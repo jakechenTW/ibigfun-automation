@@ -155,5 +155,6 @@ interface ListingTenure {
 
 ## 相依與順序
 
-疊在 `feat/notify-template-compact-walk` 的 compact 範本之上(假設先合併)。若 compact
-尚未合併,🕒 行的擺放需與最終 compact 版型再對齊一次。
+compact 範本(`feat/notify-template-compact-walk`)**已合併進 `main`**(merge commit
+`e1b6160`),本設計直接疊在其上,🕒 行對齊已落地的 compact 版型。本功能在獨立分支
+`feat/listing-tenure-days-on-market` 開發。
