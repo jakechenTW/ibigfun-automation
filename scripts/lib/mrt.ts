@@ -41,10 +41,24 @@ export function loadExits(path: string): MrtExit[] {
 
 /** Nearest exit (by straight-line distance) to `coord`, or null if no exits. */
 export function nearestExit(coord: LatLng, exits: MrtExit[]): NearestExit | null {
-  let best: NearestExit | null = null;
-  for (const exit of exits) {
-    const distanceM = haversineMeters(coord, { lat: exit.lat, lng: exit.lng });
-    if (!best || distanceM < best.distanceM) best = { exit, distanceM };
-  }
-  return best;
+  return kNearestExits(coord, exits, 1)[0] ?? null;
+}
+
+/**
+ * The `k` nearest exits to `coord` by straight-line distance, closest first.
+ * Used as a cheap pre-filter before walking-distance routing (the straight-line
+ * nearest exit is not always the shortest walk — e.g. across a river).
+ */
+export function kNearestExits(
+  coord: LatLng,
+  exits: MrtExit[],
+  k: number,
+): NearestExit[] {
+  return exits
+    .map((exit) => ({
+      exit,
+      distanceM: haversineMeters(coord, { lat: exit.lat, lng: exit.lng }),
+    }))
+    .sort((a, b) => a.distanceM - b.distanceM)
+    .slice(0, k);
 }

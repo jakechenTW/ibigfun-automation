@@ -1,17 +1,22 @@
 /**
  * Deterministic enrichment of scraped listings for the daily report.
  *
- * Reads state/listings-<date>.json (scraper output) and adds the fields the
- * data fully determines: parsed numbers, nearest MRT exit + distance, monthly
- * mortgage payment, and objective hard-exclusion flags. Writes
- * state/enriched-<date>.json and stdout.
+ * Reads state/listings-<date>.json and adds: parsed numbers, monthly mortgage,
+ * nearest MRT exit by **walking distance** (OpenRouteService foot routing over
+ * OSM data, cheap haversine pre-filter to pick candidate exits), a reliability
+ * gate, and objective hard-exclusion flags (>10-min walk when reliable; auction
+ * keywords). Writes state/enriched-<date>.json and stdout.
  *
- * Estimation (market price, rent) and the recommend/exclude judgment are NOT
- * done here — they stay with the agent (docs/reporting-rules.md).
+ * Estimation (market price, rent) and the recommend/exclude judgment stay with
+ * the agent (docs/reporting-rules.md).
  *
  * Usage:
  *   npm run enrich -- --date 2026-06-26
- *   npm run enrich                       # defaults to previous Taipei day
+ *   npm run enrich                       # previous Taipei day
+ *
+ * Needs ORS_API_KEY in .env for live routing. Without it, listings fall back to
+ * "routing unavailable" (manual review), never silently excluded. Routing
+ * results are cached in state/route-cache.json so re-runs are reproducible.
  *
  * Exit codes: 0 ok · 1 unexpected error · 2 bad input (missing/invalid file or date).
  */
@@ -19,10 +24,15 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { previousTaipeiDay, isValidDateString } from './lib/date.ts';
 import { loadExits } from './lib/mrt.ts';
-import { enrichListing } from './lib/enrich-core.ts';
-import type { FetchResult, EnrichResult } from './lib/types.ts';
+import { enrichOffline, type OfflineEnriched } from './lib/enrich-offline.ts';
+import { finalizeWalk } from './lib/walk.ts';
+import { routeWalkDistances } from './lib/routing.ts';
+import type { FetchResult, EnrichResult, EnrichedListing } from './lib/types.ts';
 
 const MRT_CSV = 'data/taipei_mrt_exits.csv';
+const CACHE_PATH = path.join('state', 'route-cache.json');
+const ORS_DELAY_MS = 1600; // ORS free tier caps matrix at 40 req/min (~1.5s apart)
+const ORS_RETRY_WAIT_MS = 65_000; // on 429, wait out the per-minute window once
 
 function fail(message: string): never {
   console.error(`BAD INPUT: ${message}`);
@@ -39,7 +49,17 @@ function resolveTargetDate(argv: string[]): string {
   return raw;
 }
 
-function main(): void {
+type Cache = Record<string, (number | null)[]>;
+
+function cacheKey(o: OfflineEnriched): string {
+  const c = o.coordinate!;
+  const exits = o.candidates.map((x) => `${x.exit.stationId}:${x.exit.exitId}`).join(',');
+  return `${c.lat.toFixed(5)},${c.lng.toFixed(5)}|${exits}`;
+}
+
+const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function main(): Promise<void> {
   const targetDate = resolveTargetDate(process.argv.slice(2));
 
   const inPath = path.join('state', `listings-${targetDate}.json`);
@@ -47,32 +67,94 @@ function main(): void {
     fail(`${inPath} not found. Run "npm run fetch -- --date ${targetDate}" first.`);
   }
 
+  try {
+    process.loadEnvFile('.env');
+  } catch {
+    /* vars may already be exported */
+  }
+  const apiKey = process.env.ORS_API_KEY;
+  if (!apiKey) {
+    console.error(
+      'WARNING: ORS_API_KEY not set — walking distances cannot be computed; ' +
+        'affected listings are marked for manual review (not excluded).',
+    );
+  }
+
   const input = JSON.parse(fs.readFileSync(inPath, 'utf8')) as FetchResult;
   const exits = loadExits(MRT_CSV);
+  const cache: Cache = fs.existsSync(CACHE_PATH)
+    ? (JSON.parse(fs.readFileSync(CACHE_PATH, 'utf8')) as Cache)
+    : {};
 
-  const listings = input.listings.map((l) => enrichListing(l, exits));
-  const hardExcludedCount = listings.filter((l) => l.hardExclusion.excluded).length;
+  const offline = input.listings.map((l) => enrichOffline(l, exits));
+  const enriched: EnrichedListing[] = [];
+  let apiCalls = 0;
+  let cacheHits = 0;
+  let routeErrors = 0;
+
+  for (const o of offline) {
+    let routed: (number | null)[] | null = null;
+    const needsRoute = o.candidates.length > 0 && o.coordConsistent !== false;
+
+    if (needsRoute) {
+      const key = cacheKey(o);
+      if (cache[key]) {
+        routed = cache[key];
+        cacheHits++;
+      } else if (apiKey) {
+        const dests = o.candidates.map((c) => ({ lat: c.exit.lat, lng: c.exit.lng }));
+        try {
+          try {
+            routed = await routeWalkDistances(o.coordinate!, dests, apiKey);
+          } catch (err) {
+            // On a rate-limit hit, wait out the per-minute window and retry once.
+            if ((err as Error).message.includes('429')) {
+              console.error('  rate-limited; waiting 65s then retrying…');
+              await delay(ORS_RETRY_WAIT_MS);
+              routed = await routeWalkDistances(o.coordinate!, dests, apiKey);
+            } else {
+              throw err;
+            }
+          }
+          cache[key] = routed;
+          apiCalls++;
+          await delay(ORS_DELAY_MS);
+        } catch (err) {
+          routeErrors++;
+          console.error(`  route error (${o.district ?? '?'}): ${(err as Error).message}`);
+          routed = null;
+        }
+      }
+    }
+    enriched.push(finalizeWalk(o, routed));
+  }
+
+  const withinWalkCount = enriched.filter((l) => l.withinWalk === true).length;
+  const manualReviewCount = enriched.filter((l) => l.withinWalk === null).length;
+  const hardExcludedCount = enriched.filter((l) => l.hardExclusion.excluded).length;
   const result: EnrichResult = {
     targetDate,
     enrichedAt: new Date().toISOString(),
-    count: listings.length,
+    count: enriched.length,
+    withinWalkCount,
+    manualReviewCount,
     hardExcludedCount,
-    listings,
+    listings: enriched,
   };
 
   fs.mkdirSync('state', { recursive: true });
+  fs.writeFileSync(CACHE_PATH, JSON.stringify(cache, null, 2));
   const outPath = path.join('state', `enriched-${targetDate}.json`);
   fs.writeFileSync(outPath, JSON.stringify(result, null, 2));
   console.error(
-    `Enriched ${listings.length} listings (${hardExcludedCount} hard-excluded, ` +
-      `${exits.length} MRT exits) -> ${outPath}`,
+    `Enriched ${enriched.length}: ${withinWalkCount} within-walk, ` +
+      `${manualReviewCount} manual-review, ${hardExcludedCount} hard-excluded ` +
+      `(ORS calls ${apiCalls}, cache hits ${cacheHits}, errors ${routeErrors}) -> ${outPath}`,
   );
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
 }
 
-try {
-  main();
-} catch (err) {
+main().catch((err) => {
   console.error(err);
   process.exit(1);
-}
+});

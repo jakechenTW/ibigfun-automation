@@ -32,13 +32,22 @@ export interface FetchResult {
   listings: Listing[];
 }
 
-/** Nearest MRT exit summary attached during enrichment. */
-export interface NearestMrt {
-  stationId: string;
-  nameZh: string;
+/** Nearest MRT exit by walking distance, attached during enrichment. */
+export interface WalkInfo {
+  stationZh: string;
   line: string;
   exitId: string;
-  distanceM: number;
+  distanceM: number; // routed walking distance
+  minutes: number; // distanceM at 80 m/min
+}
+
+/** Whether the walking-distance decision can be trusted for this listing. */
+export interface Reliability {
+  coordPresent: boolean;
+  coordConsistent: boolean | null; // null = district unknown / no coord
+  routeOk: boolean | null; // null = routing not attempted
+  ratio: number | null; // routed / straight-line
+  reason: string | null; // why unreliable, else null
 }
 
 /**
@@ -53,8 +62,10 @@ export interface EnrichedListing extends Listing {
   unitPriceWan: number | null;
   ageNum: number | null;
   monthlyMortgage: number | null;
-  mrt: NearestMrt | null;
-  mrtBoundaryCase: boolean;
+  district: string | null;
+  walk: WalkInfo | null;
+  withinWalk: boolean | null; // <=10-min walk; null = data unreliable, manual review
+  reliability: Reliability;
   hardExclusion: { excluded: boolean; reasons: string[] };
 }
 
@@ -63,6 +74,8 @@ export interface EnrichResult {
   targetDate: string;
   enrichedAt: string;
   count: number;
+  withinWalkCount: number;
+  manualReviewCount: number; // withinWalk === null
   hardExcludedCount: number;
   listings: EnrichedListing[];
 }
