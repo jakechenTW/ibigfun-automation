@@ -4,7 +4,7 @@ Future automation should keep durable local state for listing discovery and dedu
 
 ## Seen Listings
 
-Track each discovered listing by stable listing ID. For 591 URLs, use the numeric listing ID from the URL when available.
+Track each discovered listing by stable listing ID. Use the source's stable numeric listing ID from the URL when available (e.g. 591, rakuya), since iBigFun aggregates listings that originate on other sites.
 
 Recommended fields:
 
