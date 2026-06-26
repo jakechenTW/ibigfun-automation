@@ -37,6 +37,17 @@ real browser session instead.
    credentials, or repeated failure, stop and ask for manual confirmation. Do
    not attempt to bypass those controls.
 
+### Single-session account (auto re-login)
+
+iBigFun allows only one active login per account, and automation shares the
+user's account. If the user logs in elsewhere, the scraper's session is kicked
+and a page load bounces to `/user/signin`. The scraper **auto re-logins** and
+retries the page — on the first page or a mid-run kick during pagination —
+which logs the user's other browser session out (an accepted trade-off for
+unattended robustness). Recovery is bounded (`MAX_RELOGIN`); a contested account
+eventually fails with "Repeated signin redirects" (exit 2). CAPTCHA / 2FA /
+risk / missing creds still hard-stop. See `scripts/lib/relogin.ts`.
+
 ## Fields To Extract Per Listing
 
 Normalize each listing with at least:
