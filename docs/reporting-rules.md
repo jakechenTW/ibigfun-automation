@@ -18,8 +18,6 @@ Apply these exclusions before ranking recommended, near-threshold, and excluded 
 - Treat straight-line distances in the 700-900 meter range as boundary cases requiring manual walking-distance confirmation. Straight-line distance is not walking distance.
 - Construction or planned stations may be noted as future-upside context when reliable coordinates are available, but they do not replace active MRT exits for the formal 800 meter hard-exclusion rule.
 - Retired or canceled stations must not be used for either the hard-exclusion rule or future-upside notes.
-- Exclude auction and special-disposition listings, including foreclosure, court auction, bank auction, tender, bidding, and similar cases.
-- Treat title, source labels, listing notes, tags, and visible listing metadata as evidence for these exclusions.
 - Keep hard-exclusion counts and main reasons visible in the report summary when any are found.
 
 ## Calculations
@@ -107,6 +105,56 @@ and the location source: `likely-within`, `likely-far`, or `unknown` (→ human)
 Guardrails: triage verdicts are agent judgment, clearly labelled and overridable;
 default to `unknown` when genuinely ambiguous. Never present a triage verdict as
 the deterministic `withinWalk`, and never silently exclude on unreliable data.
+
+## Quality / Suspicious-Listing Judgment (Agent)
+
+Auction/foreclosure detection is no longer a hardcoded keyword hard-exclusion.
+The keyword check now only sets the advisory `signals.auctionKeyword` flag on
+each enriched listing; the agent makes the final call as part of a broader
+"low-info / suspicious listing" judgment. Foreclosure is one case under this.
+
+### Suspicious signals (weigh together; none convicts on its own)
+
+- `signals.auctionKeyword === true` — title contains 法拍 / 銀拍 / 金拍 /
+  法院拍賣 / 拍賣 / 投標 / 應買.
+- No interior photos, or only exterior / map / floor-plan images.
+- Sparse information: very short description, many key fields blank.
+- Source-site labels, tags, or notes showing special-disposition wording.
+
+### When to open the detail page
+
+Open the listing `url` to inspect photo count and information density when:
+
+- any suspicious signal above is hit, OR
+- the listing is otherwise strong enough to reach recommended / near-threshold
+  and is worth verifying.
+
+Detail URLs usually point to the originating source (591 / 樂居 / rakuya),
+not `ibigfun.com`, so opening them does not affect the iBigFun login session.
+Do NOT open every listing — only suspicious or borderline-but-promising ones,
+to control cost.
+
+### Verdict and output
+
+Assign one of: `clean` / `suspicious` / `likely-auction`. For each, record the
+reason, your confidence, and whether you actually opened the detail page.
+
+Rules:
+
+- proxy signals (e.g. "no interior photos") must never be the sole reason to
+  remove a listing; auction-like listings are flagged, not auto-removed.
+- If the detail page cannot be opened or the source blocks scraping, record
+  "未能查證", keep the soft flag at low confidence, and do not escalate to
+  removal.
+- A keyword hit the agent verifies as non-auction (e.g. title says "非法拍" or
+  "法拍屋旁") may be downgraded to `clean` with a recorded reason.
+
+### Effect on ranking
+
+`suspicious` / `likely-auction` listings are down-ranked, not removed: even if
+the numbers qualify, do not place them in 推薦 — route them to 接近門檻 or the
+可疑/待查 section with the reason noted. This mirrors the existing rule that a
+listing lacking solid data cannot be labeled recommended.
 
 ## Notification Format
 
