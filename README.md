@@ -4,9 +4,14 @@ Project workspace for monitoring iBigFun investment property listings, preparing
 
 ## Structure
 
-- `docs/`: operating notes, credential handling, and reporting rules.
+- `AGENTS.md`: shared agent entrypoint and safety rules.
+- `docs/daily-workflow.md`: source of truth for the daily monitoring procedure.
+- `docs/credentials.md`: credential storage and login handling.
+- `docs/reporting-rules.md`: investment criteria, calculations, data quality, sorting, and notification rules.
+- `docs/automation-state.md`: durable state and deduplication conventions.
 - `templates/`: reusable notification templates.
 - `reports/`: local generated notification/report files; ignored by git.
+- `state/`: future local automation state, such as seen listing IDs; ignored by git.
 
 ## Credentials
 
@@ -16,11 +21,24 @@ See `docs/credentials.md` for details.
 
 ## Daily Report Workflow
 
-1. Gather new iBigFun listings for the target date.
-2. Evaluate each listing with the rules in `docs/reporting-rules.md`.
-3. Write local notification/report output under `reports/` when needed.
-4. Use `templates/daily-notify-template.md` when preparing text for `ai-notify`.
+Follow `docs/daily-workflow.md`.
+
+Recurring runs report on the previous calendar day in the `Asia/Taipei` timezone, not the run date. For example, a run on `2026-06-27` reports listings published on `2026-06-26`.
+
+Current notification route:
+
+```bash
+ai-notify --tool codex --status <ok|warn|fail> --task "每日 iBigFun 投資房源監測" --title "<short title>" --details-file reports/YYYY-MM-DD.md
+```
+
+Do not use Slack for this automation unless the user explicitly asks for Slack again.
+
+Future automation should track seen listing IDs using the convention in `docs/automation-state.md`.
+
+## Memory Hygiene
+
+Automation memory is for recent run summaries and short-lived operational notes. If a decision becomes durable, move it into the relevant file under `docs/` instead of relying on memory as a rule source.
 
 ## Safety
 
-Do not commit real credentials, cookies, session files, raw browser profiles, or local output containing secrets.
+Do not commit real credentials, cookies, session files, raw browser profiles, automation state, traces, screenshots, downloaded pages, or local output containing secrets.

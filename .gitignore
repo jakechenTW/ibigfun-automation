@@ -1,5 +1,21 @@
 .env
 .env.*
 !.env.example
+.DS_Store
 
 reports/
+state/
+
+# Browser automation artifacts and sensitive session output.
+.auth/
+.browser-profiles/
+storageState.json
+*.har
+*.trace
+trace.zip
+playwright-report/
+test-results/
+screenshots/
+downloads/
+*.html
+*.mhtml

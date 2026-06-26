@@ -7,7 +7,7 @@
 - 新刊登物件：{{new_listing_count}} 筆
 - 推薦物件：{{recommended_count}} 筆
 - 接近門檻：{{near_threshold_count}} 筆
-- 今日排除：{{excluded_count}} 筆
+- 目標日排除：{{excluded_count}} 筆
 - 主要排除原因：{{main_exclusion_reasons}}
 - 房貸假設：8 成貸、年利率 2.6%、30 年本息平均攤還
 - 推薦門檻：`低於行情 >= 10%` 且 `租金覆蓋率 >= 1.0`
@@ -17,7 +17,9 @@
 
 {{#if recommended}}
 
-#### 1. [{{title}}]({{url}})
+{{#each recommended}}
+
+#### {{rank}}. [{{title}}]({{url}})
 
 - 狀態：`推薦`
 - 地址/區域：{{address_or_area}}
@@ -34,6 +36,8 @@
 - 推薦理由：{{recommendation_reason}}
 - 主要風險：{{risks_or_manual_checks}}
 
+{{/each}}
+
 {{else}}
 
 - 無符合 `低於行情 >= 10%` 且 `租金覆蓋率 >= 1.0` 的物件。
@@ -44,10 +48,13 @@
 
 {{#if near_threshold}}
 
-#### 1. [{{title}}]({{url}})
+{{#each near_threshold}}
+
+#### {{rank}}. [{{title}}]({{url}})
 
 - 狀態：`接近門檻`
 - 地址/區域：{{address_or_area}}
+- 刊登日：{{published_date}}
 - 總價：{{price}} 萬
 - 坪數 / 單價：{{ping}} 坪 / {{unit_price}} 萬/坪
 - 樓層 / 總樓層：{{floor}} / {{total_floor}}
@@ -59,29 +66,36 @@
 - 差一點的原因：{{near_threshold_reason}}
 - 需要人工確認：{{manual_checks}}
 
+{{/each}}
+
 {{else}}
 
 - 無租金覆蓋率達 `0.8` 的接近門檻候選。
 
 {{/if}}
 
-### 今日排除物件
+### 目標日排除物件
 
 {{#if excluded}}
 
-#### 1. [{{title}}]({{url}})
+{{#each excluded}}
+
+#### {{rank}}. [{{title}}]({{url}})
 
 - 狀態：`排除`
 - 地址/區域：{{address_or_area}}
+- 刊登日：{{published_date}}
 - 關鍵數字：總價 {{price}} 萬、{{ping}} 坪、{{unit_price}} 萬/坪、租金覆蓋率 {{rent_coverage}}
 - 行情比較：推估行情 {{market_unit_price}} 萬/坪，低估幅度 {{discount_percent}}%
 - 現金流估算：{{monthly_cash_flow}} 元/月
 - 排除原因：{{exclusion_reason}}
 - 需人工確認：{{manual_checks}}
 
+{{/each}}
+
 {{else}}
 
-- 今日無需列出的排除物件。
+- 目標日無需列出的排除物件。
 
 {{/if}}
 
