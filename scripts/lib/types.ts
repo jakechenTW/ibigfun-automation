@@ -68,6 +68,8 @@ export interface EnrichedListing extends Listing {
   walk: WalkInfo | null;
   withinWalk: boolean | null; // <=10-min walk; null = data unreliable, manual review
   reliability: Reliability;
+  /** Advisory signals for agent judgment (do NOT auto-exclude). */
+  signals: { auctionKeyword: boolean };
   hardExclusion: { excluded: boolean; reasons: string[] };
 }
 

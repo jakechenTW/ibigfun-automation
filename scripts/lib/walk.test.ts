@@ -84,9 +84,16 @@ test('pickWalk: null routed -> routing unavailable', () => {
   assert.equal(p.reason, 'routing unavailable');
 });
 
-test('auction keyword excludes even when within walk', () => {
+test('auction keyword -> advisory signal, not hard-excluded', () => {
   const e = finalizeWalk(offline({ hasAuction: true }), [600]);
   assert.equal(e.withinWalk, true);
-  assert.equal(e.hardExclusion.excluded, true);
-  assert.match(e.hardExclusion.reasons.join(), /auction/);
+  assert.equal(e.signals.auctionKeyword, true);
+  assert.equal(e.hardExclusion.excluded, false);
+  assert.equal(e.hardExclusion.reasons.join(), '');
+});
+
+test('no auction keyword -> signal false', () => {
+  const e = finalizeWalk(offline({ hasAuction: false }), [600]);
+  assert.equal(e.signals.auctionKeyword, false);
+  assert.equal(e.hardExclusion.excluded, false);
 });
