@@ -139,6 +139,16 @@ to control cost.
 Assign one of: `clean` / `suspicious` / `likely-auction`. For each, record the
 reason, your confidence, and whether you actually opened the detail page.
 
+- `likely-auction`: evidence points specifically at auction/foreclosure —
+  `signals.auctionKeyword` plus corroboration (e.g. no interior photos,
+  special-disposition wording on the detail page).
+- `suspicious`: low-info or off quality without specific auction evidence
+  (sparse description, missing interior photos, but no auction markers).
+- `clean`: no concern, or a keyword hit verified as non-auction.
+
+Both `suspicious` and `likely-auction` are down-ranked the same way (below); the
+distinction is only for the reason you record.
+
 Rules:
 
 - proxy signals (e.g. "no interior photos") must never be the sole reason to

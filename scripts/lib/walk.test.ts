@@ -95,4 +95,5 @@ test('auction keyword -> advisory signal, not hard-excluded', () => {
 test('no auction keyword -> signal false', () => {
   const e = finalizeWalk(offline({ hasAuction: false }), [600]);
   assert.equal(e.signals.auctionKeyword, false);
+  assert.equal(e.hardExclusion.excluded, false);
 });

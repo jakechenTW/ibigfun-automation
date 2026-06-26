@@ -15,8 +15,8 @@
 - 房貸假設：8 成貸、年利率 2.6%、30 年本息平均攤還
 - 推薦門檻：`低於行情 >= 10%` 且 `租金覆蓋率 >= 1.0`
 - 接近門檻：`租金覆蓋率 >= 0.8`
-- 前置排除：明確離捷運超過 800 公尺(客觀硬排除)
-- 可疑/待查：法拍/資訊過少/無室內圖等由 agent 軟標記,降權但不自動移除
+- 前置排除：明確離捷運超過 800 公尺（客觀硬排除）
+- 可疑/待查：法拍／資訊過少／無室內圖等由 agent 軟標記,降權但不自動移除
 
 ### 前置排除
 
@@ -109,7 +109,7 @@
 
 #### {{rank}}. [{{title}}]({{url}})
 
-- 標記：`{{suspicious_label}}`  （clean / suspicious / likely-auction）
+- 標記：`{{suspicious_label}}` （clean / suspicious / likely-auction）
 - 地址/區域：{{address_or_area}}
 - 刊登日：{{published_date}}
 - 命中訊號：{{suspicious_signals}}
