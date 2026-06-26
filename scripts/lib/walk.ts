@@ -107,7 +107,6 @@ export function finalizeWalk(
   }
 
   const reasons: string[] = [];
-  if (o.hasAuction) reasons.push('auction/special-disposition keyword in title');
   if (withinWalk === false && walk) {
     reasons.push(`>10-min walk to MRT (routed ${walk.distanceM}m to ${walk.stationZh})`);
   }
@@ -117,6 +116,7 @@ export function finalizeWalk(
     walk,
     withinWalk,
     reliability,
+    signals: { auctionKeyword: o.hasAuction },
     hardExclusion: { excluded: reasons.length > 0, reasons },
   };
 }
