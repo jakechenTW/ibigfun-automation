@@ -1,42 +1,29 @@
 # iBigFun Automation
 
-Project workspace for monitoring iBigFun investment property listings, preparing daily Markdown reports, and sending concise notifications.
+Workspace for monitoring iBigFun investment property listings, preparing a daily
+Markdown report, and sending a concise notification.
 
-## Structure
+## Start Here
 
-- `AGENTS.md`: shared agent entrypoint and safety rules.
-- `docs/daily-workflow.md`: source of truth for the daily monitoring procedure.
-- `docs/credentials.md`: credential storage and login handling.
-- `docs/reporting-rules.md`: investment criteria, calculations, data quality, sorting, and notification rules.
-- `docs/automation-state.md`: durable state and deduplication conventions.
-- `templates/`: reusable notification templates.
-- `reports/`: local generated notification/report files; ignored by git.
-- `state/`: future local automation state, such as seen listing IDs; ignored by git.
+**Agents:** read `AGENTS.md` — it is the linear runbook (source model, first-run
+prerequisites, daily run sequence, notification command, safety rules, and the
+source-of-truth map). Do not duplicate those rules here.
 
 ## Credentials
 
-Use a dedicated automation account. Copy `.env.example` to `.env` and fill it locally. Do not commit `.env`.
+Use a dedicated automation account. Copy `.env.example` to `.env` and fill it
+locally; never commit `.env`. See `docs/credentials.md`.
 
-See `docs/credentials.md` for details.
+## Repository Layout
 
-## Daily Report Workflow
-
-Follow `docs/daily-workflow.md`.
-
-Recurring runs report on the previous calendar day in the `Asia/Taipei` timezone, not the run date. For example, a run on `2026-06-27` reports listings published on `2026-06-26`.
-
-Current notification route:
-
-```bash
-ai-notify --tool codex --status <ok|warn|fail> --task "每日 iBigFun 投資房源監測" --title "<short title>" --details-file reports/YYYY-MM-DD.md
-```
-
-Future automation should track seen listing IDs using the convention in `docs/automation-state.md`.
-
-## Memory Hygiene
-
-Automation memory is for recent run summaries and short-lived operational notes. If a decision becomes durable, move it into the relevant file under `docs/` instead of relying on memory as a rule source.
+- `AGENTS.md` — runbook and entrypoint.
+- `docs/` — fetching, credentials, reporting rules, automation state.
+- `data/` — static reference data (Taipei MRT exit coordinates).
+- `templates/` — notification template.
+- `reports/`, `state/` — local generated output and state; git-ignored.
 
 ## Safety
 
-Do not commit real credentials, cookies, session files, raw browser profiles, automation state, traces, screenshots, downloaded pages, or local output containing secrets.
+See the safety rules in `AGENTS.md`. In short: never commit credentials,
+sessions, browser profiles, automation state, traces, screenshots, downloaded
+pages, or any local output containing secrets.

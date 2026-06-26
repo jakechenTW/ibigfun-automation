@@ -12,6 +12,12 @@ Apply these exclusions before ranking recommended, near-threshold, and excluded 
 
 - Exclude listings that are clearly more than 800 meters from the nearest MRT station.
 - Do not exclude a listing for MRT distance when the listing data does not clearly show distance or enough station/location evidence to determine it.
+- When iBigFun provides a Google Maps coordinate link for the listing address, treat that coordinate as the listing location for MRT-distance checks unless the coordinate is visibly inconsistent with the listing address.
+- Use `data/taipei_mrt_exits.csv` as the active MRT reference data. Calculate straight-line distance from the listing coordinate to all MRT exits, choose the nearest exit, and use that nearest-exit distance as the primary MRT-distance signal.
+- For routine screening, call walking-distance routing only for the single nearest MRT exit, not every exit. Use OpenStreetMap foot routing when a walking-time estimate is needed.
+- Treat straight-line distances in the 700-900 meter range as boundary cases requiring manual walking-distance confirmation. Straight-line distance is not walking distance.
+- Construction or planned stations may be noted as future-upside context when reliable coordinates are available, but they do not replace active MRT exits for the formal 800 meter hard-exclusion rule.
+- Retired or canceled stations must not be used for either the hard-exclusion rule or future-upside notes.
 - Exclude auction and special-disposition listings, including foreclosure, court auction, bank auction, tender, bidding, and similar cases.
 - Treat title, source labels, listing notes, tags, and visible listing metadata as evidence for these exclusions.
 - Keep hard-exclusion counts and main reasons visible in the report summary when any are found.
@@ -24,6 +30,33 @@ Apply these exclusions before ranking recommended, near-threshold, and excluded 
 - A listing satisfies `below market by at least 10%` only when discount percentage is `>= 10`.
 - Rent coverage must use: `estimated_monthly_rent / monthly_mortgage_payment`.
 - Monthly mortgage payment must use total price, 80% loan-to-value, 2.6% annual interest, and 30-year principal and interest repayment.
+
+## Market Price & Rent Estimation
+
+These are the inputs to the discount and rent-coverage calculations above.
+Document the source used for each, as required by the data-quality rules below.
+
+### Market Price (推估區域行情)
+
+Use this precedence:
+
+1. iBigFun's own real-price / 實價登錄 link for the listing, when available.
+2. Otherwise, agent-gathered comparable transactions matched on area, age,
+   floor, and property type.
+3. If only stale, weak, timed-out, or cross-site data is available, the listing
+   **cannot be labeled `recommended`**. Route it to near-threshold or excluded
+   and flag it for manual confirmation.
+
+### Rent (預估月租金)
+
+Estimate from comparable rental listings for the same area and property type.
+Always flag the rent figure as needing manual confirmation of the actual
+achievable rent and expected vacancy.
+
+### Source Visibility
+
+Keep the source used for each market and rent estimate visible in that
+listing's notes.
 
 ## Manual Checks
 
@@ -43,7 +76,7 @@ Apply these exclusions before ranking recommended, near-threshold, and excluded 
 
 ## Notification Format
 
-- Send with `ai-notify --details-file <markdown-file>`. See `docs/daily-workflow.md` for the full command shape and status selection.
+- Send with the canonical `ai-notify` command in `AGENTS.md`, which also defines the `ok`/`warn`/`fail` status selection.
 - Use Markdown.
 - Do not use tables.
 - Put the quick summary before listing details.
@@ -58,4 +91,4 @@ Apply these exclusions before ranking recommended, near-threshold, and excluded 
 
 ## Rule Ownership
 
-Keep durable investment, sorting, notification, and data-quality rules in this file. Keep daily execution steps in `docs/daily-workflow.md`. Keep recent run history and one-off operational observations in automation memory.
+Keep durable investment, sorting, notification, and data-quality rules in this file. Keep the daily execution sequence in `AGENTS.md`. Keep recent run history and one-off operational observations in automation memory.
