@@ -34,7 +34,6 @@
 ## Notification Format
 
 - Send with `ai-notify --details-file <markdown-file>`. See `docs/daily-workflow.md` for the full command shape and status selection.
-- Do not use Slack unless the user explicitly asks for Slack again.
 - Use Markdown.
 - Do not use tables.
 - Put the quick summary before listing details.

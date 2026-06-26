@@ -31,8 +31,6 @@ Current notification route:
 ai-notify --tool codex --status <ok|warn|fail> --task "每日 iBigFun 投資房源監測" --title "<short title>" --details-file reports/YYYY-MM-DD.md
 ```
 
-Do not use Slack for this automation unless the user explicitly asks for Slack again.
-
 Future automation should track seen listing IDs using the convention in `docs/automation-state.md`.
 
 ## Memory Hygiene

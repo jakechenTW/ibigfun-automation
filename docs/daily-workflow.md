@@ -52,7 +52,7 @@ Only use the run date itself when the user explicitly asks for a same-day or int
 
 ## Notification Route
 
-Use `ai-notify --details-file <markdown-file>` for this automation. Do not use Slack unless the user explicitly asks for Slack again.
+Use `ai-notify --details-file <markdown-file>` for this automation.
 
 ## Report Storage
 
