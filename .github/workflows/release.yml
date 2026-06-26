@@ -1,0 +1,39 @@
+name: Release
+
+# Fires when a vX.Y.Z tag is pushed. Generates release notes from the commits
+# since the previous tag (via git-cliff + cliff.toml) and publishes a GitHub
+# release. No secrets needed — GITHUB_TOKEN is provided automatically.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # git-cliff needs the full history + tags to diff against the last tag.
+          fetch-depth: 0
+
+      - name: Generate release notes
+        uses: orhun/git-cliff-action@v4
+        id: cliff
+        with:
+          config: cliff.toml
+          # --latest: only this tag's section. --strip header: body only.
+          args: --latest --strip header
+        env:
+          OUTPUT: RELEASE_NOTES.md
+
+      - name: Create GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file RELEASE_NOTES.md
