@@ -71,10 +71,57 @@ For listings with a credible address coordinate:
 See `data/README.md` for the dataset columns and the full distance rules, and
 `docs/reporting-rules.md` for how distance feeds the hard-exclusion rule.
 
-## Future: Replace Manual Fetch With A Script
+## Automated Fetch (`scripts/fetch.ts`)
 
-A committed `scripts/fetch.ts` (Playwright) should eventually log in with the
-`.env` credentials and write the day's listings to JSON, replacing the manual
-browser steps. The `.gitignore` already covers Playwright artifacts
-(`storageState.json`, `*.har`, traces, `playwright-report/`, etc.). Until that
-exists, use the browser method above.
+A committed Playwright scraper automates the manual flow above: it builds the
+filtered target-date URL, reuses a saved session (or logs in with the `.env`
+credentials, visible fields only), paginates, and writes the normalized
+listings to `state/listings-<date>.json` and stdout. It does **fetch +
+normalize only** — MRT distance, estimation, and evaluation stay with the
+report step.
+
+### One-time setup
+
+```bash
+npm install                      # toolchain (tsx, Playwright, TypeScript)
+npx playwright install chromium  # browser binary (skipped by the bare install)
+```
+
+### Run
+
+```bash
+npm run fetch -- --date 2026-06-26   # explicit target date
+npm run fetch                        # defaults to the previous Taipei day
+```
+
+Exit codes: `0` ok, `1` unexpected error, `2` blocked (login gate or bad input;
+needs a human — the scraper never bypasses CAPTCHA/2FA/risk controls).
+
+### Selectors (verified) and how to re-verify
+
+The selectors in `scripts/lib/config.ts` were confirmed against the live
+authenticated DOM on 2026-06-27, and `SELECTORS_VERIFIED` is `true`. The
+listing view is one table (`#results table.ttable`) whose rows are listings;
+most fields are positional `<td>`s with two `<br>`-separated lines, so
+`extract.ts` reads cells by index. Login fields are duplicated (hidden +
+visible) under the same ids, so the login selectors use `:visible` and the form
+is submitted with Enter (no clickable submit button).
+
+If iBigFun changes its markup (empty or wrong results), re-verify: open the
+filtered URL with real credentials, inspect the row/cell structure, update the
+selectors and `td` indices in `config.ts`, and re-run. The pure
+date/URL/coordinate/floor logic is covered by `npm test`; only the selectors
+need live confirmation.
+
+Run with a visible, slowed-down browser to watch the flow while confirming
+selectors:
+
+```bash
+HEADED=1 npm run fetch -- --date 2026-06-26
+```
+
+`npx playwright codegen <filtered-url>` is the easiest way to pick selectors
+interactively (log in manually, then click elements to get their selectors).
+
+The `.gitignore` covers the generated session and artifacts (`storageState.json`,
+`state/`, `*.har`, traces, `playwright-report/`, `node_modules/`).
