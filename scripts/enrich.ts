@@ -24,13 +24,13 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { previousTaipeiDay, isValidDateString } from './lib/date.ts';
 import { loadExits } from './lib/mrt.ts';
-import { enrichOffline, type OfflineEnriched } from './lib/enrich-offline.ts';
+import { enrichOffline } from './lib/enrich-offline.ts';
 import { finalizeWalk } from './lib/walk.ts';
 import { routeWalkDistances } from './lib/routing.ts';
+import { loadCache, saveCache, cacheKey } from './lib/route-cache.ts';
 import type { FetchResult, EnrichResult, EnrichedListing } from './lib/types.ts';
 
 const MRT_CSV = 'data/taipei_mrt_exits.csv';
-const CACHE_PATH = path.join('state', 'route-cache.json');
 const ORS_DELAY_MS = 1600; // ORS free tier caps matrix at 40 req/min (~1.5s apart)
 const ORS_RETRY_WAIT_MS = 65_000; // on 429, wait out the per-minute window once
 
@@ -47,14 +47,6 @@ function resolveTargetDate(argv: string[]): string {
     : argv[idx + 1];
   if (!raw || !isValidDateString(raw)) fail(`invalid --date "${raw ?? ''}"; expected YYYY-MM-DD.`);
   return raw;
-}
-
-type Cache = Record<string, (number | null)[]>;
-
-function cacheKey(o: OfflineEnriched): string {
-  const c = o.coordinate!;
-  const exits = o.candidates.map((x) => `${x.exit.stationId}:${x.exit.exitId}`).join(',');
-  return `${c.lat.toFixed(5)},${c.lng.toFixed(5)}|${exits}`;
 }
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -82,9 +74,7 @@ async function main(): Promise<void> {
 
   const input = JSON.parse(fs.readFileSync(inPath, 'utf8')) as FetchResult;
   const exits = loadExits(MRT_CSV);
-  const cache: Cache = fs.existsSync(CACHE_PATH)
-    ? (JSON.parse(fs.readFileSync(CACHE_PATH, 'utf8')) as Cache)
-    : {};
+  const cache = loadCache();
 
   const offline = input.listings.map((l) => enrichOffline(l, exits));
   const enriched: EnrichedListing[] = [];
@@ -97,7 +87,7 @@ async function main(): Promise<void> {
     const needsRoute = o.candidates.length > 0 && o.coordConsistent !== false;
 
     if (needsRoute) {
-      const key = cacheKey(o);
+      const key = cacheKey(o.coordinate!, o.candidates);
       if (cache[key]) {
         routed = cache[key];
         cacheHits++;
@@ -143,7 +133,7 @@ async function main(): Promise<void> {
   };
 
   fs.mkdirSync('state', { recursive: true });
-  fs.writeFileSync(CACHE_PATH, JSON.stringify(cache, null, 2));
+  saveCache(cache);
   const outPath = path.join('state', `enriched-${targetDate}.json`);
   fs.writeFileSync(outPath, JSON.stringify(result, null, 2));
   console.error(

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { finalizeWalk } from './walk.ts';
+import { finalizeWalk, pickWalk } from './walk.ts';
 import type { OfflineEnriched } from './enrich-offline.ts';
 import type { MrtExit, NearestExit } from './mrt.ts';
 
@@ -13,7 +13,7 @@ const cand = (nameZh: string, exitId: string, straightM: number): NearestExit =>
 
 function offline(over: Partial<OfflineEnriched>): OfflineEnriched {
   return {
-    title: '美寓', url: null, addressOrArea: '台北市中正區X街', coordinate: { lat: 25, lng: 121 },
+    title: '美寓', url: null, addressOrArea: '台北市中正區X街', nearbyStation: null, coordinate: { lat: 25, lng: 121 },
     publishedDate: null, totalPrice: '1000萬', totalPing: '20坪', unitPrice: '50萬/坪',
     floor: '3', totalFloors: '5', typeLayout: '公寓', age: '30', parking: '無車位', realPriceUrl: null,
     totalPriceWan: 1000, totalPriceNtd: 10_000_000, totalPingNum: 20, unitPriceWan: 50, ageNum: 30,
@@ -69,6 +69,19 @@ test('implausible routed/straight ratio -> not trusted (manual)', () => {
   assert.equal(e.withinWalk, null);
   assert.equal(e.reliability.routeOk, false);
   assert.equal(e.reliability.reason, 'route ratio implausible');
+});
+
+test('pickWalk: shortest valid candidate within threshold', () => {
+  const p = pickWalk([cand('A', '1', 500), cand('B', '2', 550)], [900, 650]);
+  assert.equal(p.walk?.stationZh, 'B');
+  assert.equal(p.withinWalk, true);
+  assert.equal(p.routeOk, true);
+});
+
+test('pickWalk: null routed -> routing unavailable', () => {
+  const p = pickWalk([cand('A', '1', 500)], null);
+  assert.equal(p.withinWalk, null);
+  assert.equal(p.reason, 'routing unavailable');
 });
 
 test('auction keyword excludes even when within walk', () => {

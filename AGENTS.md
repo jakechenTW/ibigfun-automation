@@ -40,14 +40,18 @@ Do these once before the first run; stop and ask the user if any fails:
    auction/special-disposition keywords). Listings with an unreliable
    coordinate/route are marked `withinWalk: null` for manual review, never
    auto-excluded. See "Tooling" below.
-5. Deduplicate by stable listing ID → `docs/automation-state.md`.
-6. Estimate market price and rent (the agent's judgment; not automated) →
+5. Triage unreliable walking distances (`withinWalk: null`): re-locate from the
+   address + `nearbyStation`, use `npm run route -- --lat <> --lng <>` for a
+   deterministic walk, and give a labelled verdict (likely-within / likely-far /
+   unknown→human) → `docs/reporting-rules.md` (Walking-Distance Triage).
+6. Deduplicate by stable listing ID → `docs/automation-state.md`.
+7. Estimate market price and rent (the agent's judgment; not automated) →
    `docs/reporting-rules.md`.
-7. Evaluate against the investment criteria, exclusions, and sorting, using the
+8. Evaluate against the investment criteria, exclusions, and sorting, using the
    enriched fields plus your estimates → `docs/reporting-rules.md`.
-8. Write `reports/YYYY-MM-DD.md` (target date in the filename) using
+9. Write `reports/YYYY-MM-DD.md` (target date in the filename) using
    `templates/daily-notify-template.md` as the structure.
-9. Notify with the canonical command below.
+10. Notify with the canonical command below.
 
 ### Tooling
 
@@ -63,6 +67,9 @@ evaluation, and writing the report.
   gate, and hard-exclusion flags → `state/enriched-<target>.json`. Estimation
   and the final recommend/exclude judgment stay with the agent. The decision is
   `withinWalk` (true ≤10-min walk / false too far / null unreliable→manual).
+- `npm run route -- --lat <> --lng <>` — deterministic nearest-walk exit for one
+  coordinate (shared ORS cache). Used during triage (step 5) to get a trustworthy
+  walking distance after re-locating a listing from its address.
 
 Both default to the previous Taipei day when `--date` is omitted. Pure logic is
 covered by `npm test`.

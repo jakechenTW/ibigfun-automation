@@ -11,6 +11,7 @@ interface RawCard {
   title: string;
   url: string | null;
   addressOrArea: string | null;
+  nearbyStation: string | null;
   mapHref: string | null;
   publishedDate: string | null;
   priceLines: string[];
@@ -30,6 +31,7 @@ function toListing(r: RawCard): Listing {
     title: r.title,
     url: r.url,
     addressOrArea: r.addressOrArea,
+    nearbyStation: r.nearbyStation,
     coordinate: parseMapsCoordinate(r.mapHref),
     publishedDate: r.publishedDate,
     totalPrice: r.priceLines[0] ?? null,
@@ -66,12 +68,17 @@ export async function extractListingsOnPage(page: Page): Promise<Listing[]> {
           const real = r.querySelector(
             s.realPriceLink,
           ) as HTMLAnchorElement | null;
+          const trainIcon = r.querySelector(s.nearbyStationIcon);
           const tds = Array.from(r.querySelectorAll(':scope > td'));
           const td = (i: number) => tds[i] ?? null;
           return {
             title: txt(subj) ?? '',
             url: subj ? subj.href : null,
             addressOrArea: txt(map),
+            nearbyStation:
+              trainIcon && trainIcon.parentElement
+                ? trainIcon.parentElement.innerText.trim() || null
+                : null,
             mapHref: map ? map.getAttribute('href') : null,
             publishedDate: txt(td(s.td.date)),
             priceLines: lines(td(s.td.price)),
@@ -99,13 +106,19 @@ export async function collectListings(
   date: string,
 ): Promise<Listing[]> {
   // Prime page 1 and handle a possible login bounce before collecting.
-  await page.goto(buildListUrl(date, 1), { waitUntil: 'networkidle' });
+  // 'networkidle' is unreliable here (the SPA holds a connection open), so wait
+  // for DOM + the results to render instead.
+  await page.goto(buildListUrl(date, 1), { waitUntil: 'domcontentloaded' });
   await ensureLoggedIn(page, context);
 
   const all: Listing[] = [];
   let prevSignature = '';
   for (let pageNum = 1; pageNum <= MAX_PAGES; pageNum++) {
-    await page.goto(buildListUrl(date, pageNum), { waitUntil: 'networkidle' });
+    await page.goto(buildListUrl(date, pageNum), { waitUntil: 'domcontentloaded' });
+    // Wait for listing rows to render; a timeout (empty/last page) ends paging.
+    await page
+      .waitForSelector(SELECTORS.list.cardRow, { timeout: 20000 })
+      .catch(() => {});
     const onPage = await extractListingsOnPage(page);
     if (onPage.length === 0) break;
 

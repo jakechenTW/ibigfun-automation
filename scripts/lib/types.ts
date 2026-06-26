@@ -11,6 +11,8 @@ export interface Listing {
   title: string;
   url: string | null;
   addressOrArea: string | null;
+  /** Nearest-MRT text the listing itself shows, e.g. "植物園站(施工中)". */
+  nearbyStation: string | null;
   coordinate: Coordinate | null;
   publishedDate: string | null;
   totalPrice: string | null;

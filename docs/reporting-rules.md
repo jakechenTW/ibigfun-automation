@@ -74,6 +74,40 @@ listing's notes.
 - Keep the source used for each market estimate visible in the listing notes.
 - Track seen listing IDs using `docs/automation-state.md` so reposts, edited listings, and cross-day duplicates can be handled consistently.
 
+## Walking-Distance Triage (Agent)
+
+When `scripts/enrich.ts` cannot trust the walking-distance result it sets
+`withinWalk: null` with a `reliability.reason`. Before sending these to human
+manual review, the agent does a first-pass triage. The deterministic distance
+math stays with the tooling — the agent only fixes the *location* and reads the
+signals; it never overrides a reliable `withinWalk`.
+
+Inputs the agent has per listing: `addressOrArea`, `nearbyStation` (the station
+text the listing itself shows), `reliability.reason`, `district`, and the
+`coordinate`. The `npm run route -- --lat <> --lng <>` tool returns the
+deterministic nearest-walk exit for any coordinate (shared ORS cache).
+
+By reason:
+
+- `coordinate inconsistent with district` / `no coordinate`: the pin is
+  unreliable but the text address usually is not. Re-locate from the address
+  (cross-check `nearbyStation`), then run `route` for a deterministic walking
+  distance and decide `withinWalk`. Note "location from address, not listing
+  pin". If `nearbyStation` and the address disagree (e.g. a 中正區 address
+  claiming 信義安和站), treat it as a genuine data conflict — resolve only if
+  confident, else `unknown`.
+- `route ratio implausible`: the coordinate may be fine but the path detours
+  (river/lake/hillside). Cross-check `nearbyStation`; you may accept "near but
+  awkward walk" with low confidence, or defer.
+- `routing unavailable`: not a data problem — re-run enrich later (transient).
+
+Output a three-state verdict, recorded in the report with rationale, confidence,
+and the location source: `likely-within`, `likely-far`, or `unknown` (→ human).
+
+Guardrails: triage verdicts are agent judgment, clearly labelled and overridable;
+default to `unknown` when genuinely ambiguous. Never present a triage verdict as
+the deterministic `withinWalk`, and never silently exclude on unreliable data.
+
 ## Notification Format
 
 - Send with the canonical `ai-notify` command in `AGENTS.md`, which also defines the `ok`/`warn`/`fail` status selection.
