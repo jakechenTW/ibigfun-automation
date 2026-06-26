@@ -6,6 +6,16 @@
 - Recommended listing: below market by at least 10% and rent coverage at least 1.0.
 - Near-threshold listing: rent coverage at least 0.8.
 
+## Hard Exclusions
+
+Apply these exclusions before ranking recommended, near-threshold, and excluded listings:
+
+- Exclude listings that are clearly more than 800 meters from the nearest MRT station.
+- Do not exclude a listing for MRT distance when the listing data does not clearly show distance or enough station/location evidence to determine it.
+- Exclude auction and special-disposition listings, including foreclosure, court auction, bank auction, tender, bidding, and similar cases.
+- Treat title, source labels, listing notes, tags, and visible listing metadata as evidence for these exclusions.
+- Keep hard-exclusion counts and main reasons visible in the report summary when any are found.
+
 ## Calculations
 
 - Market discount percentage must use: `(market_unit_price - listing_unit_price) / market_unit_price * 100`.

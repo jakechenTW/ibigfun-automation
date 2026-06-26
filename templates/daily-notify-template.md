@@ -5,6 +5,8 @@
 ### 快速摘要
 
 - 新刊登物件：{{new_listing_count}} 筆
+- iBigFun 查詢：[開啟目標日篩選](https://www.ibigfun.com/lists/latest?page=1&expand=0&method=all_case&on_market=1&city=1&price_segment=%2C2500&floor_segment=2%2C4&total_floor=%2C5&add_date={{date}}&add_date_max={{date}})
+- 前置排除：{{hard_excluded_count}} 筆
 - 推薦物件：{{recommended_count}} 筆
 - 接近門檻：{{near_threshold_count}} 筆
 - 目標日排除：{{excluded_count}} 筆
@@ -12,6 +14,29 @@
 - 房貸假設：8 成貸、年利率 2.6%、30 年本息平均攤還
 - 推薦門檻：`低於行情 >= 10%` 且 `租金覆蓋率 >= 1.0`
 - 接近門檻：`租金覆蓋率 >= 0.8`
+- 前置排除：明確離捷運超過 800 公尺，或法拍/銀拍/法院拍賣/投標等特殊處分案
+
+### 前置排除
+
+{{#if hard_excluded}}
+
+{{#each hard_excluded}}
+
+#### {{rank}}. [{{title}}]({{url}})
+
+- 狀態：`前置排除`
+- 地址/區域：{{address_or_area}}
+- 刊登日：{{published_date}}
+- 排除原因：{{hard_exclusion_reason}}
+- 證據：{{hard_exclusion_evidence}}
+
+{{/each}}
+
+{{else}}
+
+- 無明確符合前置排除條件的物件。捷運距離看不出來者不以前置排除處理。
+
+{{/if}}
 
 ### 推薦物件
 
