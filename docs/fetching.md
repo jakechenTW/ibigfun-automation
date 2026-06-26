@@ -108,5 +108,15 @@ then set `SELECTORS_VERIFIED = true`. The pure date/URL/coordinate logic is
 covered by `npm test`; the selectors are the only part that needs live
 confirmation.
 
+Run with a visible, slowed-down browser to watch the flow while confirming
+selectors:
+
+```bash
+HEADED=1 npm run fetch -- --date 2026-06-26
+```
+
+`npx playwright codegen <filtered-url>` is the easiest way to pick selectors
+interactively (log in manually, then click elements to get their selectors).
+
 The `.gitignore` covers the generated session and artifacts (`storageState.json`,
 `state/`, `*.har`, traces, `playwright-report/`, `node_modules/`).

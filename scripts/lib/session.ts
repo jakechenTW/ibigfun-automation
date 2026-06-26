@@ -29,13 +29,28 @@ export function loadEnv(path = '.env'): void {
   }
 }
 
-/** Launch a browser and a context, reusing a saved session when present. */
+/** True when HEADED is set to a truthy value (for selector verification). */
+function isHeaded(): boolean {
+  const v = (process.env.HEADED ?? '').toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
+}
+
+/**
+ * Launch a browser and a context, reusing a saved session when present.
+ *
+ * Set `HEADED=1` to run with a visible browser (slowed down) when confirming
+ * the selectors in config.ts against the live site — see docs/fetching.md.
+ */
 export async function createSession(): Promise<{
   browser: Browser;
   context: BrowserContext;
   page: Page;
 }> {
-  const browser = await chromium.launch({ headless: true });
+  const headed = isHeaded();
+  const browser = await chromium.launch({
+    headless: !headed,
+    slowMo: headed ? 250 : 0,
+  });
   const context = await browser.newContext(
     fs.existsSync(STORAGE_STATE_PATH)
       ? { storageState: STORAGE_STATE_PATH }
