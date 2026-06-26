@@ -31,3 +31,38 @@ export interface FetchResult {
   count: number;
   listings: Listing[];
 }
+
+/** Nearest MRT exit summary attached during enrichment. */
+export interface NearestMrt {
+  stationId: string;
+  nameZh: string;
+  line: string;
+  exitId: string;
+  distanceM: number;
+}
+
+/**
+ * A listing plus the deterministic fields computed by scripts/enrich.ts.
+ * Estimation (market price, rent) and the final recommend/exclude judgment are
+ * NOT here — they stay with the agent (docs/reporting-rules.md).
+ */
+export interface EnrichedListing extends Listing {
+  totalPriceWan: number | null;
+  totalPriceNtd: number | null;
+  totalPingNum: number | null;
+  unitPriceWan: number | null;
+  ageNum: number | null;
+  monthlyMortgage: number | null;
+  mrt: NearestMrt | null;
+  mrtBoundaryCase: boolean;
+  hardExclusion: { excluded: boolean; reasons: string[] };
+}
+
+/** Output document written to state/enriched-<date>.json and stdout. */
+export interface EnrichResult {
+  targetDate: string;
+  enrichedAt: string;
+  count: number;
+  hardExcludedCount: number;
+  listings: EnrichedListing[];
+}
