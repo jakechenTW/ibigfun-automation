@@ -114,6 +114,7 @@ async function openListPage(
   context: BrowserContext,
   date: string,
   pageNum: number,
+  prevFirstHref: string,
 ): Promise<void> {
   await openWithRelogin({
     navigate: async () => {
@@ -129,8 +130,21 @@ async function openListPage(
           '— this logs out any other browser session.',
       ),
   });
-  // Wait for listing rows to render; a timeout (empty/last page) ends paging.
-  await page.waitForSelector(SELECTORS.list.cardRow, { timeout: 20000 }).catch(() => {});
+  // The SPA renders listing rows via XHR after domcontentloaded, so a plain
+  // "row exists" check can read the previous page's stale rows. Wait until the
+  // first listing differs from the previous page's first listing. Times out on
+  // an empty/last page, which then ends paging.
+  const firstLink = `${SELECTORS.list.cardRow} ${SELECTORS.list.titleLink}`;
+  await page
+    .waitForFunction(
+      ({ sel, prev }: { sel: string; prev: string }) => {
+        const a = document.querySelector(sel) as HTMLAnchorElement | null;
+        return !!(a && a.href && a.href !== prev);
+      },
+      { sel: firstLink, prev: prevFirstHref },
+      { timeout: 15000 },
+    )
+    .catch(() => {});
 }
 
 export async function collectListings(
@@ -140,8 +154,9 @@ export async function collectListings(
 ): Promise<Listing[]> {
   const all: Listing[] = [];
   let prevSignature = '';
+  let prevFirstHref = '';
   for (let pageNum = 1; pageNum <= MAX_PAGES; pageNum++) {
-    await openListPage(page, context, date, pageNum);
+    await openListPage(page, context, date, pageNum, prevFirstHref);
     const onPage = await extractListingsOnPage(page);
     if (onPage.length === 0) break;
 
@@ -150,6 +165,7 @@ export async function collectListings(
     const signature = onPage.map((l) => l.url ?? l.title).join('|');
     if (signature === prevSignature) break;
     prevSignature = signature;
+    prevFirstHref = onPage[0].url ?? prevFirstHref;
 
     all.push(...onPage);
   }
