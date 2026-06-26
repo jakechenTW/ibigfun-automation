@@ -97,16 +97,21 @@ npm run fetch                        # defaults to the previous Taipei day
 Exit codes: `0` ok, `1` unexpected error, `2` blocked (login gate or bad input;
 needs a human — the scraper never bypasses CAPTCHA/2FA/risk controls).
 
-### First run: verify selectors
+### Selectors (verified) and how to re-verify
 
-The CSS selectors in `scripts/lib/config.ts` are **best-effort guesses** — they
-were not confirmed against the live authenticated iBigFun DOM. On the first
-run, `SELECTORS_VERIFIED` is `false` and the scraper prints a warning. If
-results look empty or wrong, open the page with real credentials, confirm and
-adjust each `VERIFY:`-marked selector (login fields and listing-card fields),
-then set `SELECTORS_VERIFIED = true`. The pure date/URL/coordinate logic is
-covered by `npm test`; the selectors are the only part that needs live
-confirmation.
+The selectors in `scripts/lib/config.ts` were confirmed against the live
+authenticated DOM on 2026-06-27, and `SELECTORS_VERIFIED` is `true`. The
+listing view is one table (`#results table.ttable`) whose rows are listings;
+most fields are positional `<td>`s with two `<br>`-separated lines, so
+`extract.ts` reads cells by index. Login fields are duplicated (hidden +
+visible) under the same ids, so the login selectors use `:visible` and the form
+is submitted with Enter (no clickable submit button).
+
+If iBigFun changes its markup (empty or wrong results), re-verify: open the
+filtered URL with real credentials, inspect the row/cell structure, update the
+selectors and `td` indices in `config.ts`, and re-run. The pure
+date/URL/coordinate/floor logic is covered by `npm test`; only the selectors
+need live confirmation.
 
 Run with a visible, slowed-down browser to watch the flow while confirming
 selectors:

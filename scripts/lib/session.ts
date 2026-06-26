@@ -19,6 +19,20 @@ export class BlockedError extends Error {
   }
 }
 
+/**
+ * Shim injected into every page before its scripts run. tsx/esbuild transpiles
+ * the functions we pass to page.$$eval with a `__name` keep-names helper that
+ * is undefined in the browser context; defining it as a no-op makes those
+ * evaluations work. Passed as a raw string so it is not itself transpiled.
+ */
+const NAME_SHIM = 'globalThis.__name = globalThis.__name || function (f) { return f; };';
+
+/** True when HEADED is set to a truthy value (for selector verification). */
+function isHeaded(): boolean {
+  const v = (process.env.HEADED ?? '').toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
+}
+
 /** Load project-local .env into process.env without overwriting existing vars. */
 export function loadEnv(path = '.env'): void {
   try {
@@ -27,12 +41,6 @@ export function loadEnv(path = '.env'): void {
     // Missing .env is fine if the vars are already exported; login will fail
     // later with a clear BlockedError if the credentials are truly absent.
   }
-}
-
-/** True when HEADED is set to a truthy value (for selector verification). */
-function isHeaded(): boolean {
-  const v = (process.env.HEADED ?? '').toLowerCase();
-  return v === '1' || v === 'true' || v === 'yes';
 }
 
 /**
@@ -56,6 +64,7 @@ export async function createSession(): Promise<{
       ? { storageState: STORAGE_STATE_PATH }
       : {},
   );
+  await context.addInitScript(NAME_SHIM);
   const page = await context.newPage();
   return { browser, context, page };
 }
@@ -93,9 +102,10 @@ export async function ensureLoggedIn(
 
   await page.fill(SELECTORS.login.account, account);
   await page.fill(SELECTORS.login.password, password);
+  // The visible form has no clickable submit button; Enter submits it.
   await Promise.all([
     page.waitForLoadState('networkidle'),
-    page.click(SELECTORS.login.submit),
+    page.locator(SELECTORS.login.password).press('Enter'),
   ]);
 
   if (page.url().includes(SIGNIN_PATH_FRAGMENT)) {

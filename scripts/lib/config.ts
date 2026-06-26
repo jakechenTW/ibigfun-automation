@@ -1,19 +1,18 @@
 /**
  * Centralized iBigFun page configuration: paths, selectors, and runtime knobs.
  *
- * ┌─────────────────────────────────────────────────────────────────────────┐
- * │ VERIFY BEFORE TRUSTING                                                     │
- * │ The selectors below are BEST-EFFORT GUESSES. They were NOT confirmed       │
- * │ against the live authenticated iBigFun DOM (the site is login-gated and    │
- * │ JS-rendered). On the first real run, `SELECTORS_VERIFIED` is false and the │
- * │ scraper prints a prominent warning. Open the page with real credentials,   │
- * │ confirm/adjust each `VERIFY:` selector below, then set                     │
- * │ `SELECTORS_VERIFIED = true`. See docs/fetching.md.                          │
- * └─────────────────────────────────────────────────────────────────────────┘
+ * Selectors below were CONFIRMED against the live authenticated DOM on
+ * 2026-06-27 (filtered latest-sale view). The listing view is a single table
+ * (`#results table.ttable`) whose rows are listings; most fields live in
+ * positional `<td>`s with two `<br>`-separated lines, so extraction reads cells
+ * by index (see `td` below and scripts/lib/extract.ts).
+ *
+ * If iBigFun changes its markup, re-confirm with the approach in
+ * docs/fetching.md and update these values.
  */
 
-/** Flip to true only after confirming every selector against the live site. */
-export const SELECTORS_VERIFIED = false;
+/** True once selectors are confirmed against the live site. */
+export const SELECTORS_VERIFIED = true;
 
 /** Substring that signals iBigFun bounced us to the login page. */
 export const SIGNIN_PATH_FRAGMENT = '/user/signin';
@@ -35,40 +34,34 @@ export const BLOCKING_SIGNALS = [
 ];
 
 export const SELECTORS = {
-  // Login form. Fill the VISIBLE fields only — the page has duplicate hidden
-  // login inputs (see docs/credentials.md), so these target the visible form.
+  // Login form. The page renders duplicate hidden + visible copies sharing the
+  // same ids (see docs/credentials.md), so `:visible` pins the visible field.
+  // The form has no clickable visible submit button — submit via Enter on the
+  // password field (see scripts/lib/session.ts).
   login: {
-    // VERIFY:
-    account: 'form:visible input[name="account"]',
-    // VERIFY:
-    password: 'form:visible input[name="password"]',
-    // VERIFY:
-    submit: 'form:visible button[type="submit"]',
+    account: '#login-form-username:visible',
+    password: '#login-form-password:visible',
   },
 
-  // Listing results.
+  // Listing results. Each listing is a row in the single results table.
   list: {
-    // VERIFY: a single listing card/row container.
-    card: '.case-list .case-item',
-    // VERIFY: title text node within a card.
-    title: '.case-item__title',
-    // VERIFY: anchor to the listing detail page within a card.
-    link: 'a.case-item__link',
-    // VERIFY: the Google Maps address link within a card (href parsed for coords).
-    mapLink: 'a[href*="google.com/maps"], a[href*="maps.google"]',
-    // VERIFY: the iBigFun real-price (實價登錄) link within a card.
-    realPriceLink: 'a[href*="real"], a[href*="實價"]',
-    // VERIFY: per-field text nodes within a card.
-    address: '.case-item__address',
-    publishedDate: '.case-item__date',
-    totalPrice: '.case-item__price',
-    totalPing: '.case-item__ping',
-    unitPrice: '.case-item__unit-price',
-    floor: '.case-item__floor',
-    totalFloors: '.case-item__total-floor',
-    typeLayout: '.case-item__type',
-    age: '.case-item__age',
-    parking: '.case-item__parking',
+    // A listing row (filtered to rows that actually contain a title link).
+    cardRow: '#results table.ttable tbody > tr',
+    titleLink: 'a.subject_href',
+    mapLink: 'a.map-address',
+    realPriceLink: 'a[href*="/realprice/"]',
+    // Per-row cell indices (0-based). Cells hold up to two newline-separated
+    // values; extract.ts splits them: price -> [total, unit], ping ->
+    // [total, main], landFloor -> [land, floor], typePattern -> [type, layout],
+    // ageParking -> [age, parking].
+    td: {
+      date: 1,
+      price: 2,
+      ping: 3,
+      landFloor: 4,
+      typePattern: 5,
+      ageParking: 6,
+    },
   },
 } as const;
 

@@ -6,7 +6,7 @@
   "description": "Scraper and tooling for the iBigFun investment-listing daily monitor.",
   "scripts": {
     "fetch": "tsx scripts/fetch.ts",
-    "test": "node --import tsx --test scripts/lib/date.test.ts scripts/lib/url.test.ts scripts/lib/coords.test.ts"
+    "test": "node --import tsx --test scripts/lib/date.test.ts scripts/lib/url.test.ts scripts/lib/coords.test.ts scripts/lib/floor.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
