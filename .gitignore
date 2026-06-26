@@ -19,3 +19,6 @@ screenshots/
 downloads/
 *.html
 *.mhtml
+
+# Node toolchain
+node_modules/
