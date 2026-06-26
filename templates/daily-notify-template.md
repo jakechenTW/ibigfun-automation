@@ -26,11 +26,8 @@
 
 #### {{rank}}. [{{title}}]({{url}})
 
-- 狀態：`前置排除`
-- 地址/區域：{{address_or_area}}
-- 刊登日：{{published_date}}
-- 排除原因：{{hard_exclusion_reason}}
-- 證據：{{hard_exclusion_evidence}}
+- {{walk_line}}
+- 前置排除：{{hard_exclusion_reason}}（{{hard_exclusion_evidence}}）
 
 {{/each}}
 
@@ -46,22 +43,13 @@
 
 {{#each recommended}}
 
-#### {{rank}}. [{{title}}]({{url}})
+#### {{rank}}. [{{title}}]({{url}}) ｜ 低於行情 {{discount_percent}}%・覆蓋率 {{rent_coverage}}
 
-- 狀態：`推薦`
-- 地址/區域：{{address_or_area}}
-- 刊登日：{{published_date}}
-- 總價：{{price}} 萬
-- 坪數 / 單價：{{ping}} 坪 / {{unit_price}} 萬/坪
-- 樓層 / 總樓層：{{floor}} / {{total_floor}}
-- 推估區域行情：{{market_unit_price}} 萬/坪
-- 低估幅度：{{discount_percent}}%
-- 預估月租金：{{estimated_rent}} 元
-- 月房貸本利和：{{monthly_mortgage}} 元
-- 租金覆蓋率：{{rent_coverage}}
-- 現金流估算：{{monthly_cash_flow}} 元/月
+- {{walk_line}}
+- {{price}} 萬／{{ping}} 坪／{{unit_price}} 萬/坪・{{floor}}/{{total_floor}} 樓・屋齡 {{age}}・{{address_or_area}}
+- 行情 {{market_unit_price}} 萬/坪・月租 ~{{estimated_rent}}・房貸 {{monthly_mortgage}}・現金流 {{monthly_cash_flow}}/月
 - 推薦理由：{{recommendation_reason}}
-- 主要風險：{{risks_or_manual_checks}}
+- 風險：{{risks_or_manual_checks}}
 
 {{/each}}
 
@@ -77,21 +65,12 @@
 
 {{#each near_threshold}}
 
-#### {{rank}}. [{{title}}]({{url}})
+#### {{rank}}. [{{title}}]({{url}}) ｜ 覆蓋率 {{rent_coverage}}・差在 {{near_threshold_reason}}
 
-- 狀態：`接近門檻`
-- 地址/區域：{{address_or_area}}
-- 刊登日：{{published_date}}
-- 總價：{{price}} 萬
-- 坪數 / 單價：{{ping}} 坪 / {{unit_price}} 萬/坪
-- 樓層 / 總樓層：{{floor}} / {{total_floor}}
-- 推估區域行情：{{market_unit_price}} 萬/坪
-- 低估幅度：{{discount_percent}}%
-- 預估月租金：{{estimated_rent}} 元
-- 月房貸本利和：{{monthly_mortgage}} 元
-- 租金覆蓋率：{{rent_coverage}}
-- 差一點的原因：{{near_threshold_reason}}
-- 需要人工確認：{{manual_checks}}
+- {{walk_line}}
+- {{price}} 萬／{{ping}} 坪／{{unit_price}} 萬/坪・{{floor}}/{{total_floor}} 樓・屋齡 {{age}}・{{address_or_area}}
+- 行情 {{market_unit_price}} 萬/坪・月租 ~{{estimated_rent}}・房貸 {{monthly_mortgage}}・現金流 {{monthly_cash_flow}}/月
+- 需人工確認：{{manual_checks}}
 
 {{/each}}
 
@@ -107,14 +86,10 @@
 
 {{#each suspicious}}
 
-#### {{rank}}. [{{title}}]({{url}})
+#### {{rank}}. [{{title}}]({{url}}) ｜ `{{suspicious_label}}`
 
-- 標記：`{{suspicious_label}}` （clean / suspicious / likely-auction）
-- 地址/區域：{{address_or_area}}
-- 刊登日：{{published_date}}
 - 命中訊號：{{suspicious_signals}}
-- 是否點進詳情頁查證：{{detail_page_checked}}
-- 理由與信心：{{suspicious_reason}}（信心：{{suspicious_confidence}}）
+- 理由：{{suspicious_reason}}（信心：{{suspicious_confidence}}・{{detail_page_checked}}）
 
 {{/each}}
 
@@ -132,14 +107,8 @@
 
 #### {{rank}}. [{{title}}]({{url}})
 
-- 狀態：`排除`
-- 地址/區域：{{address_or_area}}
-- 刊登日：{{published_date}}
-- 關鍵數字：總價 {{price}} 萬、{{ping}} 坪、{{unit_price}} 萬/坪、租金覆蓋率 {{rent_coverage}}
-- 行情比較：推估行情 {{market_unit_price}} 萬/坪，低估幅度 {{discount_percent}}%
-- 現金流估算：{{monthly_cash_flow}} 元/月
-- 排除原因：{{exclusion_reason}}
-- 需人工確認：{{manual_checks}}
+- {{price}} 萬／{{ping}} 坪／{{unit_price}} 萬/坪・覆蓋率 {{rent_coverage}}
+- 排除：{{exclusion_reason}}
 
 {{/each}}
 
