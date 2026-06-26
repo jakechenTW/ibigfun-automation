@@ -4,8 +4,9 @@
  * Reads state/listings-<date>.json and adds: parsed numbers, monthly mortgage,
  * nearest MRT exit by **walking distance** (OpenRouteService foot routing over
  * OSM data, cheap haversine pre-filter to pick candidate exits), a reliability
- * gate, and objective hard-exclusion flags (>10-min walk when reliable; auction
- * keywords). Writes state/enriched-<date>.json and stdout.
+ * gate, an objective hard-exclusion flag (>10-min walk when reliable), and an
+ * advisory auction-keyword signal for the agent. Writes
+ * state/enriched-<date>.json and stdout.
  *
  * Estimation (market price, rent) and the recommend/exclude judgment stay with
  * the agent (docs/reporting-rules.md).

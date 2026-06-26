@@ -10,11 +10,13 @@
 - 推薦物件：{{recommended_count}} 筆
 - 接近門檻：{{near_threshold_count}} 筆
 - 目標日排除：{{excluded_count}} 筆
+- 可疑/待查：{{suspicious_count}} 筆
 - 主要排除原因：{{main_exclusion_reasons}}
 - 房貸假設：8 成貸、年利率 2.6%、30 年本息平均攤還
 - 推薦門檻：`低於行情 >= 10%` 且 `租金覆蓋率 >= 1.0`
 - 接近門檻：`租金覆蓋率 >= 0.8`
-- 前置排除：明確離捷運超過 800 公尺，或法拍/銀拍/法院拍賣/投標等特殊處分案
+- 前置排除：明確離捷運超過 800 公尺(客觀硬排除)
+- 可疑/待查：法拍/資訊過少/無室內圖等由 agent 軟標記,降權但不自動移除
 
 ### 前置排除
 
@@ -96,6 +98,29 @@
 {{else}}
 
 - 無租金覆蓋率達 `0.8` 的接近門檻候選。
+
+{{/if}}
+
+### ⚠️ 可疑/待查
+
+{{#if suspicious}}
+
+{{#each suspicious}}
+
+#### {{rank}}. [{{title}}]({{url}})
+
+- 標記：`{{suspicious_label}}`  （clean / suspicious / likely-auction）
+- 地址/區域：{{address_or_area}}
+- 刊登日：{{published_date}}
+- 命中訊號：{{suspicious_signals}}
+- 是否點進詳情頁查證：{{detail_page_checked}}
+- 理由與信心：{{suspicious_reason}}（信心：{{suspicious_confidence}}）
+
+{{/each}}
+
+{{else}}
+
+- 無 agent 標記為可疑/待查的物件。
 
 {{/if}}
 

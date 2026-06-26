@@ -36,8 +36,10 @@ Do these once before the first run; stop and ask the user if any fails:
 4. Enrich deterministically (`npm run enrich -- --date <target>` writes
    `state/enriched-<target>.json`): nearest MRT exit by **walking distance**
    (OpenRouteService foot routing over OSM), monthly mortgage, parsed numbers,
-   and objective hard-exclusion flags (>10-min walk when data is reliable,
-   auction/special-disposition keywords). Listings with an unreliable
+   objective hard-exclusion flags (>10-min walk when data is reliable), and an
+   advisory `signals.auctionKeyword` flag the agent weighs (no longer an
+   auto-exclusion — see Quality / Suspicious-Listing Judgment in
+   docs/reporting-rules.md). Listings with an unreliable
    coordinate/route are marked `withinWalk: null` for manual review, never
    auto-excluded. See "Tooling" below.
 5. Triage unreliable walking distances (`withinWalk: null`): re-locate from the
@@ -64,7 +66,8 @@ evaluation, and writing the report.
 - `npm run enrich -- --date <target>` — reads that file and adds walking
   distance to the nearest MRT exit (needs `ORS_API_KEY` in `.env`; results
   cached in `state/route-cache.json`), mortgage, parsed numbers, a reliability
-  gate, and hard-exclusion flags → `state/enriched-<target>.json`. Estimation
+  gate, hard-exclusion (walk only), and the advisory auction-keyword signal →
+  `state/enriched-<target>.json`. Estimation
   and the final recommend/exclude judgment stay with the agent. The decision is
   `withinWalk` (true ≤10-min walk / false too far / null unreliable→manual).
 - `npm run route -- --lat <> --lng <>` — deterministic nearest-walk exit for one
