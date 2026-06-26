@@ -173,6 +173,16 @@ listing lacking solid data cannot be labeled recommended.
 - Do not use tables.
 - Put the quick summary before listing details.
 - Add a Markdown link to every listing title.
+- Each listing section header is `#### {rank}. [title](url)`; do not emit a `- 狀態：…` line — the section heading already names the bucket.
+- Append inline metrics to the header: recommended `｜ 低於行情 {discount_percent}%・覆蓋率 {rent_coverage}`; near-threshold `｜ 覆蓋率 {rent_coverage}・差在 {near_threshold_reason}`; suspicious `｜ \`{label}\`` where label is `clean` / `suspicious` / `likely-auction`.
+- Do not emit a 刊登日 line in recommended or near-threshold listings.
+- Recommended and near-threshold use the full compact layout (walk line, one basics line `總價／坪數／單價・樓層・屋齡・地址`, one financial line `行情・月租・房貸・現金流`, then reason/risk or manual-check). Hard-excluded, suspicious, and excluded use the shorter layout shown in `templates/daily-notify-template.md`.
+- Emit the 🚶 walk line in 前置排除, 推薦, and 接近門檻 only — never in 可疑/待查 or 目標日排除. Compose it from the listing's enriched `walk` and `coordinate`:
+  - Reliable (`walk` present): `🚶 {stationZh} {exitId} 號出口・{minutes} 分鐘（[地圖]({map_url})）`. If `exitId` is missing, drop the 出口 part: `🚶 {stationZh}・{minutes} 分鐘（[地圖]({map_url})）`.
+  - Unreliable but `coordinate` present (`walk` is null — e.g. coordinate inconsistent, route ratio implausible): show the triage result and mark it pending: `🚶 約{station}・步行待確認（[地圖]({map_url})）`, or `🚶 步行待人工確認（[地圖]({map_url})）` when no station can be inferred.
+  - No `coordinate`: `🚶 無位置資訊` (no map link).
+- Map link `{map_url}` is exactly `https://www.google.com/maps?q=<lat>,<lng>` using the listing `coordinate`, with link text `地圖`.
+- When a numeric field (月租, 現金流, 行情, etc.) is null, render it as `—` rather than dropping the line.
 - Render each listed property with a 1-based `rank` value inside its section.
 - If the target-date new-listing count is 10 or lower, list all excluded properties.
 - If the target-date new-listing count is above 10, list only the 5 excluded properties closest to the threshold.
