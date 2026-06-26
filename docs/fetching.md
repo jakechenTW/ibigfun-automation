@@ -71,10 +71,42 @@ For listings with a credible address coordinate:
 See `data/README.md` for the dataset columns and the full distance rules, and
 `docs/reporting-rules.md` for how distance feeds the hard-exclusion rule.
 
-## Future: Replace Manual Fetch With A Script
+## Automated Fetch (`scripts/fetch.ts`)
 
-A committed `scripts/fetch.ts` (Playwright) should eventually log in with the
-`.env` credentials and write the day's listings to JSON, replacing the manual
-browser steps. The `.gitignore` already covers Playwright artifacts
-(`storageState.json`, `*.har`, traces, `playwright-report/`, etc.). Until that
-exists, use the browser method above.
+A committed Playwright scraper automates the manual flow above: it builds the
+filtered target-date URL, reuses a saved session (or logs in with the `.env`
+credentials, visible fields only), paginates, and writes the normalized
+listings to `state/listings-<date>.json` and stdout. It does **fetch +
+normalize only** — MRT distance, estimation, and evaluation stay with the
+report step.
+
+### One-time setup
+
+```bash
+npm install                      # toolchain (tsx, Playwright, TypeScript)
+npx playwright install chromium  # browser binary (skipped by the bare install)
+```
+
+### Run
+
+```bash
+npm run fetch -- --date 2026-06-26   # explicit target date
+npm run fetch                        # defaults to the previous Taipei day
+```
+
+Exit codes: `0` ok, `1` unexpected error, `2` blocked (login gate or bad input;
+needs a human — the scraper never bypasses CAPTCHA/2FA/risk controls).
+
+### First run: verify selectors
+
+The CSS selectors in `scripts/lib/config.ts` are **best-effort guesses** — they
+were not confirmed against the live authenticated iBigFun DOM. On the first
+run, `SELECTORS_VERIFIED` is `false` and the scraper prints a warning. If
+results look empty or wrong, open the page with real credentials, confirm and
+adjust each `VERIFY:`-marked selector (login fields and listing-card fields),
+then set `SELECTORS_VERIFIED = true`. The pure date/URL/coordinate logic is
+covered by `npm test`; the selectors are the only part that needs live
+confirmation.
+
+The `.gitignore` covers the generated session and artifacts (`storageState.json`,
+`state/`, `*.har`, traces, `playwright-report/`, `node_modules/`).
