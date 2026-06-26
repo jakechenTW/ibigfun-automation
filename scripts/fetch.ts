@@ -16,7 +16,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { previousTaipeiDay, isValidDateString } from './lib/date.ts';
 import { SELECTORS_VERIFIED } from './lib/config.ts';
-import { loadEnv, createSession, BlockedError } from './lib/session.ts';
+import { loadEnv, createSession } from './lib/session.ts';
+import { BlockedError } from './lib/errors.ts';
 import { collectListings } from './lib/extract.ts';
 import type { FetchResult } from './lib/types.ts';
 

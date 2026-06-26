@@ -6,18 +6,9 @@ import {
   BLOCKING_SIGNALS,
   STORAGE_STATE_PATH,
 } from './config.ts';
+import { BlockedError } from './errors.ts';
 
-/**
- * Raised when login cannot proceed safely (missing creds, CAPTCHA/2FA/risk, or
- * repeated failure). The orchestrator catches this and exits non-zero with a
- * clear message — never bypassing the control. Messages never include secrets.
- */
-export class BlockedError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'BlockedError';
-  }
-}
+export { BlockedError };
 
 /**
  * Shim injected into every page before its scripts run. tsx/esbuild transpiles
@@ -70,18 +61,16 @@ export async function createSession(): Promise<{
 }
 
 /**
- * If `page` is on the signin page, log in with .env credentials (visible fields
- * only) and persist the session. No-op when already authenticated.
+ * Perform one login attempt from the signin page with .env credentials (visible
+ * fields only) and persist the session on success. Called by the relogin loop
+ * (scripts/lib/relogin.ts) each time navigation lands on signin — including a
+ * mid-run kick when the account logs in elsewhere.
  *
- * Throws BlockedError on missing creds, CAPTCHA/2FA/risk signals, or a login
- * that still lands on signin.
+ * Throws BlockedError on CAPTCHA/2FA/risk signals or missing creds (terminal —
+ * cannot auto-handle). If the login does not take (still on signin), it returns
+ * without saving; the relogin loop decides whether to retry or give up.
  */
-export async function ensureLoggedIn(
-  page: Page,
-  context: BrowserContext,
-): Promise<void> {
-  if (!page.url().includes(SIGNIN_PATH_FRAGMENT)) return;
-
+export async function logIn(page: Page, context: BrowserContext): Promise<void> {
   const bodyText = ((await page.textContent('body')) ?? '').toLowerCase();
   const hit = BLOCKING_SIGNALS.find((s) => bodyText.includes(s.toLowerCase()));
   if (hit) {
@@ -109,12 +98,9 @@ export async function ensureLoggedIn(
     .waitForURL((url) => !url.toString().includes(SIGNIN_PATH_FRAGMENT), { timeout: 30000 })
     .catch(() => {});
 
-  if (page.url().includes(SIGNIN_PATH_FRAGMENT)) {
-    throw new BlockedError(
-      'Still on the signin page after submitting credentials. Check the ' +
-        'credentials and the login selectors in scripts/lib/config.ts.',
-    );
+  // Persist only a session that actually left signin; otherwise leave the old
+  // state and let the relogin loop retry or give up.
+  if (!page.url().includes(SIGNIN_PATH_FRAGMENT)) {
+    await context.storageState({ path: STORAGE_STATE_PATH });
   }
-
-  await context.storageState({ path: STORAGE_STATE_PATH });
 }
