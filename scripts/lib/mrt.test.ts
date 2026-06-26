@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseExitsCsv, nearestExit } from './mrt.ts';
+import { parseExitsCsv, nearestExit, kNearestExits } from './mrt.ts';
 
 const CSV =
   '﻿station_id,line,name_zh,exit_id,latitude,longitude\n' +
@@ -30,4 +30,12 @@ test('nearestExit picks the closest exit by straight-line distance', () => {
 
 test('nearestExit returns null for an empty dataset', () => {
   assert.equal(nearestExit({ lat: 25, lng: 121 }, []), null);
+});
+
+test('kNearestExits returns up to k exits, closest first', () => {
+  const exits = parseExitsCsv(CSV);
+  const near = kNearestExits({ lat: 25.0471, lng: 121.5171 }, exits, 2);
+  assert.equal(near.length, 2);
+  assert.equal(near[0].exit.nameZh, '台北車站'); // closest first
+  assert.ok(near[0].distanceM <= near[1].distanceM);
 });

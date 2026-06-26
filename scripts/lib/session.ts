@@ -102,11 +102,12 @@ export async function ensureLoggedIn(
 
   await page.fill(SELECTORS.login.account, account);
   await page.fill(SELECTORS.login.password, password);
-  // The visible form has no clickable submit button; Enter submits it.
-  await Promise.all([
-    page.waitForLoadState('networkidle'),
-    page.locator(SELECTORS.login.password).press('Enter'),
-  ]);
+  // The visible form has no clickable submit button; Enter submits it. Wait for
+  // the URL to leave the signin page (networkidle never fires on this SPA).
+  await page.locator(SELECTORS.login.password).press('Enter');
+  await page
+    .waitForURL((url) => !url.toString().includes(SIGNIN_PATH_FRAGMENT), { timeout: 30000 })
+    .catch(() => {});
 
   if (page.url().includes(SIGNIN_PATH_FRAGMENT)) {
     throw new BlockedError(

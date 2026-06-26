@@ -19,8 +19,10 @@ notifies.
 Do these once before the first run; stop and ask the user if any fails:
 
 - [ ] `ai-notify` is on PATH (`which ai-notify`). If missing, stop and ask.
-- [ ] `.env` exists and is filled (`cp .env.example .env`; see
-  `docs/credentials.md`).
+- [ ] `.env` exists and is filled (`cp .env.example .env`): `IBIGFUN_ACCOUNT`/
+  `IBIGFUN_PASSWORD` (see `docs/credentials.md`) and `ORS_API_KEY` for the
+  enrich step's walking distances (free key at openrouteservice.org/dev).
+- [ ] Toolchain installed: `npm install` and `npx playwright install chromium`.
 - [ ] A browser tool is available for the fetch step (see `docs/fetching.md`).
 
 ## Daily Run Sequence
@@ -32,17 +34,24 @@ Do these once before the first run; stop and ask the user if any fails:
 3. Fetch the target date's listings → `docs/fetching.md`
    (`npm run fetch -- --date <target>` writes `state/listings-<target>.json`).
 4. Enrich deterministically (`npm run enrich -- --date <target>` writes
-   `state/enriched-<target>.json`): nearest MRT exit + distance, monthly
-   mortgage, parsed numbers, and objective hard-exclusion flags (clearly >800m
-   from MRT, auction/special-disposition keywords). See "Tooling" below.
-5. Deduplicate by stable listing ID → `docs/automation-state.md`.
-6. Estimate market price and rent (the agent's judgment; not automated) →
+   `state/enriched-<target>.json`): nearest MRT exit by **walking distance**
+   (OpenRouteService foot routing over OSM), monthly mortgage, parsed numbers,
+   and objective hard-exclusion flags (>10-min walk when data is reliable,
+   auction/special-disposition keywords). Listings with an unreliable
+   coordinate/route are marked `withinWalk: null` for manual review, never
+   auto-excluded. See "Tooling" below.
+5. Triage unreliable walking distances (`withinWalk: null`): re-locate from the
+   address + `nearbyStation`, use `npm run route -- --lat <> --lng <>` for a
+   deterministic walk, and give a labelled verdict (likely-within / likely-far /
+   unknown→human) → `docs/reporting-rules.md` (Walking-Distance Triage).
+6. Deduplicate by stable listing ID → `docs/automation-state.md`.
+7. Estimate market price and rent (the agent's judgment; not automated) →
    `docs/reporting-rules.md`.
-7. Evaluate against the investment criteria, exclusions, and sorting, using the
+8. Evaluate against the investment criteria, exclusions, and sorting, using the
    enriched fields plus your estimates → `docs/reporting-rules.md`.
-8. Write `reports/YYYY-MM-DD.md` (target date in the filename) using
+9. Write `reports/YYYY-MM-DD.md` (target date in the filename) using
    `templates/daily-notify-template.md` as the structure.
-9. Notify with the canonical command below.
+10. Notify with the canonical command below.
 
 ### Tooling
 
@@ -52,10 +61,15 @@ evaluation, and writing the report.
 - `npm run fetch -- --date <target>` — Playwright scraper. Logs in from `.env`,
   paginates the filtered view, writes normalized listings to
   `state/listings-<target>.json`. Details: `docs/fetching.md`.
-- `npm run enrich -- --date <target>` — reads that file and adds MRT distance,
-  mortgage, parsed numbers, and hard-exclusion flags →
-  `state/enriched-<target>.json`. Estimation and the final recommend/exclude
-  judgment stay with the agent.
+- `npm run enrich -- --date <target>` — reads that file and adds walking
+  distance to the nearest MRT exit (needs `ORS_API_KEY` in `.env`; results
+  cached in `state/route-cache.json`), mortgage, parsed numbers, a reliability
+  gate, and hard-exclusion flags → `state/enriched-<target>.json`. Estimation
+  and the final recommend/exclude judgment stay with the agent. The decision is
+  `withinWalk` (true ≤10-min walk / false too far / null unreliable→manual).
+- `npm run route -- --lat <> --lng <>` — deterministic nearest-walk exit for one
+  coordinate (shared ORS cache). Used during triage (step 5) to get a trustworthy
+  walking distance after re-locating a listing from its address.
 
 Both default to the previous Taipei day when `--date` is omitted. Pure logic is
 covered by `npm test`.
