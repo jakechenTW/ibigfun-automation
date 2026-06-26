@@ -31,10 +31,11 @@ Add these date parameters for the target date:
 4. If iBigFun redirects to `/user/signin`, follow `docs/credentials.md` to log in from the project-local `.env` credentials. Stop if CAPTCHA, 2FA, account-risk checks, missing credentials, or repeated login failure occurs.
 5. Confirm the page displays the expected target date and collect all result pages for that date.
 6. Deduplicate listings using stable listing IDs and the convention in `docs/automation-state.md`.
-7. Normalize each listing with at least: title, URL, address/area, published date, total price, total ping, unit price, floor/total floors, type/layout, age, parking, and iBigFun real-price URL when available.
-8. Evaluate listings with `docs/reporting-rules.md`.
-9. Write the detailed Markdown report under `reports/YYYY-MM-DD.md`, using the target date in the filename and `templates/daily-notify-template.md` as the structure guide.
-10. Send the completed report with:
+7. Normalize each listing with at least: title, URL, address/area, address coordinate from the iBigFun Google Maps link when available, published date, total price, total ping, unit price, floor/total floors, type/layout, age, parking, and iBigFun real-price URL when available.
+8. For listings with a credible address coordinate, calculate the nearest active MRT exit using `data/taipei_mrt_exits.csv`. Keep the nearest station, exit ID, straight-line distance, and whether the result is a 700-900m manual walking-distance boundary case. If a walking-time estimate is needed, call OpenStreetMap foot routing only for the nearest exit.
+9. Evaluate listings with `docs/reporting-rules.md`.
+10. Write the detailed Markdown report under `reports/YYYY-MM-DD.md`, using the target date in the filename and `templates/daily-notify-template.md` as the structure guide.
+11. Send the completed report with:
 
 ```bash
 ai-notify --tool codex --status <ok|warn|fail> --task "每日 iBigFun 投資房源監測" --title "<short title>" --details-file reports/YYYY-MM-DD.md

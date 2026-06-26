@@ -9,6 +9,7 @@ Project workspace for monitoring iBigFun investment property listings, preparing
 - `docs/credentials.md`: credential storage and login handling.
 - `docs/reporting-rules.md`: investment criteria, calculations, data quality, sorting, and notification rules.
 - `docs/automation-state.md`: durable state and deduplication conventions.
+- `data/`: static reference data, such as Taipei MRT exit coordinates for distance checks.
 - `templates/`: reusable notification templates.
 - `reports/`: local generated notification/report files; ignored by git.
 - `state/`: future local automation state, such as seen listing IDs; ignored by git.

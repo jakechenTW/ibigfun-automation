@@ -12,6 +12,12 @@ Apply these exclusions before ranking recommended, near-threshold, and excluded 
 
 - Exclude listings that are clearly more than 800 meters from the nearest MRT station.
 - Do not exclude a listing for MRT distance when the listing data does not clearly show distance or enough station/location evidence to determine it.
+- When iBigFun provides a Google Maps coordinate link for the listing address, treat that coordinate as the listing location for MRT-distance checks unless the coordinate is visibly inconsistent with the listing address.
+- Use `data/taipei_mrt_exits.csv` as the active MRT reference data. Calculate straight-line distance from the listing coordinate to all MRT exits, choose the nearest exit, and use that nearest-exit distance as the primary MRT-distance signal.
+- For routine screening, call walking-distance routing only for the single nearest MRT exit, not every exit. Use OpenStreetMap foot routing when a walking-time estimate is needed.
+- Treat straight-line distances in the 700-900 meter range as boundary cases requiring manual walking-distance confirmation. Straight-line distance is not walking distance.
+- Construction or planned stations may be noted as future-upside context when reliable coordinates are available, but they do not replace active MRT exits for the formal 800 meter hard-exclusion rule.
+- Retired or canceled stations must not be used for either the hard-exclusion rule or future-upside notes.
 - Exclude auction and special-disposition listings, including foreclosure, court auction, bank auction, tender, bidding, and similar cases.
 - Treat title, source labels, listing notes, tags, and visible listing metadata as evidence for these exclusions.
 - Keep hard-exclusion counts and main reasons visible in the report summary when any are found.
