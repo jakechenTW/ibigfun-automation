@@ -29,16 +29,36 @@ Do these once before the first run; stop and ask the user if any fails:
    `docs/automation-state.md` before generating a report or changing behavior.
 2. Compute the target date: the previous calendar day in `Asia/Taipei` (see
    "Report Date" below). A run on `2026-06-27` targets `2026-06-26`.
-3. Fetch the target date's listings → `docs/fetching.md`.
-4. Deduplicate by stable listing ID → `docs/automation-state.md`.
-5. Normalize each listing's fields and compute the nearest MRT exit →
-   `docs/fetching.md`, `data/taipei_mrt_exits.csv`.
-6. Estimate market price and rent → `docs/reporting-rules.md`.
-7. Evaluate against the investment criteria, exclusions, and sorting →
+3. Fetch the target date's listings → `docs/fetching.md`
+   (`npm run fetch -- --date <target>` writes `state/listings-<target>.json`).
+4. Enrich deterministically (`npm run enrich -- --date <target>` writes
+   `state/enriched-<target>.json`): nearest MRT exit + distance, monthly
+   mortgage, parsed numbers, and objective hard-exclusion flags (clearly >800m
+   from MRT, auction/special-disposition keywords). See "Tooling" below.
+5. Deduplicate by stable listing ID → `docs/automation-state.md`.
+6. Estimate market price and rent (the agent's judgment; not automated) →
    `docs/reporting-rules.md`.
+7. Evaluate against the investment criteria, exclusions, and sorting, using the
+   enriched fields plus your estimates → `docs/reporting-rules.md`.
 8. Write `reports/YYYY-MM-DD.md` (target date in the filename) using
    `templates/daily-notify-template.md` as the structure.
 9. Notify with the canonical command below.
+
+### Tooling
+
+Two committed scripts cover the deterministic steps; the agent does estimation,
+evaluation, and writing the report.
+
+- `npm run fetch -- --date <target>` — Playwright scraper. Logs in from `.env`,
+  paginates the filtered view, writes normalized listings to
+  `state/listings-<target>.json`. Details: `docs/fetching.md`.
+- `npm run enrich -- --date <target>` — reads that file and adds MRT distance,
+  mortgage, parsed numbers, and hard-exclusion flags →
+  `state/enriched-<target>.json`. Estimation and the final recommend/exclude
+  judgment stay with the agent.
+
+Both default to the previous Taipei day when `--date` is omitted. Pure logic is
+covered by `npm test`.
 
 ### Report Date
 
