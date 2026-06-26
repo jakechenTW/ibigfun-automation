@@ -1,6 +1,6 @@
 {
   "name": "ibigfun-automation",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "Scraper and tooling for the iBigFun investment-listing daily monitor.",
