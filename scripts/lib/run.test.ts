@@ -17,13 +17,13 @@ test('runStep marks ok, records summary/artifacts, journals start+end', async ()
   try {
     const m = createManifest(date, date, 'seed');
     const status = await runStep(m, 'fetch',
-      async () => ({ summary: { listings: 3 }, artifacts: ['state/listings-0003-03-03.json'] }),
+      async () => ({ summary: { listings: 3 }, artifacts: ['state/runs/0003-03-03/listings.json'] }),
       fakeClock());
     assert.equal(status, 'ok');
     assert.equal(m.steps.fetch.status, 'ok');
     assert.equal(m.steps.fetch.attempt, 1);
     assert.deepEqual(m.steps.fetch.summary, { listings: 3 });
-    assert.deepEqual(m.steps.fetch.artifacts, ['state/listings-0003-03-03.json']);
+    assert.deepEqual(m.steps.fetch.artifacts, ['state/runs/0003-03-03/listings.json']);
     assert.equal(typeof m.steps.fetch.durationMs, 'number');
     const events = readJournal(date).map((e) => e.event);
     assert.ok(events.includes('step.start'));

@@ -1,5 +1,4 @@
 import * as fs from 'node:fs';
-import * as path from 'node:path';
 import { collectListings } from './extract.ts';
 import { loadEnv } from './http.ts';
 import type { Logger } from './journal.ts';
@@ -11,6 +10,7 @@ import { finalizeWalk } from './walk.ts';
 import { routeWalkDistances } from './routing.ts';
 import { loadCache, saveCache, cacheKey } from './route-cache.ts';
 import type { EnrichResult, EnrichedListing, FetchResult } from './types.ts';
+import { runDir, listingsPath, enrichedPath } from './runpaths.ts';
 
 const MRT_CSV = 'data/taipei_mrt_exits.csv';
 const ORS_DELAY_MS = 1600;        // ORS free tier ~40 req/min
@@ -18,7 +18,7 @@ const ORS_RETRY_WAIT_MS = 65_000; // wait out the per-minute window once
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export async function enrichStep(range: RunRange, logger: Logger): Promise<StepOutput> {
-  const inPath = path.join('state', `listings-${range.label}.json`);
+  const inPath = listingsPath(range.label);
   if (!fs.existsSync(inPath)) {
     throw new Error(`${inPath} not found. Run the fetch step for ${range.label} first.`);
   }
@@ -82,9 +82,9 @@ export async function enrichStep(range: RunRange, logger: Logger): Promise<StepO
     withinWalkCount, manualReviewCount, hardExcludedCount, listings: enriched,
   };
 
-  fs.mkdirSync('state', { recursive: true });
+  fs.mkdirSync(runDir(range.label), { recursive: true });
   saveCache(cache);
-  const outPath = path.join('state', `enriched-${range.label}.json`);
+  const outPath = enrichedPath(range.label);
   fs.writeFileSync(outPath, JSON.stringify(result, null, 2));
   logger.event('info', 'enrich.summary',
     `enriched ${enriched.length}: ${withinWalkCount} within-walk, ${manualReviewCount} manual-review, ` +
@@ -108,8 +108,8 @@ export async function fetchStep(range: RunRange, logger: Logger): Promise<StepOu
     count: listings.length,
     listings,
   };
-  fs.mkdirSync('state', { recursive: true });
-  const outPath = path.join('state', `listings-${range.label}.json`);
+  fs.mkdirSync(runDir(range.label), { recursive: true });
+  const outPath = listingsPath(range.label);
   fs.writeFileSync(outPath, JSON.stringify(result, null, 2));
   return { summary: { listings: listings.length, historyDropped: dropped, duplicates }, artifacts: [outPath] };
 }

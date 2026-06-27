@@ -46,7 +46,7 @@ export interface Listing {
   bathroom: number | null;
 }
 
-/** Output document written to state/listings-<label>.json and stdout. */
+/** Output document written to state/runs/<label>/listings.json and stdout. */
 export interface FetchResult {
   from: string;
   to: string;
@@ -106,7 +106,7 @@ export interface EnrichedListing extends Listing {
   tenure: ListingTenure;
 }
 
-/** Output document written to state/enriched-<label>.json and stdout. */
+/** Output document written to state/runs/<label>/enriched.json and stdout. */
 export interface EnrichResult {
   from: string;
   to: string;
