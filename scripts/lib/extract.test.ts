@@ -42,10 +42,10 @@ test('collectListings paginates by total_records/per_page and maps items in orde
     1: page([item(1), item(2)], 40),
     2: page([item(3)], 40),
   };
-  const out = await collectListings('2026-06-26', okDeps({
+  const { out } = await captureErr(() => collectListings('2026-06-26', okDeps({
     fetchPage: async (_d, p) => pages[p],
     fetchOnMarketHistory: async (id) => [on(id)],
-  }));
+  })));
   assert.equal(out.length, 3);
   assert.equal(out[0].id, 1);
   assert.equal(out[2].id, 3);
@@ -53,18 +53,18 @@ test('collectListings paginates by total_records/per_page and maps items in orde
 
 test('collectListings stops at an empty page', async () => {
   const pages: Record<number, SearchListResponse> = { 1: page([item(1)], 100), 2: page([], 100) };
-  const out = await collectListings('2026-06-26', okDeps({
+  const { out } = await captureErr(() => collectListings('2026-06-26', okDeps({
     fetchPage: async (_d, p) => pages[p] ?? page([], 100),
-  }));
+  })));
   assert.equal(out.length, 1);
 });
 
 test('collectListings merges on-market and off-market history', async () => {
-  const out = await collectListings('2026-06-27', okDeps({
+  const { out } = await captureErr(() => collectListings('2026-06-27', okDeps({
     fetchPage: async () => page([item(7)], 1),
     fetchOnMarketHistory: async () => [{ source: '樂屋網', source_id: 'a', total: 1688, subject: 's', add_time: '2026-06-27', link: 'x' }],
     fetchOffMarketHistory: async () => [{ source: '信義房屋', source_id: 'b', total: '1,500', subject: 's', add_time: '2025-12-01', link: 'y' }],
-  }));
+  })));
   const h = out[0].listingHistory;
   assert.equal(h.length, 2);
   const off = h.find((e) => e.source === '信義房屋');
@@ -90,4 +90,15 @@ test('collectListings treats an empty on-market history as a drop', async () => 
   })));
   assert.deepEqual(out[0].listingHistory, []);
   assert.ok(errs.some((e) => /1 dropped/.test(e)));
+});
+
+test('collectListings keeps on-market history when only off-market fails', async () => {
+  const { out, errs } = await captureErr(() => collectListings('2026-06-26', okDeps({
+    fetchPage: async () => page([item(8)], 1),
+    fetchOnMarketHistory: async (id) => [on(id)],
+    fetchOffMarketHistory: async () => { throw new Error('throttled'); },
+  })));
+  assert.equal(out[0].listingHistory.length, 1); // on-market survived
+  assert.ok(errs.some((e) => /off-market/.test(e) && e.includes('8')));
+  assert.ok(errs.some((e) => /0 dropped/.test(e))); // off-market-only fail is not a drop
 });

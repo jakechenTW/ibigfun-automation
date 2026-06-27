@@ -28,7 +28,7 @@ test('assertApiOk passes for a 200 ok envelope', () => {
   assert.doesNotThrow(() => assertApiOk('/api/search/list', 200, 'ok'));
 });
 test('assertApiOk passes when apiStatus is undefined (200)', () => {
-  assert.doesNotThrow(() => assertApiOk('o2o-same', 200, undefined));
+  assert.doesNotThrow(() => assertApiOk('history', 200, undefined));
 });
 test('assertApiOk throws on a non-200 status', () => {
   assert.throws(() => assertApiOk('/api/search/list', 502, 'ok'), /HTTP 502/);
@@ -54,15 +54,17 @@ test('withRetry retries then succeeds', async () => {
 
 test('withRetry gives up after retries+1 attempts and throws the last error', async () => {
   let calls = 0;
+  const msgs = ['first', 'middle', 'last'];
   await assert.rejects(
-    withRetry(async () => { calls++; throw new Error('always'); }, { retries: 2, baseMs: 0, sleep: async () => {} }),
-    /always/,
+    withRetry(async () => { throw new Error(msgs[calls++]); }, { retries: 2, baseMs: 0, sleep: async () => {} }),
+    /last/,
   );
   assert.equal(calls, 3);
 });
 
 test('withRetry doubles the backoff each attempt', async () => {
   const delays: number[] = [];
+  // rejection is expected here; the assertion under test is the `delays` sequence
   await assert.rejects(
     withRetry(async () => { throw new Error('e'); }, { retries: 3, baseMs: 100, sleep: async (ms) => { delays.push(ms); } }),
   );

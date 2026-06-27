@@ -34,7 +34,7 @@ export interface Listing {
   realPriceUrl: string | null;
   /** Cross-source posting history from iBigFun's 刊登紀錄 (incl. delisted); [] if none. */
   listingHistory: ListingHistoryEntry[];
-  /** Stable iBigFun listing id (also the o2o-same key); null if absent. */
+  /** Stable iBigFun listing id (path key for /on-market/{id}/history); null if absent. */
   id: number | null;
   /** Origin platform label, e.g. "樂屋"; null if absent. */
   source: string | null;

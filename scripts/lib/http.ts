@@ -38,8 +38,7 @@ export function looksLikeSignin(res: { status: number; finalUrl: string; content
   if (res.contentType.includes('text/html')) {
     const isDataUrl =
       res.finalUrl.includes('/api/') ||
-      res.finalUrl.includes('/on-market/') ||
-      res.finalUrl.includes('o2o-same');
+      res.finalUrl.includes('/on-market/');
     if (isDataUrl) return true;
   }
   return false;
@@ -143,7 +142,7 @@ export async function withRetry<T>(
   opts: { retries: number; baseMs: number; sleep?: (ms: number) => Promise<void> },
 ): Promise<T> {
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  let lastErr: unknown;
+  let lastErr: unknown = new Error('withRetry: no attempts made');
   for (let attempt = 0; attempt <= opts.retries; attempt++) {
     try {
       return await fn();
