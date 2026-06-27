@@ -92,7 +92,8 @@ async function cmdRun(argv: string[]): Promise<void> {
       console.error(
         `\n■ report is an agent step — it cannot be auto-run.\n` +
         `  Profile: ${profile.id} (${profile.displayName})\n` +
-        `  Read: AGENTS.md, docs/reporting-rules.md, ${profile.ruleDocPath}\n` +
+        `  Read: AGENTS.md, docs/reporting-rules.md, docs/credentials.md, docs/automation-state.md, ` +
+        `profiles/${profile.id}.json, ${profile.ruleDocPath}\n` +
         `  Template: ${profile.templatePath}\n` +
         `  Do the agent work, write ${reportPath(profile.id, range.label)}, then run:\n` +
         `    npm run pipeline -- mark report ${profileFlags(profile)} ${rangeFlags(range)} --status ok --artifact ${reportPath(profile.id, range.label)} \\\n` +

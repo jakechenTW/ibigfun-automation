@@ -44,4 +44,13 @@ login.
 If iBigFun blocks login with CAPTCHA, 2FA, account-risk checks, missing
 credentials, a login response with no `ibigfun_session` cookie, or repeated
 login failure, the run raises `BlockedError` and stops immediately. Do not
-bypass those controls — always stop and ask for manual confirmation.
+bypass those controls.
+
+Interactive agents must stop and ask the user for manual confirmation.
+Headless workers must use the pipeline failure escape hatch and include the
+agent identity explicitly:
+
+```bash
+npm run pipeline -- fail --profile <profile> [--date <d> | --from <a> --to <b>] \
+  --reason "<short>" --tool <codex|claude>
+```
