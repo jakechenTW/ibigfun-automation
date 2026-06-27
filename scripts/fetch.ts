@@ -5,7 +5,7 @@
  *   npm run fetch -- --date 2026-06-26   # explicit target date
  *   npm run fetch                        # defaults to previous Taipei day
  *
- * Writes state/listings-<date>.json (git-ignored) and prints the JSON to
+ * Writes state/runs/<label>/listings.json (git-ignored) and prints the JSON to
  * stdout. Fetch + normalize only — MRT distance, estimation, and evaluation
  * stay with the report step (see AGENTS.md / docs/reporting-rules.md).
  *
