@@ -1,0 +1,15 @@
+{
+  "id": "investment",
+  "displayName": "iBigFun 投資房源監測",
+  "notifyTask": "每日 iBigFun 投資房源監測",
+  "ruleDocPath": "docs/profiles/investment.md",
+  "templatePath": "templates/investment-notify-template.md",
+  "requiresFilterVerification": false,
+  "fetchFilters": {
+    "enabled": false,
+    "description": "Uses the existing captured investment search request shape in scripts/lib/api.ts."
+  },
+  "hardCriteria": {
+    "profile": "investment"
+  }
+}
