@@ -39,3 +39,10 @@ export function isValidDateString(s: string): boolean {
     dt.getUTCDate() === d
   );
 }
+
+/** Whole calendar days from `fromYMD` to `toYMD` (negative if reversed). */
+export function daysBetween(fromYMD: string, toYMD: string): number {
+  const [fy, fm, fd] = fromYMD.split('-').map(Number);
+  const [ty, tm, td] = toYMD.split('-').map(Number);
+  return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / DAY_MS);
+}
