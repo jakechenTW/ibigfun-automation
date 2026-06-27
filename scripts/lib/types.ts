@@ -1,5 +1,13 @@
 import type { Coordinate } from './coords.ts';
 
+/** One row of iBigFun's 刊登紀錄: this property's appearance on one source/date. */
+export interface ListingHistoryEntry {
+  date: string; // "2026-06-05"
+  source: string; // "樂屋網" | "591" | …; "" when blank
+  price: string | null; // raw token, e.g. "1588" / "1,588"; null when absent
+  active: boolean; // false = a (下架) record
+}
+
 /**
  * A normalized iBigFun listing. Fields mirror the "Fields To Extract Per
  * Listing" list in docs/fetching.md. Values are kept as the scraped display
@@ -24,6 +32,18 @@ export interface Listing {
   age: string | null;
   parking: string | null;
   realPriceUrl: string | null;
+  /** Cross-source posting history from iBigFun's 刊登紀錄 (incl. delisted); [] if none. */
+  listingHistory: ListingHistoryEntry[];
+  /** Stable iBigFun listing id (path key for /on-market/{id}/history); null if absent. */
+  id: number | null;
+  /** Origin platform label, e.g. "樂屋"; null if absent. */
+  source: string | null;
+  /** Canonical source-site URL for the listing (same value as `url`). */
+  sourceLink: string | null;
+  /** Room counts parsed by iBigFun; null if absent. */
+  room: number | null;
+  livingRoom: number | null;
+  bathroom: number | null;
 }
 
 /** Output document written to state/listings-<date>.json and stdout. */
@@ -52,6 +72,17 @@ export interface Reliability {
   reason: string | null; // why unreliable, else null
 }
 
+/** Deterministic "how long on market" summary derived from `listingHistory`. */
+export interface ListingTenure {
+  firstListedDate: string | null; // earliest date across all records (incl. 下架)
+  daysOnMarket: number | null; // targetDate − firstListedDate; null if no history / bad date
+  recordCount: number; // total history rows
+  sourceCount: number; // distinct non-empty sources
+  priceTrend: 'flat' | 'dropped' | 'raised' | 'unknown';
+  firstPrice: number | null; // earliest record's price (萬)
+  latestPrice: number | null; // latest record's price (萬)
+}
+
 /**
  * A listing plus the deterministic fields computed by scripts/enrich.ts.
  * Estimation (market price, rent) and the final recommend/exclude judgment are
@@ -68,7 +99,10 @@ export interface EnrichedListing extends Listing {
   walk: WalkInfo | null;
   withinWalk: boolean | null; // <=10-min walk; null = data unreliable, manual review
   reliability: Reliability;
+  /** Advisory signals for agent judgment (do NOT auto-exclude). */
+  signals: { auctionKeyword: boolean };
   hardExclusion: { excluded: boolean; reasons: string[] };
+  tenure: ListingTenure;
 }
 
 /** Output document written to state/enriched-<date>.json and stdout. */

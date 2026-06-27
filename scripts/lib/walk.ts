@@ -11,6 +11,7 @@
 import type { OfflineEnriched } from './enrich-offline.ts';
 import type { NearestExit } from './mrt.ts';
 import type { EnrichedListing, Reliability, WalkInfo } from './types.ts';
+import { computeTenure } from './tenure.ts';
 
 /** ≤10-min walk threshold (~800m at 80 m/min); transparent and tunable. */
 export const WALK_THRESHOLD_M = 800;
@@ -81,6 +82,7 @@ function listingBase(o: OfflineEnriched) {
 export function finalizeWalk(
   o: OfflineEnriched,
   routed: (number | null)[] | null,
+  targetDate = '',
 ): EnrichedListing {
   const coordPresent = o.candidates.length > 0;
   const reliability: Reliability = {
@@ -107,7 +109,6 @@ export function finalizeWalk(
   }
 
   const reasons: string[] = [];
-  if (o.hasAuction) reasons.push('auction/special-disposition keyword in title');
   if (withinWalk === false && walk) {
     reasons.push(`>10-min walk to MRT (routed ${walk.distanceM}m to ${walk.stationZh})`);
   }
@@ -117,6 +118,8 @@ export function finalizeWalk(
     walk,
     withinWalk,
     reliability,
+    signals: { auctionKeyword: o.hasAuction },
     hardExclusion: { excluded: reasons.length > 0, reasons },
+    tenure: computeTenure(o.listingHistory, targetDate),
   };
 }

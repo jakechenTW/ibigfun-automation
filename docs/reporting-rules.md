@@ -18,8 +18,6 @@ Apply these exclusions before ranking recommended, near-threshold, and excluded 
 - Treat straight-line distances in the 700-900 meter range as boundary cases requiring manual walking-distance confirmation. Straight-line distance is not walking distance.
 - Construction or planned stations may be noted as future-upside context when reliable coordinates are available, but they do not replace active MRT exits for the formal 800 meter hard-exclusion rule.
 - Retired or canceled stations must not be used for either the hard-exclusion rule or future-upside notes.
-- Exclude auction and special-disposition listings, including foreclosure, court auction, bank auction, tender, bidding, and similar cases.
-- Treat title, source labels, listing notes, tags, and visible listing metadata as evidence for these exclusions.
 - Keep hard-exclusion counts and main reasons visible in the report summary when any are found.
 
 ## Calculations
@@ -108,6 +106,66 @@ Guardrails: triage verdicts are agent judgment, clearly labelled and overridable
 default to `unknown` when genuinely ambiguous. Never present a triage verdict as
 the deterministic `withinWalk`, and never silently exclude on unreliable data.
 
+## Quality / Suspicious-Listing Judgment (Agent)
+
+Auction/foreclosure detection is no longer a hardcoded keyword hard-exclusion.
+The keyword check now only sets the advisory `signals.auctionKeyword` flag on
+each enriched listing; the agent makes the final call as part of a broader
+"low-info / suspicious listing" judgment. Foreclosure is one case under this.
+
+### Suspicious signals (weigh together; none convicts on its own)
+
+- `signals.auctionKeyword === true` — title contains 法拍 / 銀拍 / 金拍 /
+  法院拍賣 / 拍賣 / 投標 / 應買.
+- No interior photos, or only exterior / map / floor-plan images.
+- Sparse information: very short description, many key fields blank.
+- Source-site labels, tags, or notes showing special-disposition wording.
+
+### When to open the detail page
+
+Open the listing `url` to inspect photo count and information density when:
+
+- any suspicious signal above is hit, OR
+- the listing is otherwise strong enough to reach recommended / near-threshold
+  and is worth verifying.
+
+Detail URLs usually point to the originating source (591 / 樂居 / rakuya),
+not `ibigfun.com`, so opening them does not affect the iBigFun login session.
+Do NOT open every listing — only suspicious or borderline-but-promising ones,
+to control cost.
+
+### Verdict and output
+
+Assign one of: `clean` / `suspicious` / `likely-auction`. For each, record the
+reason, your confidence, and whether you actually opened the detail page.
+
+- `likely-auction`: evidence points specifically at auction/foreclosure —
+  `signals.auctionKeyword` plus corroboration (e.g. no interior photos,
+  special-disposition wording on the detail page).
+- `suspicious`: low-info or off quality without specific auction evidence
+  (sparse description, missing interior photos, but no auction markers).
+- `clean`: no concern, or a keyword hit verified as non-auction.
+
+Both `suspicious` and `likely-auction` are down-ranked the same way (below); the
+distinction is only for the reason you record.
+
+Rules:
+
+- proxy signals (e.g. "no interior photos") must never be the sole reason to
+  remove a listing; auction-like listings are flagged, not auto-removed.
+- If the detail page cannot be opened or the source blocks scraping, record
+  "未能查證", keep the soft flag at low confidence, and do not escalate to
+  removal.
+- A keyword hit the agent verifies as non-auction (e.g. title says "非法拍" or
+  "法拍屋旁") may be downgraded to `clean` with a recorded reason.
+
+### Effect on ranking
+
+`suspicious` / `likely-auction` listings are down-ranked, not removed: even if
+the numbers qualify, do not place them in 推薦 — route them to 接近門檻 or the
+可疑/待查 section with the reason noted. This mirrors the existing rule that a
+listing lacking solid data cannot be labeled recommended.
+
 ## Notification Format
 
 - Send with the canonical `ai-notify` command in `AGENTS.md`, which also defines the `ok`/`warn`/`fail` status selection.
@@ -115,6 +173,26 @@ the deterministic `withinWalk`, and never silently exclude on unreliable data.
 - Do not use tables.
 - Put the quick summary before listing details.
 - Add a Markdown link to every listing title.
+- Each listing section header is `#### {rank}. [title](url)`; do not emit a `- 狀態：…` line — the section heading already names the bucket.
+- Append inline metrics to the header: recommended `｜ 低於行情 {discount_percent}%・覆蓋率 {rent_coverage}`; near-threshold `｜ 覆蓋率 {rent_coverage}・差在 {near_threshold_reason}`; suspicious `｜ \`{suspicious_label}\`` where suspicious_label is `clean` / `suspicious` / `likely-auction`.
+- Render `detail_page_checked` as a short phrase (e.g. 已點詳情頁 / 未查證), not a raw boolean.
+- Do not emit a 刊登日 line in recommended or near-threshold listings.
+- Recommended and near-threshold use the full compact layout (walk line, one basics line `總價／坪數／單價・樓層・屋齡・地址`, one financial line `行情・月租・房貸・現金流`, then reason/risk or manual-check). Hard-excluded, suspicious, and excluded use the shorter layout shown in `templates/daily-notify-template.md`.
+- Emit the 🚶 walk line in 前置排除, 推薦, and 接近門檻 only — never in 可疑/待查 or 目標日排除. Compose it from the listing's enriched `walk` and `coordinate`:
+  - Reliable (`walk` present): `🚶 {stationZh} {exitId} 號出口・{minutes} 分鐘（[地圖]({map_url})）`. If `exitId` is missing, drop the 出口 part: `🚶 {stationZh}・{minutes} 分鐘（[地圖]({map_url})）`.
+  - Unreliable but `coordinate` present (`walk` is null — e.g. coordinate inconsistent, route ratio implausible): show the triage result and mark it pending: `🚶 約{station}・步行待確認（[地圖]({map_url})）`, or `🚶 步行待人工確認（[地圖]({map_url})）` when no station can be inferred.
+  - No `coordinate`: `🚶 無位置資訊` (no map link).
+- Map link `{map_url}` is exactly `https://www.google.com/maps?q=<lat>,<lng>` using the listing `coordinate`, with link text `地圖`.
+- Emit the 🕒 tenure line (`{{tenure_line}}`) in every listing block (前置排除, 推薦, 接近門檻, 可疑/待查, 目標日排除). Compose it from the listing's enriched `tenure`:
+  - `recordCount === 0` (no 刊登紀錄 parsed): `🕒 刊登史不明`.
+  - `daysOnMarket` is `0` (earliest record is the target date — genuinely fresh): `🕒 本日新上架`.
+  - Otherwise: `🕒 已刊登 {daysOnMarket} 天・{price_part}（最早 {firstListedDate}・{sourceCount} 來源）`, where `{price_part}` is:
+    - `priceTrend === 'flat'` → `未降價`
+    - `priceTrend === 'dropped'` → `曾降價 {firstPrice}→{latestPrice}萬`
+    - `priceTrend === 'raised'` → `曾調漲 {firstPrice}→{latestPrice}萬`
+    - `priceTrend === 'unknown'` → drop the `・{price_part}` segment entirely: `🕒 已刊登 {daysOnMarket} 天（最早 {firstListedDate}・{sourceCount} 來源）`
+  - This line is information-only: it never changes the recommend / exclusion / suspicious decision.
+- When any field (月租, 現金流, 行情, 屋齡, 地址 等) is null, render it as `—` rather than dropping the line.
 - Render each listed property with a 1-based `rank` value inside its section.
 - If the target-date new-listing count is 10 or lower, list all excluded properties.
 - If the target-date new-listing count is above 10, list only the 5 excluded properties closest to the threshold.

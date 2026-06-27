@@ -28,12 +28,20 @@ IBIGFUN_PASSWORD
 
 Do not print either value in logs, notifications, reports, screenshots, or debugging output.
 
-## Browser Login
+## Session Storage
 
-The browser login flow (when, where, and how to enter these credentials during
-a fetch) lives in `docs/fetching.md`. This file owns only how the secrets are
-stored and the rule for stopping on blocked login.
+Login is a form POST to `https://www.ibigfun.com/user/login` (no browser, no
+CSRF token). On success the server sets an `ibigfun_session` cookie. The cookie
+jar is persisted locally to `.cookies.json` (git-ignored) and reused on
+subsequent runs, replacing the old `storageState.json`.
+
+The full login flow and API endpoints are documented in `docs/fetching.md`. This
+file owns only how the secrets are stored and the rule for stopping on blocked
+login.
 
 ## Operational Rule
 
-If iBigFun blocks login with CAPTCHA, 2FA, account-risk checks, missing credentials, or repeated login failure, stop and ask for manual confirmation. Do not bypass those controls.
+If iBigFun blocks login with CAPTCHA, 2FA, account-risk checks, missing
+credentials, a login response with no `ibigfun_session` cookie, or repeated
+login failure, the run raises `BlockedError` and stops immediately. Do not
+bypass those controls — always stop and ask for manual confirmation.
