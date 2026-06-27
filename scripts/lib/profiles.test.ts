@@ -23,7 +23,7 @@ test('loadProfile validates and returns investment metadata', () => {
   assert.equal(p.fetchFilters.enabled, false);
 });
 
-test('loadProfile keeps owner-occupied coded filters readable and verified', () => {
+test('loadProfile resolves owner-occupied town names; house_type still unverified', () => {
   const p = loadProfile('owner-occupied');
   assert.equal(p.id, 'owner-occupied');
   assert.equal(p.requiresFilterVerification, true);

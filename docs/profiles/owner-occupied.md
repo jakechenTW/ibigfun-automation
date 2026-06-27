@@ -10,11 +10,11 @@ The first profile version is based on this saved iBigFun URL:
 
 Fetch filters are enabled. Town id→name mappings were verified from a live
 fetch on 2026-06-27: 1→中正區, 4→中山區, 6→大安區, 8→信義區, 9→士林區.
-`house_type=17` could not be confirmed — the normalized API output exposes room
-layout (`typeLayout`), not a building-type category; it remains `待驗證` in
-`profiles/owner-occupied.json`. `main_ping >= 30` is applied server-side and
-is not re-verifiable from API results (API returns `total_ping`, not 主建物
-ping).
+`house_type=17` is applied server-side and is not re-verifiable from API
+results (API returns `typeLayout` room layout, not a building-type category);
+its name stays `待驗證` in `profiles/owner-occupied.json`. `main_ping >= 30`
+is likewise applied server-side and is not re-verifiable (API returns
+`total_ping`, not 主建物 ping). Both are trusted server-side-only filters.
 
 ## Hard Criteria
 

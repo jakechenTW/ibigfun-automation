@@ -95,10 +95,14 @@ profile's filters instead: `city`, `town[]`, `house_type[]`,
 `house_age_segment[max_val]`, and `parking` (the `total_floor` cap and the
 investment `floor 2–4` window are omitted). The `method`, `on_market`, `expand`,
 `exclude_land`, and `source_web[]`/`source[]` allow-list are shared by both shapes.
-`owner-occupied` enabled and verified its filters on 2026-06-27.
+`owner-occupied` enabled its filters on 2026-06-27; its town, floor, age,
+parking, and price filters were verified against a live fetch (`house_type` and
+`main_ping` are server-side filters, trusted but not re-verifiable — see the
+note below).
 
-`main_ping_number` is a server-side filter only: `/api/search/list` returns
-`total_ping`, not 主建物 ping, so a `main_ping >= 30` constraint cannot be
+Both `main_ping_number` and `house_type` are server-side filters only:
+`/api/search/list` returns `total_ping` (not 主建物 ping) and `typeLayout`
+(room layout, not a building-type category), so neither constraint can be
 re-verified from the response.
 
 Response JSON shape: `{ data: ListItem[], total_records: number, per_page: number, current_page: number }`.
