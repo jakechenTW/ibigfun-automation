@@ -11,7 +11,7 @@
 - 排除：{{excluded_count}} 筆
 - 主要排除原因：{{main_exclusion_reasons}}
 - Filter 對照狀態：{{filter_verification_status}}
-- 自住條件：總價 <= 7000 萬、類型 house_type=17（名稱待驗證）、7 樓以上、主建物 >= 30 坪、屋齡 <= 25 年、平面車位
+- 自住條件：總價 <= 7000 萬、類型 電梯大樓（house_type=17）、7 樓以上、主建物 >= 30 坪、屋齡 <= 25 年、平面車位
 
 ### 符合條件
 

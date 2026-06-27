@@ -96,14 +96,15 @@ profile's filters instead: `city`, `town[]`, `house_type[]`,
 investment `floor 2–4` window are omitted). The `method`, `on_market`, `expand`,
 `exclude_land`, and `source_web[]`/`source[]` allow-list are shared by both shapes.
 `owner-occupied` enabled its filters on 2026-06-27; its town, floor, age,
-parking, and price filters were verified against a live fetch (`house_type` and
-`main_ping` are server-side filters, trusted but not re-verifiable — see the
-note below).
+parking, and price filters were verified against a live fetch, and its coded
+ids were resolved (town 1/4/6/8/9→中正/中山/大安/信義/士林,
+`house_type=17`→電梯大樓 from the filter UI). See
+`data/ibigfun-filter-mappings.md` for the id→name reference.
 
-Both `main_ping_number` and `house_type` are server-side filters only:
+`main_ping_number` and `house_type` are server-side filters only:
 `/api/search/list` returns `total_ping` (not 主建物 ping) and `typeLayout`
 (room layout, not a building-type category), so neither constraint can be
-re-verified from the response.
+re-verified per-result from the response — they are trusted server-side.
 
 Response JSON shape: `{ data: ListItem[], total_records: number, per_page: number, current_page: number }`.
 

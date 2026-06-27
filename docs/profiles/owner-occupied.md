@@ -8,20 +8,21 @@ The first profile version is based on this saved iBigFun URL:
 
 `https://www.ibigfun.com/lists/latest?page=1&expand=0&method=all_case&on_market=1&city=1&town=1%2C4%2C6%2C8%2C9&price_segment=%2C7000&house_type=17&floor_segment=7%2C&main_ping_number=30%2C&house_age_segment=%2C25&parking=%E5%B9%B3%E9%9D%A2`
 
-Fetch filters are enabled. Town id→name mappings were verified from a live
-fetch on 2026-06-27: 1→中正區, 4→中山區, 6→大安區, 8→信義區, 9→士林區.
-`house_type=17` is applied server-side and is not re-verifiable from API
-results (API returns `typeLayout` room layout, not a building-type category);
-its name stays `待驗證` in `profiles/owner-occupied.json`. `main_ping >= 30`
-is likewise applied server-side and is not re-verifiable (API returns
-`total_ping`, not 主建物 ping). Both are trusted server-side-only filters.
+Fetch filters are enabled. All coded mappings were verified on 2026-06-27:
+town id→name from a live fetch (1→中正區, 4→中山區, 6→大安區, 8→信義區,
+9→士林區) and `house_type=17`→`電梯大樓` from the iBigFun filter UI
+(`house_type_caption_17`). `house_type` and `main_ping >= 30` are applied
+server-side and cannot be re-verified per-result from the API response
+(it returns `typeLayout` room layout, not a building-type category, and
+`total_ping`, not 主建物 ping) — they are trusted server-side-only filters.
+See `data/ibigfun-filter-mappings.md` for the full id→name reference.
 
 ## Hard Criteria
 
 - City: 台北市.
 - District ids: `1`, `4`, `6`, `8`, `9` (中正區, 中山區, 大安區, 信義區, 士林區; verified 2026-06-27).
 - Total price: <= 7000 萬.
-- House type: `house_type=17`; name pending verification.
+- House type: `house_type=17` (電梯大樓; verified 2026-06-27).
 - Floor: >= 7.
 - Main ping: >= 30.
 - Age: <= 25 years.

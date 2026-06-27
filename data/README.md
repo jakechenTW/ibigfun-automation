@@ -2,6 +2,12 @@
 
 Static reference data used by the iBigFun monitoring workflow lives here.
 
+## `ibigfun-filter-mappings.md`
+
+Coded id → name key for iBigFun's search filters (`city`, `house_type`, `town`,
+`parking`) and the `/api/search/list` request-body encoding. Captured from the
+filter UI on 2026-06-27. Profiles store the ids; this file is the human key.
+
 ## `taipei_mrt_exits.csv`
 
 Taipei MRT exit coordinates for distance checks against iBigFun listing coordinates.
