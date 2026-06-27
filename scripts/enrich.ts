@@ -26,6 +26,7 @@ import { resolveRange, rangeFlags, type RunRange } from './lib/range.ts';
 import { consoleLogger } from './lib/journal.ts';
 import { enrichStep } from './lib/steps.ts';
 import { listingsPath } from './lib/runpaths.ts';
+import { resolveProfileFromArgs } from './lib/profiles.ts';
 
 function fail(message: string): never {
   console.error(`BAD INPUT: ${message}`);
@@ -33,22 +34,29 @@ function fail(message: string): never {
 }
 
 async function main(): Promise<void> {
+  const argv = process.argv.slice(2);
+  const profile = resolveProfileFromArgs(argv);
   let range: RunRange;
   try {
-    range = resolveRange(process.argv.slice(2), new Date());
+    range = resolveRange(argv, new Date());
   } catch (e) {
     fail((e as Error).message);
   }
-  const inPath = listingsPath(range.label);
+  const inPath = listingsPath(profile.id, range.label);
   if (!fs.existsSync(inPath)) {
-    fail(`${inPath} not found. Run "npm run fetch -- ${rangeFlags(range)}" first.`);
+    fail(`${inPath} not found. Run "npm run fetch -- --profile ${profile.id} ${rangeFlags(range)}" first.`);
   }
-  const { artifacts } = await enrichStep(range, consoleLogger('enrich'));
+  const { artifacts } = await enrichStep({ profile, range }, consoleLogger('enrich'));
   console.error(`Wrote enriched listings to ${artifacts![0]}`);
   process.stdout.write(fs.readFileSync(artifacts![0], 'utf8'));
 }
 
 main().catch((err) => {
+  const msg = (err as Error).message;
+  if (msg.includes('--profile') || msg.includes('unknown profile') || msg.includes('invalid profile')) {
+    console.error(`BAD INPUT: ${msg}`);
+    process.exit(2);
+  }
   console.error(err);
   process.exit(1);
 });

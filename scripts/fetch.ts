@@ -17,6 +17,7 @@ import { resolveRange, type RunRange } from './lib/range.ts';
 import { BlockedError } from './lib/errors.ts';
 import { consoleLogger } from './lib/journal.ts';
 import { fetchStep } from './lib/steps.ts';
+import { resolveProfileFromArgs } from './lib/profiles.ts';
 
 /** Resolve --date / --from/--to; map a bad range to a BlockedError (exit 2). */
 function resolveRangeOrThrow(argv: string[]): RunRange {
@@ -28,8 +29,10 @@ function resolveRangeOrThrow(argv: string[]): RunRange {
 }
 
 async function main(): Promise<void> {
-  const range = resolveRangeOrThrow(process.argv.slice(2));
-  const { artifacts } = await fetchStep(range, consoleLogger('fetch'));
+  const argv = process.argv.slice(2);
+  const profile = resolveProfileFromArgs(argv);
+  const range = resolveRangeOrThrow(argv);
+  const { artifacts } = await fetchStep({ profile, range }, consoleLogger('fetch'));
   console.error(`Wrote listings to ${artifacts![0]}`);
   process.stdout.write(fs.readFileSync(artifacts![0], 'utf8'));
 }
@@ -37,6 +40,11 @@ async function main(): Promise<void> {
 main().catch((err) => {
   if (err instanceof BlockedError) {
     console.error(`BLOCKED: ${err.message}`);
+    process.exit(2);
+  }
+  const msg = (err as Error).message;
+  if (msg.includes('--profile') || msg.includes('unknown profile') || msg.includes('invalid profile')) {
+    console.error(`BAD INPUT: ${msg}`);
     process.exit(2);
   }
   console.error(err);

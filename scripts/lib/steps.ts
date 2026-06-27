@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import { collectListings } from './extract.ts';
 import { loadEnv } from './http.ts';
 import type { Logger } from './journal.ts';
-import type { RunRange } from './range.ts';
+import type { RunContext } from './profiles.ts';
 import type { StepOutput } from './run.ts';
 import { loadExits } from './mrt.ts';
 import { enrichOffline } from './enrich-offline.ts';
@@ -17,8 +17,9 @@ const ORS_DELAY_MS = 1600;        // ORS free tier ~40 req/min
 const ORS_RETRY_WAIT_MS = 65_000; // wait out the per-minute window once
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export async function enrichStep(range: RunRange, logger: Logger): Promise<StepOutput> {
-  const inPath = listingsPath(range.label);
+export async function enrichStep(ctx: RunContext, logger: Logger): Promise<StepOutput> {
+  const { profile, range } = ctx;
+  const inPath = listingsPath(profile.id, range.label);
   if (!fs.existsSync(inPath)) {
     throw new Error(`${inPath} not found. Run the fetch step for ${range.label} first.`);
   }
@@ -82,9 +83,9 @@ export async function enrichStep(range: RunRange, logger: Logger): Promise<StepO
     withinWalkCount, manualReviewCount, hardExcludedCount, listings: enriched,
   };
 
-  fs.mkdirSync(runDir(range.label), { recursive: true });
+  fs.mkdirSync(runDir(profile.id, range.label), { recursive: true });
   saveCache(cache);
-  const outPath = enrichedPath(range.label);
+  const outPath = enrichedPath(profile.id, range.label);
   fs.writeFileSync(outPath, JSON.stringify(result, null, 2));
   logger.event('info', 'enrich.summary',
     `enriched ${enriched.length}: ${withinWalkCount} within-walk, ${manualReviewCount} manual-review, ` +
@@ -98,7 +99,8 @@ export async function enrichStep(range: RunRange, logger: Logger): Promise<StepO
   };
 }
 
-export async function fetchStep(range: RunRange, logger: Logger): Promise<StepOutput> {
+export async function fetchStep(ctx: RunContext, logger: Logger): Promise<StepOutput> {
+  const { profile, range } = ctx;
   loadEnv();
   const { listings, dropped, duplicates } = await collectListings(range, undefined, logger);
   const result: FetchResult = {
@@ -108,8 +110,8 @@ export async function fetchStep(range: RunRange, logger: Logger): Promise<StepOu
     count: listings.length,
     listings,
   };
-  fs.mkdirSync(runDir(range.label), { recursive: true });
-  const outPath = listingsPath(range.label);
+  fs.mkdirSync(runDir(profile.id, range.label), { recursive: true });
+  const outPath = listingsPath(profile.id, range.label);
   fs.writeFileSync(outPath, JSON.stringify(result, null, 2));
   return { summary: { listings: listings.length, historyDropped: dropped, duplicates }, artifacts: [outPath] };
 }
