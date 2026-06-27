@@ -35,11 +35,21 @@ function getJar(): Jar {
 export function looksLikeSignin(res: { status: number; finalUrl: string; contentType: string }): boolean {
   if (res.finalUrl.includes(SIGNIN_PATH_FRAGMENT)) return true;
   // A data endpoint returning HTML means we were bounced to a login page.
-  if (!res.finalUrl.includes(SIGNIN_PATH_FRAGMENT) && res.contentType.includes('text/html')) {
+  if (res.contentType.includes('text/html')) {
     const isDataUrl = res.finalUrl.includes('/api/') || res.finalUrl.includes('o2o-same');
     if (isDataUrl) return true;
   }
   return false;
+}
+
+/** Throw a loud, typed error when an API response is not a 200/"ok" envelope. */
+export function assertApiOk(label: string, httpStatus: number, apiStatus: string | undefined): void {
+  if (httpStatus !== 200) {
+    throw new Error(`${label} returned HTTP ${httpStatus}`);
+  }
+  if (apiStatus !== undefined && apiStatus !== 'ok') {
+    throw new Error(`${label} returned status "${apiStatus}"`);
+  }
 }
 
 async function rawGet(url: string): Promise<{ status: number; finalUrl: string; contentType: string; text: string; setCookies: string[] }> {
@@ -129,7 +139,9 @@ async function fetchPage(date: string, page: number): Promise<SearchListResponse
     const r = await rawPostForm(SEARCH_LIST_URL, buildSearchBody(date, page), 'https://www.ibigfun.com/lists/latest');
     applySetCookies(getJar(), r.setCookies);
     if (looksLikeSignin(r)) return { kicked: true };
-    return { kicked: false, value: JSON.parse(r.text) as SearchListResponse };
+    const parsed = JSON.parse(r.text) as SearchListResponse;
+    assertApiOk('/api/search/list', r.status, parsed.status);
+    return { kicked: false, value: parsed };
   });
 }
 
@@ -139,7 +151,9 @@ async function fetchHistory(ids: number[]): Promise<O2oResponse['data']> {
     const r = await rawGet(`${O2O_SAME_URL}?ids=${ids.join('%2C')}`);
     applySetCookies(getJar(), r.setCookies);
     if (looksLikeSignin(r)) return { kicked: true };
-    return { kicked: false, value: (JSON.parse(r.text) as O2oResponse).data ?? {} };
+    const parsed = JSON.parse(r.text) as O2oResponse;
+    assertApiOk('o2o-same', r.status, parsed.status);
+    return { kicked: false, value: parsed.data ?? {} };
   });
 }
 

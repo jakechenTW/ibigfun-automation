@@ -23,6 +23,8 @@ export async function collectListings(date: string, deps: CollectDeps = defaultD
   const pages = Math.min(pageCount(first.total_records, first.per_page), MAX_PAGES);
   const all: Listing[] = [];
 
+  // Always probe page 1 (even when total_records is 0 / pageCount is 0); the
+  // empty-data check below ends paging.
   for (let p = 1; p <= Math.max(pages, 1); p++) {
     const res = p === 1 ? first : await deps.fetchPage(date, p);
     if (!res.data || res.data.length === 0) break;
