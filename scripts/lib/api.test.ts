@@ -1,7 +1,7 @@
 // scripts/lib/api.test.ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSearchBody, pageCount, SEARCH_LIST_URL, historyUrl, OFF_MARKET_URL, buildOffMarketBody } from './api.ts';
+import { buildSearchBody, pageCount, SEARCH_LIST_URL, historyUrl, OFF_MARKET_URL, buildOffMarketBody, type SearchFilters } from './api.ts';
 
 test('buildSearchBody maps a single day to equal add_date / add_date_max', () => {
   const b = buildSearchBody('2026-06-26', '2026-06-26', 1);
@@ -54,4 +54,59 @@ test('OFF_MARKET_URL points at the off-market endpoint', () => {
 
 test('buildOffMarketBody encodes the uuid as id_encode', () => {
   assert.equal(buildOffMarketBody('A_1FF424'), 'id_encode=A_1FF424');
+});
+
+const ownerFilters: SearchFilters = {
+  city: '1',
+  town: ['1', '4', '6', '8', '9'],
+  houseType: ['17'],
+  priceMaxWan: 7000,
+  floorMin: 7,
+  mainPingMin: 30,
+  ageMax: 25,
+  parking: '平面',
+};
+
+test('buildSearchBody with no filters is unchanged (captured investment shape)', () => {
+  const b = buildSearchBody('2026-06-26', '2026-06-26', 1);
+  assert.match(b, /price_segment%5Bmax_val%5D=2500/);
+  assert.match(b, /floor_segment%5Bmin_val%5D=2/);
+  assert.match(b, /floor_segment%5Bmax_val%5D=4/);
+  assert.match(b, /total_floor%5Bmax_val%5D=5/);
+  assert.doesNotMatch(b, /town%5B%5D=/);
+  assert.doesNotMatch(b, /parking=/);
+});
+
+test('buildSearchBody with owner filters emits floor min only, no total_floor', () => {
+  const b = buildSearchBody('2026-06-26', '2026-06-26', 1, ownerFilters);
+  assert.match(b, /floor_segment%5Bmin_val%5D=7/);
+  assert.doesNotMatch(b, /floor_segment%5Bmax_val%5D=\d/);
+  assert.doesNotMatch(b, /total_floor/);
+});
+
+test('buildSearchBody with owner filters emits town[] and house_type[]', () => {
+  const b = buildSearchBody('2026-06-26', '2026-06-26', 1, ownerFilters);
+  assert.match(b, /town%5B%5D=1/);
+  assert.match(b, /town%5B%5D=4/);
+  assert.match(b, /town%5B%5D=9/);
+  assert.match(b, /house_type%5B%5D=17/);
+});
+
+test('buildSearchBody with owner filters emits price/ping/age segments and parking', () => {
+  const b = buildSearchBody('2026-06-26', '2026-06-26', 1, ownerFilters);
+  assert.match(b, /price_segment%5Bmax_val%5D=7000/);
+  assert.match(b, /main_ping_number%5Bmin_val%5D=30/);
+  assert.match(b, /house_age_segment%5Bmax_val%5D=25/);
+  assert.match(b, new RegExp('parking=' + encodeURIComponent('平面')));
+});
+
+test('buildSearchBody with owner filters keeps shared source allow-list + exclude_land + dates', () => {
+  const b = buildSearchBody('2026-06-20', '2026-06-25', 2, ownerFilters);
+  assert.match(b, /(^|&)page=2(&|$)/);
+  assert.match(b, /method=all_case/);
+  assert.match(b, /source_web%5B%5D=370/);
+  assert.match(b, /source%5B%5D=372/);
+  assert.match(b, /(^|&)exclude_land=1(&|$)/);
+  assert.match(b, /(^|&)add_date=2026-06-20(&|$)/);
+  assert.match(b, /(^|&)add_date_max=2026-06-25(&|$)/);
 });
