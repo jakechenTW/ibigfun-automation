@@ -2,16 +2,17 @@
  * Thin pipeline orchestrator for the daily iBigFun monitor.
  *
  * Steps: fetch (script) -> enrich (script) -> report (agent) -> notify (script).
- * One run per date range, recorded under state/runs/<label>/ (manifest.json +
- * journal.jsonl). Resume = run again: ok steps are skipped, execution picks up
- * at the first non-ok step and stops at the agent `report` step.
+ * One run per profile/date range, recorded under
+ * state/runs/<profile>/<label>/ (manifest.json + journal.jsonl). Resume = run
+ * again: ok steps are skipped, execution picks up at the first non-ok step and
+ * stops at the agent `report` step.
  *
  * Commands:
- *   pipeline run    [--date <d> | --from <d> --to <d>] [--only <step>] [--force <step>] [--dry-run]
- *   pipeline status [--date <d> | --from <d> --to <d>]
+ *   pipeline run    --profile <id> [--date <d> | --from <d> --to <d>] [--only <step>] [--force <step>] [--dry-run]
+ *   pipeline status --profile <id> [--date <d> | --from <d> --to <d>]
  *   pipeline mark <step> --status <ok|failed> [--artifact <p>]
- *                 [--status-notify <ok|warn|fail>] [--title <s>] [--tool <codex|claude>]
- *   pipeline fail   [--date <d> | --from <d> --to <d>] --reason "<short>" [--tool <codex|claude>]
+ *                 --profile <id> [--status-notify <ok|warn|fail>] [--title <s>] [--tool <codex|claude>]
+ *   pipeline fail   --profile <id> [--date <d> | --from <d> --to <d>] --reason "<short>" [--tool <codex|claude>]
  *                   [--title <s>] [--dry-run]
  *
  * Default (no date flags): yesterday in Taipei time (single-day run).
@@ -29,6 +30,7 @@ import { composeNotifyCommand, runNotify, renderFailDetails } from './lib/notify
 import { fetchStep, enrichStep } from './lib/steps.ts';
 import { resolveRange, rangeFlags, type RunRange } from './lib/range.ts';
 import { runDir, reportPath } from './lib/runpaths.ts';
+import { resolveProfileFromArgs, profileFlags, type Profile } from './lib/profiles.ts';
 
 const now = () => new Date().toISOString();
 
@@ -45,6 +47,13 @@ function flag(argv: string[], name: string): string | undefined {
 function has(argv: string[], name: string): boolean {
   return argv.includes(name);
 }
+function resolveProfileOrExit(argv: string[]): Profile {
+  try {
+    return resolveProfileFromArgs(argv);
+  } catch (e) {
+    fail((e as Error).message);
+  }
+}
 function resolveRangeOrExit(argv: string[]): RunRange {
   try {
     return resolveRange(argv, new Date());
@@ -59,9 +68,10 @@ function asStep(v: string | undefined, label: string): StepName | undefined {
 }
 
 async function cmdRun(argv: string[]): Promise<void> {
+  const profile = resolveProfileOrExit(argv);
   const range = resolveRangeOrExit(argv);
   const dryRun = has(argv, '--dry-run');
-  const m = loadOrCreateManifest(range.from, range.to, now());
+  const m = loadOrCreateManifest(profile.id, range.from, range.to, now());
   writeManifest(m, now());
   const plan = planNextSteps(m, {
     only: asStep(flag(argv, '--only'), '--only'),
@@ -76,20 +86,23 @@ async function cmdRun(argv: string[]): Promise<void> {
     if (item.step === 'report') {
       console.error(
         `\n■ report is an agent step — it cannot be auto-run.\n` +
-        `  Do the agent work (triage, estimate, evaluate, write ${reportPath(range.label)}), then run:\n` +
-        `    npm run pipeline -- mark report ${rangeFlags(range)} --status ok --artifact ${reportPath(range.label)} \\\n` +
+        `  Profile: ${profile.id} (${profile.displayName})\n` +
+        `  Read: AGENTS.md, docs/reporting-rules.md, ${profile.ruleDocPath}\n` +
+        `  Template: ${profile.templatePath}\n` +
+        `  Do the agent work, write ${reportPath(profile.id, range.label)}, then run:\n` +
+        `    npm run pipeline -- mark report ${profileFlags(profile)} ${rangeFlags(range)} --status ok --artifact ${reportPath(profile.id, range.label)} \\\n` +
         `      --status-notify <ok|warn|fail> --title "<short>" --tool <codex|claude>\n` +
-        `  Then re-run: npm run pipeline -- run ${rangeFlags(range)}\n`);
+        `  Then re-run: npm run pipeline -- run ${profileFlags(profile)} ${rangeFlags(range)}\n`);
       process.exit(0);
     }
     if (item.step === 'notify') {
       if (!m.notify) fail('notify requires report to be marked first (--status-notify + --title set m.notify).');
       if (dryRun) {
-        console.error(`[dry-run] would send:\n  ${composeNotifyCommand(m.notify, reportPath(range.label))}`);
+        console.error(`[dry-run] would send:\n  ${composeNotifyCommand(m.notify, profile.notifyTask, reportPath(profile.id, range.label))}`);
         continue;
       }
       const status = await runStep(m, 'notify', async (logger) => {
-        const { exitCode, stderr } = runNotify(m.notify as NotifyParams, reportPath(range.label));
+        const { exitCode, stderr } = runNotify(m.notify as NotifyParams, profile.notifyTask, reportPath(profile.id, range.label));
         logger.event(exitCode === 0 ? 'info' : 'error', 'notify.sent',
           `ai-notify exited ${exitCode}`, { exitCode, stderr });
         if (exitCode !== 0) throw new Error(`ai-notify exited ${exitCode}: ${stderr.trim()}`);
@@ -101,21 +114,22 @@ async function cmdRun(argv: string[]): Promise<void> {
     }
     // script steps: fetch / enrich
     const fn = item.step === 'fetch' ? fetchStep : enrichStep;
-    const status = await runStep(m, item.step, (logger) => fn(range, logger), now);
+    const status = await runStep(m, item.step, (logger) => fn({ profile, range }, logger), now);
     if (status === 'failed') {
-      console.error(`✗ ${item.step} failed — run "npm run pipeline -- status ${rangeFlags(range)}" for the error + journal.`);
+      console.error(`✗ ${item.step} failed — run "npm run pipeline -- status ${profileFlags(profile)} ${rangeFlags(range)}" for the error + journal.`);
       process.exit(1);
     }
     console.error(`✓ ${item.step} ok`);
   }
-  console.error(`\nRun ${range.label} reached the end of the plan.`);
+  console.error(`\nRun ${profile.id}/${range.label} reached the end of the plan.`);
 }
 
 function cmdStatus(argv: string[]): void {
+  const profile = resolveProfileOrExit(argv);
   const range = resolveRangeOrExit(argv);
-  const m = readManifest(range.label);
-  if (!m) { console.error(`No run found for ${range.label} (state/runs/${range.label}/ absent).`); process.exit(0); }
-  console.error(`Run ${range.label}  (updated ${m.updatedAt})`);
+  const m = readManifest(profile.id, range.label);
+  if (!m) { console.error(`No run found for ${profile.id}/${range.label} (state/runs/${profile.id}/${range.label}/ absent).`); process.exit(0); }
+  console.error(`Run ${profile.id}/${range.label}  (updated ${m.updatedAt})`);
   for (const name of STEP_ORDER) {
     const s = m.steps[name];
     const dur = s.durationMs != null ? `${(s.durationMs / 1000).toFixed(1)}s` : '–';
@@ -125,7 +139,7 @@ function cmdStatus(argv: string[]): void {
   }
   if (m.failure) console.error(`  FAILED: ${m.failure.reason} (at ${m.failure.where})`);
   if (m.notify) console.error(`  notify params: ${m.notify.tool} / ${m.notify.status} / "${m.notify.title}"`);
-  const tail = readJournal(range.label).slice(-12);
+  const tail = readJournal(profile.id, range.label).slice(-12);
   if (tail.length) {
     console.error(`\n  journal (last ${tail.length}):`);
     for (const e of tail) console.error(`    ${e.ts} [${e.level}] ${e.step}:${e.event} ${e.msg}`);
@@ -135,8 +149,9 @@ function cmdStatus(argv: string[]): void {
 function cmdMark(argv: string[]): void {
   const step = asStep(argv[0], 'step');
   if (!step) fail('usage: pipeline mark <step> --status <ok|failed> [...]');
+  const profile = resolveProfileOrExit(argv);
   const range = resolveRangeOrExit(argv);
-  const m = readManifest(range.label) ?? loadOrCreateManifest(range.from, range.to, now());
+  const m = readManifest(profile.id, range.label) ?? loadOrCreateManifest(profile.id, range.from, range.to, now());
   const status = flag(argv, '--status');
   if (status !== 'ok' && status !== 'failed') fail('--status must be ok|failed.');
   const artifact = flag(argv, '--artifact');
@@ -158,12 +173,13 @@ function cmdMark(argv: string[]): void {
     artifacts: artifact ? [artifact] : m.steps[step].artifacts,
   });
   writeManifest(m, now());
-  journalLogger(range.label, step, now).event('info', 'step.mark', `marked ${step} ${status}`,
+  journalLogger(profile.id, range.label, step, now).event('info', 'step.mark', `marked ${step} ${status}`,
     { artifact, notify: step === 'report' ? m.notify : undefined });
-  console.error(`✓ marked ${step} ${status} for ${range.label}.`);
+  console.error(`✓ marked ${step} ${status} for ${profile.id}/${range.label}.`);
 }
 
 async function cmdFail(argv: string[]): Promise<void> {
+  const profile = resolveProfileOrExit(argv);
   const range = resolveRangeOrExit(argv);
   const reason = flag(argv, '--reason');
   if (!reason || reason.startsWith('--')) fail('fail requires --reason "<short>".');
@@ -172,26 +188,26 @@ async function cmdFail(argv: string[]): Promise<void> {
   const title = flag(argv, '--title') ?? '每日監測中斷';
   const dryRun = has(argv, '--dry-run');
 
-  const m = readManifest(range.label) ?? loadOrCreateManifest(range.from, range.to, now());
+  const m = readManifest(profile.id, range.label) ?? loadOrCreateManifest(profile.id, range.from, range.to, now());
   if (m.steps.notify.status === 'ok') {
     console.error('notify already sent for this run; not sending a fail notification.');
     process.exit(0);
   }
 
-  const tail = readJournal(range.label).slice(-20);
-  const detailsFile = path.join(runDir(range.label), 'fail-details.md');
-  fs.mkdirSync(runDir(range.label), { recursive: true });
-  fs.writeFileSync(detailsFile, renderFailDetails(range, reason, tail));
+  const tail = readJournal(profile.id, range.label).slice(-20);
+  const detailsFile = path.join(runDir(profile.id, range.label), 'fail-details.md');
+  fs.mkdirSync(runDir(profile.id, range.label), { recursive: true });
+  fs.writeFileSync(detailsFile, renderFailDetails(profile.id, range, reason, tail));
 
   const params: NotifyParams = { tool, status: 'fail', title };
   if (dryRun) {
-    console.error(`[dry-run] wrote ${detailsFile}; would send:\n  ${composeNotifyCommand(params, detailsFile)}`);
+    console.error(`[dry-run] wrote ${detailsFile}; would send:\n  ${composeNotifyCommand(params, profile.notifyTask, detailsFile)}`);
     process.exit(0);
   }
   m.failure = { reason, where: 'pipeline fail' };
-  journalLogger(range.label, 'notify', now).event('error', 'run.fail', `run failed: ${reason}`, { reason });
-  const { exitCode, stderr } = runNotify(params, detailsFile);
-  journalLogger(range.label, 'notify', now).event(exitCode === 0 ? 'info' : 'error', 'notify.sent',
+  journalLogger(profile.id, range.label, 'notify', now).event('error', 'run.fail', `run failed: ${reason}`, { reason });
+  const { exitCode, stderr } = runNotify(params, profile.notifyTask, detailsFile);
+  journalLogger(profile.id, range.label, 'notify', now).event(exitCode === 0 ? 'info' : 'error', 'notify.sent',
     `fail notification ai-notify exited ${exitCode}`, { exitCode, stderr });
   if (exitCode !== 0) {
     writeManifest(m, now());
@@ -200,7 +216,7 @@ async function cmdFail(argv: string[]): Promise<void> {
   }
   setStep(m, 'notify', { status: 'ok', endedAt: now() });
   writeManifest(m, now());
-  console.error(`✓ fail notification sent for ${range.label} (${reason}).`);
+  console.error(`✓ fail notification sent for ${profile.id}/${range.label} (${reason}).`);
 }
 
 async function main(): Promise<void> {
