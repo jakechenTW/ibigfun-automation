@@ -10,6 +10,21 @@ export const LOGIN_URL = 'https://www.ibigfun.com/user/login';
 export const SEARCH_LIST_URL = 'https://www.ibigfun.com/api/search/list';
 export const O2O_SAME_URL = 'https://api.ibigfun.com/on-market/o2o-same';
 
+/** On-market cross-source posting history for one listing (id in the path). */
+export function historyUrl(id: number): string {
+  return `https://api.ibigfun.com/on-market/${id}/history`;
+}
+
+/** Off-market (下架) posting history endpoint; body is id_encode=<uuid>. */
+export const OFF_MARKET_URL = 'https://www.ibigfun.com/api/query_off_market_by_id';
+
+/** Build the URL-encoded query_off_market_by_id POST body for a listing uuid. */
+export function buildOffMarketBody(uuid: string): string {
+  const p = new URLSearchParams();
+  p.set('id_encode', uuid);
+  return p.toString();
+}
+
 /** One listing as returned by /api/search/list (fields we consume). */
 export interface ListItem {
   id: number;
@@ -59,6 +74,38 @@ export type O2oForId = Record<string, O2oEntry>;
 export interface O2oResponse {
   status: string;
   data: Record<string, O2oForId>;
+}
+
+/** One on-market posting from /on-market/{id}/history. `total` is a number. */
+export interface HistoryEntry {
+  source: string;
+  source_id: string;
+  total: number;
+  subject: string;
+  add_time: string;
+  link: string;
+}
+
+export interface HistoryResponse {
+  status: string;
+  data: HistoryEntry[];
+}
+
+/** One off-market (下架) posting. `total` is a comma string here, e.g. "1,234". */
+export interface OffMarketEntry {
+  source: string;
+  source_id: string;
+  total: string | number;
+  subject: string;
+  add_time: string;
+  link: string;
+}
+
+export interface OffMarketResponse {
+  status: string;
+  msg: string;
+  total_records: number;
+  data: OffMarketEntry[];
 }
 
 /** Captured allow-lists (2026-06-27). Re-confirm if iBigFun changes sources. */

@@ -1,7 +1,7 @@
 // scripts/lib/api.test.ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSearchBody, pageCount, SEARCH_LIST_URL } from './api.ts';
+import { buildSearchBody, pageCount, SEARCH_LIST_URL, historyUrl, OFF_MARKET_URL, buildOffMarketBody } from './api.ts';
 
 test('buildSearchBody sets both add_date params to the target date', () => {
   const b = buildSearchBody('2026-06-26', 1);
@@ -36,4 +36,16 @@ test('pageCount = ceil(total / perPage), 0 when perPage invalid', () => {
 
 test('SEARCH_LIST_URL points at the listing API', () => {
   assert.equal(SEARCH_LIST_URL, 'https://www.ibigfun.com/api/search/list');
+});
+
+test('historyUrl puts the numeric listing id in the path', () => {
+  assert.equal(historyUrl(53200935), 'https://api.ibigfun.com/on-market/53200935/history');
+});
+
+test('OFF_MARKET_URL points at the off-market endpoint', () => {
+  assert.equal(OFF_MARKET_URL, 'https://www.ibigfun.com/api/query_off_market_by_id');
+});
+
+test('buildOffMarketBody encodes the uuid as id_encode', () => {
+  assert.equal(buildOffMarketBody('A_1FF424'), 'id_encode=A_1FF424');
 });
