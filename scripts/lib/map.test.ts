@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { apiItemToListing, o2oToRawHistory, onMarketToRows, offMarketToRows, mergeHistory } from './map.ts';
 import { computeTenure } from './tenure.ts';
 import type { ListItem, O2oForId, HistoryEntry, OffMarketEntry } from './api.ts';
+import type { ListingHistoryEntry } from './types.ts';
 
 const ITEM: ListItem = {
   id: 53199422,
@@ -34,8 +35,13 @@ const HISTORY: O2oForId = {
   '中信房屋': { source_id: '2036990', link: 'y', total: 1790, add_date: '2025-06-21' },
 };
 
+const MERGED: ListingHistoryEntry[] = [
+  { date: '2026-05-09', source: '591', price: '1790', active: true },
+  { date: '2025-06-21', source: '中信房屋', price: '1790', active: false },
+];
+
 test('apiItemToListing maps core fields from typed JSON', () => {
-  const l = apiItemToListing(ITEM, {});
+  const l = apiItemToListing(ITEM, []);
   assert.equal(l.title, '國語實小學區低總首購美寓');
   assert.equal(l.url, 'https://www.rakuya.com.tw/sell_item/info?ehid=051d9a345427898');
   assert.equal(l.addressOrArea, '台北市中正區汀州路一段');
@@ -54,7 +60,7 @@ test('apiItemToListing maps core fields from typed JSON', () => {
 });
 
 test('apiItemToListing fills the new structured fields', () => {
-  const l = apiItemToListing(ITEM, {});
+  const l = apiItemToListing(ITEM, []);
   assert.equal(l.id, 53199422);
   assert.equal(l.source, '樂屋');
   assert.equal(l.sourceLink, ITEM.link);
@@ -70,8 +76,8 @@ test('o2oToRawHistory turns each source into a raw history row', () => {
   assert.deepEqual(cic, { price: '1790', source: '中信房屋', date: '2025-06-21', active: true });
 });
 
-test('listingHistory feeds tenure: earliest add_date is first listed', () => {
-  const l = apiItemToListing(ITEM, HISTORY);
+test('listingHistory feeds tenure: earliest record is first listed', () => {
+  const l = apiItemToListing(ITEM, MERGED);
   assert.equal(l.listingHistory.length, 2);
   const t = computeTenure(l.listingHistory, '2026-06-26');
   assert.equal(t.firstListedDate, '2025-06-21');
@@ -79,11 +85,11 @@ test('listingHistory feeds tenure: earliest add_date is first listed', () => {
 });
 
 test('empty history maps to an empty listingHistory array', () => {
-  assert.deepEqual(apiItemToListing(ITEM, {}).listingHistory, []);
+  assert.deepEqual(apiItemToListing(ITEM, []).listingHistory, []);
 });
 
 test('apiItemToListing coerces a numeric source to a string', () => {
-  const l = apiItemToListing({ ...ITEM, source: 591 as unknown as string }, {});
+  const l = apiItemToListing({ ...ITEM, source: 591 as unknown as string }, []);
   assert.equal(l.source, '591');
   assert.equal(typeof l.source, 'string');
 });

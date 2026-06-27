@@ -69,8 +69,8 @@ export function o2oToRawHistory(forId: O2oForId): RawHistoryRow[] {
   }));
 }
 
-/** Map one API item (+ its history) to a Listing. */
-export function apiItemToListing(it: ListItem, historyForId: O2oForId): Listing {
+/** Map one API item (+ its already-merged history) to a Listing. */
+export function apiItemToListing(it: ListItem, history: ListingHistoryEntry[]): Listing {
   return {
     title: it.subject ?? '',
     url: it.link || null,
@@ -87,7 +87,7 @@ export function apiItemToListing(it: ListItem, historyForId: O2oForId): Listing 
     age: numStr(it.house_age_x),
     parking: it.parking_type || null,
     realPriceUrl: null, // not exposed by the API; intentionally dropped
-    listingHistory: normalizeHistory(o2oToRawHistory(historyForId)),
+    listingHistory: history,
     id: it.id ?? null,
     source: it.source !== null && it.source !== undefined && it.source !== '' ? String(it.source) : null,
     sourceLink: it.link || null,

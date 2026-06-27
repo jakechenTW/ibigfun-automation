@@ -215,5 +215,5 @@ async function ensureSession(): Promise<void> {
 
 /** Real dependencies for collectListings (network-backed). */
 export function defaultDeps(): CollectDeps {
-  return { ensureSession, fetchPage, fetchHistory };
+  return { ensureSession, fetchPage, fetchOnMarketHistory, fetchOffMarketHistory };
 }

@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { collectListings, type CollectDeps } from './extract.ts';
-import type { ListItem, SearchListResponse, O2oResponse } from './api.ts';
+import type { ListItem, SearchListResponse, HistoryEntry } from './api.ts';
 
 function item(id: number): ListItem {
   return {
@@ -16,46 +16,78 @@ function item(id: number): ListItem {
 function page(items: ListItem[], total: number): SearchListResponse {
   return { status: 'ok', msg: '', total_records: total, per_page: 20, current_page: 1, data: items };
 }
+function on(id: number, date = '2026-06-26'): HistoryEntry {
+  return { source: '樂屋網', source_id: `o${id}`, total: 1000, subject: `s${id}`, add_time: date, link: `http://x/${id}` };
+}
+function captureErr<T>(fn: () => Promise<T>): Promise<{ out: T; errs: string[] }> {
+  const errs: string[] = [];
+  const orig = console.error;
+  console.error = (...a: unknown[]) => { errs.push(a.map(String).join(' ')); };
+  return fn().then(
+    (out) => { console.error = orig; return { out, errs }; },
+    (e) => { console.error = orig; throw e; },
+  );
+}
 
-test('collectListings paginates by total_records/per_page and maps items', async () => {
+const okDeps = (over: Partial<CollectDeps>): CollectDeps => ({
+  ensureSession: async () => {},
+  fetchPage: async () => page([item(1)], 1),
+  fetchOnMarketHistory: async (id) => [on(id)],
+  fetchOffMarketHistory: async () => [],
+  ...over,
+});
+
+test('collectListings paginates by total_records/per_page and maps items in order', async () => {
   const pages: Record<number, SearchListResponse> = {
     1: page([item(1), item(2)], 40),
     2: page([item(3)], 40),
   };
-  let historyCalls = 0;
-  const deps: CollectDeps = {
-    ensureSession: async () => {},
+  const out = await collectListings('2026-06-26', okDeps({
     fetchPage: async (_d, p) => pages[p],
-    fetchHistory: async (ids) => { historyCalls++; assert.ok(ids.length > 0); return {} as O2oResponse['data']; },
-  };
-  const out = await collectListings('2026-06-26', deps);
+    fetchOnMarketHistory: async (id) => [on(id)],
+  }));
   assert.equal(out.length, 3);
   assert.equal(out[0].id, 1);
   assert.equal(out[2].id, 3);
-  assert.equal(historyCalls, 2); // one per page
 });
 
 test('collectListings stops at an empty page', async () => {
-  const pages: Record<number, SearchListResponse> = {
-    1: page([item(1)], 100),
-    2: page([], 100),
-  };
-  const deps: CollectDeps = {
-    ensureSession: async () => {},
+  const pages: Record<number, SearchListResponse> = { 1: page([item(1)], 100), 2: page([], 100) };
+  const out = await collectListings('2026-06-26', okDeps({
     fetchPage: async (_d, p) => pages[p] ?? page([], 100),
-    fetchHistory: async () => ({}) as O2oResponse['data'],
-  };
-  const out = await collectListings('2026-06-26', deps);
+  }));
   assert.equal(out.length, 1);
 });
 
-test('collectListings attaches o2o-same history by id', async () => {
-  const deps: CollectDeps = {
-    ensureSession: async () => {},
+test('collectListings merges on-market and off-market history', async () => {
+  const out = await collectListings('2026-06-27', okDeps({
     fetchPage: async () => page([item(7)], 1),
-    fetchHistory: async () => ({ '7': { '591': { source_id: 'a', link: 'b', total: 1200, add_date: '2025-01-02' } } }),
-  };
-  const out = await collectListings('2026-06-26', deps);
-  assert.equal(out[0].listingHistory.length, 1);
-  assert.equal(out[0].listingHistory[0].date, '2025-01-02');
+    fetchOnMarketHistory: async () => [{ source: '樂屋網', source_id: 'a', total: 1688, subject: 's', add_time: '2026-06-27', link: 'x' }],
+    fetchOffMarketHistory: async () => [{ source: '信義房屋', source_id: 'b', total: '1,500', subject: 's', add_time: '2025-12-01', link: 'y' }],
+  }));
+  const h = out[0].listingHistory;
+  assert.equal(h.length, 2);
+  const off = h.find((e) => e.source === '信義房屋');
+  assert.equal(off?.active, false);
+  assert.equal(off?.date, '2025-12-01');
+});
+
+test('collectListings drops history and warns when a listing fetch fails', async () => {
+  const { out, errs } = await captureErr(() => collectListings('2026-06-26', okDeps({
+    fetchPage: async () => page([item(1), item(2)], 2),
+    fetchOnMarketHistory: async (id) => { if (id === 1) throw new Error('boom'); return [on(id)]; },
+  })));
+  assert.deepEqual(out.find((l) => l.id === 1)?.listingHistory, []);
+  assert.equal(out.find((l) => l.id === 2)?.listingHistory.length, 1);
+  assert.ok(errs.some((e) => /WARN/.test(e) && e.includes('1')));
+  assert.ok(errs.some((e) => /1 dropped/.test(e)));
+});
+
+test('collectListings treats an empty on-market history as a drop', async () => {
+  const { out, errs } = await captureErr(() => collectListings('2026-06-26', okDeps({
+    fetchPage: async () => page([item(5)], 1),
+    fetchOnMarketHistory: async () => [],
+  })));
+  assert.deepEqual(out[0].listingHistory, []);
+  assert.ok(errs.some((e) => /1 dropped/.test(e)));
 });
