@@ -13,8 +13,9 @@
 - 可疑/待查：{{suspicious_count}} 筆
 - 主要排除原因：{{main_exclusion_reasons}}
 - 房貸假設：8 成貸、年利率 2.6%、30 年本息平均攤還
-- 推薦門檻：`低於行情 >= 10%` 且 `租金覆蓋率 >= 1.0`
-- 接近門檻：`租金覆蓋率 >= 0.8`
+- 推薦門檻：`開價溢價 ≤ 該市 p*/2`（`p*` 由議價率換算，見 `data/negotiation-rate.md`）
+- 接近門檻：`p*/2 < 開價溢價 ≤ p*`
+- 排除：`開價溢價 > p*`；可疑/待查：`開價溢價 ≤ −10%`（異常低）或法拍/資訊過少等軟標記
 - 前置排除：可靠步行路線超過 10 分鐘（投資 profile 硬排除）
 - 可疑/待查：法拍／資訊過少／無室內圖等由 agent 軟標記,降權但不自動移除
 
@@ -44,12 +45,12 @@
 
 {{#each recommended}}
 
-#### {{rank}}. [{{title}}]({{url}}) ｜ 低於行情 {{discount_percent}}%・覆蓋率 {{rent_coverage}}
+#### {{rank}}. [{{title}}]({{url}}) ｜ 開價溢價 {{premium_percent}}%
 
 - {{walk_line}}
 - {{tenure_line}}
 - {{price}} 萬／{{ping}} 坪／{{unit_price}} 萬/坪・{{floor}}/{{total_floor}} 樓・屋齡 {{age}}・{{address_or_area}}
-- 行情 {{market_unit_price}} 萬/坪・月租 ~{{estimated_rent}}・房貸 {{monthly_mortgage}}・現金流 {{monthly_cash_flow}}/月
+- 行情 {{market_unit_price}} 萬/坪・房貸 {{monthly_mortgage}}・月租 ~{{estimated_rent}}（參考）・現金流 ~{{monthly_cash_flow}}/月（參考）
 - 推薦理由：{{recommendation_reason}}
 - 風險：{{risks_or_manual_checks}}
 
@@ -57,7 +58,7 @@
 
 {{else}}
 
-- 無符合 `低於行情 >= 10%` 且 `租金覆蓋率 >= 1.0` 的物件。
+- 無符合 `開價溢價 ≤ p*/2` 的推薦物件。
 
 {{/if}}
 
@@ -67,19 +68,19 @@
 
 {{#each near_threshold}}
 
-#### {{rank}}. [{{title}}]({{url}}) ｜ 覆蓋率 {{rent_coverage}}・差在 {{near_threshold_reason}}
+#### {{rank}}. [{{title}}]({{url}}) ｜ 開價溢價 {{premium_percent}}%・差在 {{near_threshold_reason}}
 
 - {{walk_line}}
 - {{tenure_line}}
 - {{price}} 萬／{{ping}} 坪／{{unit_price}} 萬/坪・{{floor}}/{{total_floor}} 樓・屋齡 {{age}}・{{address_or_area}}
-- 行情 {{market_unit_price}} 萬/坪・月租 ~{{estimated_rent}}・房貸 {{monthly_mortgage}}・現金流 {{monthly_cash_flow}}/月
+- 行情 {{market_unit_price}} 萬/坪・房貸 {{monthly_mortgage}}・月租 ~{{estimated_rent}}（參考）・現金流 ~{{monthly_cash_flow}}/月（參考）
 - 需人工確認：{{manual_checks}}
 
 {{/each}}
 
 {{else}}
 
-- 無租金覆蓋率達 `0.8` 的接近門檻候選。
+- 無 `p*/2 < 開價溢價 ≤ p*` 的接近門檻候選。
 
 {{/if}}
 
@@ -111,7 +112,7 @@
 
 #### {{rank}}. [{{title}}]({{url}})
 
-- {{price}} 萬／{{ping}} 坪／{{unit_price}} 萬/坪・覆蓋率 {{rent_coverage}}
+- {{price}} 萬／{{ping}} 坪／{{unit_price}} 萬/坪・開價溢價 {{premium_percent}}%
 - {{tenure_line}}
 - 排除：{{exclusion_reason}}
 
