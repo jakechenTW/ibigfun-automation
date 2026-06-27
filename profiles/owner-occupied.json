@@ -25,6 +25,7 @@
   },
   "hardCriteria": {
     "priceMaxWan": 7000,
+    "houseType": { "id": "17", "nameZh": "待驗證" },
     "floorMin": 7,
     "mainPingMin": 30,
     "ageMax": 25,

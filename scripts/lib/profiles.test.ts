@@ -31,6 +31,7 @@ test('loadProfile keeps owner-occupied coded filters readable and unverified', (
   assert.deepEqual(p.fetchFilters.towns?.map((t) => t.id), ['1', '4', '6', '8', '9']);
   assert.ok(p.fetchFilters.towns?.every((t) => t.nameZh === '待驗證'));
   assert.equal(p.fetchFilters.houseType?.id, '17');
+  assert.deepEqual(p.hardCriteria.houseType, { id: '17', nameZh: '待驗證' });
   assert.equal(p.fetchFilters.priceMaxWan, 7000);
   assert.equal(p.fetchFilters.floorMin, 7);
   assert.equal(p.fetchFilters.mainPingMin, 30);

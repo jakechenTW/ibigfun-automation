@@ -15,6 +15,7 @@ The numeric `town` and `house_type` mappings are not considered verified until `
 - City: 台北市.
 - District ids: `1`, `4`, `6`, `8`, `9`; names require verification.
 - Total price: <= 7000 萬.
+- House type: `house_type=17`; name pending verification.
 - Floor: >= 7.
 - Main ping: >= 30.
 - Age: <= 25 years.
