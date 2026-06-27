@@ -4,10 +4,10 @@
  * cookie jar, and calls the iBigFun JSON APIs with those cookies. Reuses the
  * pure relogin loop (relogin.ts) to recover from a mid-run session kick.
  */
-import { SIGNIN_URL, LOGIN_URL, SEARCH_LIST_URL, O2O_SAME_URL, buildSearchBody } from './api.ts';
-import type { SearchListResponse, O2oResponse } from './api.ts';
+import { SIGNIN_URL, LOGIN_URL, SEARCH_LIST_URL, O2O_SAME_URL, buildSearchBody, historyUrl, OFF_MARKET_URL, buildOffMarketBody } from './api.ts';
+import type { SearchListResponse, O2oResponse, HistoryResponse, OffMarketResponse, HistoryEntry, OffMarketEntry } from './api.ts';
 import { applySetCookies, cookieHeader, loadJar, saveJar, type Jar } from './cookies.ts';
-import { SIGNIN_PATH_FRAGMENT, BLOCKING_SIGNALS, COOKIE_JAR_PATH } from './config.ts';
+import { SIGNIN_PATH_FRAGMENT, BLOCKING_SIGNALS, COOKIE_JAR_PATH, HISTORY_RETRIES, HISTORY_RETRY_BASE_MS } from './config.ts';
 import { openWithRelogin } from './relogin.ts';
 import { BlockedError } from './errors.ts';
 import type { CollectDeps } from './extract.ts';
@@ -36,7 +36,10 @@ export function looksLikeSignin(res: { status: number; finalUrl: string; content
   if (res.finalUrl.includes(SIGNIN_PATH_FRAGMENT)) return true;
   // A data endpoint returning HTML means we were bounced to a login page.
   if (res.contentType.includes('text/html')) {
-    const isDataUrl = res.finalUrl.includes('/api/') || res.finalUrl.includes('o2o-same');
+    const isDataUrl =
+      res.finalUrl.includes('/api/') ||
+      res.finalUrl.includes('/on-market/') ||
+      res.finalUrl.includes('o2o-same');
     if (isDataUrl) return true;
   }
   return false;
@@ -134,6 +137,24 @@ async function withRelogin<T>(attempt: () => Promise<{ kicked: boolean; value?: 
   return out as T;
 }
 
+/** Retry an async call with exponential backoff. Empty results are NOT errors. */
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  opts: { retries: number; baseMs: number; sleep?: (ms: number) => Promise<void> },
+): Promise<T> {
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= opts.retries; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      if (attempt < opts.retries) await sleep(opts.baseMs * 2 ** attempt);
+    }
+  }
+  throw lastErr;
+}
+
 async function fetchPage(date: string, page: number): Promise<SearchListResponse> {
   return withRelogin(async () => {
     const r = await rawPostForm(SEARCH_LIST_URL, buildSearchBody(date, page), 'https://www.ibigfun.com/lists/latest');
@@ -155,6 +176,36 @@ async function fetchHistory(ids: number[]): Promise<O2oResponse['data']> {
     assertApiOk('o2o-same', r.status, parsed.status);
     return { kicked: false, value: parsed.data ?? {} };
   });
+}
+
+async function fetchOnMarketHistory(id: number): Promise<HistoryEntry[]> {
+  return withRetry(
+    () =>
+      withRelogin(async () => {
+        const r = await rawGet(historyUrl(id));
+        applySetCookies(getJar(), r.setCookies);
+        if (looksLikeSignin(r)) return { kicked: true };
+        const parsed = JSON.parse(r.text) as HistoryResponse;
+        assertApiOk(`history ${id}`, r.status, parsed.status);
+        return { kicked: false, value: parsed.data ?? [] };
+      }),
+    { retries: HISTORY_RETRIES, baseMs: HISTORY_RETRY_BASE_MS },
+  );
+}
+
+async function fetchOffMarketHistory(uuid: string): Promise<OffMarketEntry[]> {
+  return withRetry(
+    () =>
+      withRelogin(async () => {
+        const r = await rawPostForm(OFF_MARKET_URL, buildOffMarketBody(uuid), 'https://www.ibigfun.com/lists/latest');
+        applySetCookies(getJar(), r.setCookies);
+        if (looksLikeSignin(r)) return { kicked: true };
+        const parsed = JSON.parse(r.text) as OffMarketResponse;
+        assertApiOk('query_off_market_by_id', r.status, parsed.status);
+        return { kicked: false, value: parsed.data ?? [] };
+      }),
+    { retries: HISTORY_RETRIES, baseMs: HISTORY_RETRY_BASE_MS },
+  );
 }
 
 /** Ensure we hold a session: log in when the jar has no session cookie. */

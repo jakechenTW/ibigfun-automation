@@ -30,3 +30,12 @@ export const MAX_PAGES = 50;
 
 /** Where the cookie jar is cached between runs (git-ignored). */
 export const COOKIE_JAR_PATH = '.cookies.json';
+
+/** Max listings fetched concurrently when pulling per-listing history. */
+export const HISTORY_CONCURRENCY = 4;
+
+/** Retry budget per history API call (in addition to the first attempt). */
+export const HISTORY_RETRIES = 3;
+
+/** Base backoff (ms) for history retries; doubles each attempt. */
+export const HISTORY_RETRY_BASE_MS = 500;
