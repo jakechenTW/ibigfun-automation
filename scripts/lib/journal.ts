@@ -35,29 +35,29 @@ export function redact(value: unknown): unknown {
   return value;
 }
 
-export function appendJournal(date: string, ev: JournalEvent): void {
-  fs.mkdirSync(runDir(date), { recursive: true });
+export function appendJournal(label: string, ev: JournalEvent): void {
+  fs.mkdirSync(runDir(label), { recursive: true });
   const msg = ev.msg.length > SNIPPET_MAX ? ev.msg.slice(0, SNIPPET_MAX) + '…' : ev.msg;
   const safe: JournalEvent = {
     ...ev,
     msg,
     data: ev.data === undefined ? undefined : redact(ev.data),
   };
-  fs.appendFileSync(journalPath(date), JSON.stringify(safe) + '\n');
+  fs.appendFileSync(journalPath(label), JSON.stringify(safe) + '\n');
 }
 
-export function readJournal(date: string): JournalEvent[] {
-  const p = journalPath(date);
+export function readJournal(label: string): JournalEvent[] {
+  const p = journalPath(label);
   if (!fs.existsSync(p)) return [];
   return fs.readFileSync(p, 'utf8').split('\n').filter(Boolean)
     .map((l) => JSON.parse(l) as JournalEvent);
 }
 
 /** Logger that appends redacted events to the run journal. */
-export function journalLogger(date: string, step: string, nowFn: () => string): Logger {
+export function journalLogger(label: string, step: string, nowFn: () => string): Logger {
   return {
     event(level, event, msg, data) {
-      appendJournal(date, { ts: nowFn(), step, level, event, msg, data });
+      appendJournal(label, { ts: nowFn(), step, level, event, msg, data });
     },
   };
 }

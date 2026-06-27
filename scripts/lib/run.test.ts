@@ -15,7 +15,7 @@ function fakeClock() {
 test('runStep marks ok, records summary/artifacts, journals start+end', async () => {
   const date = '0003-03-03';
   try {
-    const m = createManifest(date, 'seed');
+    const m = createManifest(date, date, 'seed');
     const status = await runStep(m, 'fetch',
       async () => ({ summary: { listings: 3 }, artifacts: ['state/listings-0003-03-03.json'] }),
       fakeClock());
@@ -36,7 +36,7 @@ test('runStep marks ok, records summary/artifacts, journals start+end', async ()
 test('runStep marks failed and captures the error on throw', async () => {
   const date = '0003-03-04';
   try {
-    const m = createManifest(date, 'seed');
+    const m = createManifest(date, date, 'seed');
     const status = await runStep(m, 'enrich',
       async () => { throw new Error('ORS exploded'); },
       fakeClock());
