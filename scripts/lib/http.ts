@@ -32,14 +32,22 @@ function getJar(): Jar {
 }
 
 /** True when a data response actually returned the signin page (a kick). */
-export function looksLikeSignin(res: { status: number; finalUrl: string; contentType: string }): boolean {
+export function looksLikeSignin(res: {
+  status: number;
+  finalUrl: string;
+  contentType: string;
+  text?: string;
+}): boolean {
+  // A redirect to the signin path is always a kick.
   if (res.finalUrl.includes(SIGNIN_PATH_FRAGMENT)) return true;
-  // A data endpoint returning HTML means we were bounced to a login page.
+  // Trust the body shape over the content-type header: some valid data
+  // endpoints (e.g. query_off_market_by_id) return a JSON document with a
+  // text/html content-type. A real logged-out bounce returns an HTML page.
+  const body = (res.text ?? '').trimStart();
+  if (body) return !(body.startsWith('{') || body.startsWith('['));
+  // No body to inspect: fall back to the header heuristic (html on a data URL).
   if (res.contentType.includes('text/html')) {
-    const isDataUrl =
-      res.finalUrl.includes('/api/') ||
-      res.finalUrl.includes('/on-market/');
-    if (isDataUrl) return true;
+    return res.finalUrl.includes('/api/') || res.finalUrl.includes('/on-market/');
   }
   return false;
 }

@@ -5,21 +5,28 @@ import { looksLikeSignin, assertApiOk, withRetry } from './http.ts';
 
 test('a redirect to /user/signin is a kick', () => {
   assert.equal(
-    looksLikeSignin({ status: 302, finalUrl: 'https://www.ibigfun.com/user/signin?return_url=/x', contentType: 'text/html' }),
+    looksLikeSignin({ status: 302, finalUrl: 'https://www.ibigfun.com/user/signin?return_url=/x', contentType: 'text/html', text: '' }),
     true,
   );
 });
 
-test('an HTML body on a data URL (logged out) is a kick', () => {
+test('an HTML login body on a data URL is a kick', () => {
   assert.equal(
-    looksLikeSignin({ status: 200, finalUrl: 'https://www.ibigfun.com/api/search/list', contentType: 'text/html; charset=utf-8' }),
+    looksLikeSignin({ status: 200, finalUrl: 'https://www.ibigfun.com/api/search/list', contentType: 'text/html; charset=utf-8', text: '<!DOCTYPE html><html><body>login</body></html>' }),
     true,
   );
 });
 
-test('a 200 JSON response is not a kick', () => {
+test('a JSON body is not a kick (application/json)', () => {
   assert.equal(
-    looksLikeSignin({ status: 200, finalUrl: 'https://www.ibigfun.com/api/search/list', contentType: 'application/json; charset=UTF-8' }),
+    looksLikeSignin({ status: 200, finalUrl: 'https://www.ibigfun.com/api/search/list', contentType: 'application/json; charset=UTF-8', text: '{"status":"ok"}' }),
+    false,
+  );
+});
+
+test('a JSON body with a text/html content-type is NOT a kick (off-market quirk)', () => {
+  assert.equal(
+    looksLikeSignin({ status: 200, finalUrl: 'https://www.ibigfun.com/api/query_off_market_by_id', contentType: 'text/html; charset=UTF-8', text: '{"status":"ok","msg":"","total_records":3,"data":[]}' }),
     false,
   );
 });
@@ -71,9 +78,9 @@ test('withRetry doubles the backoff each attempt', async () => {
   assert.deepEqual(delays, [100, 200, 400]);
 });
 
-test('an HTML body on the history URL is a kick', () => {
+test('an HTML login body on the history URL is a kick', () => {
   assert.equal(
-    looksLikeSignin({ status: 200, finalUrl: 'https://api.ibigfun.com/on-market/53200935/history', contentType: 'text/html' }),
+    looksLikeSignin({ status: 200, finalUrl: 'https://api.ibigfun.com/on-market/53200935/history', contentType: 'text/html', text: '<html>login</html>' }),
     true,
   );
 });
