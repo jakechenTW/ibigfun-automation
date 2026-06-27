@@ -43,18 +43,26 @@ Complete list (12 entries):
 
 ## `town` (district id → name)
 
-The town options load per-city via AJAX, so the full per-city table is **not**
-in the static `lists/latest` HTML. Verified 台北市 (city=1) ids in use, confirmed
-via single-town live fetches on 2026-06-27:
+Town options are not in the rendered filter markup; the page embeds the full
+city→towns table in an inline `var city = {...}` object (each town is
+`{sn, town, town_en}`) and `onCityChange` populates the selector from it.
+
+Complete **台北市 (city=1)** list (12 districts), from that embedded object:
 
 | id | name | id | name |
 |---|---|---|---|
-| 1 | 中正區 | 8 | 信義區 |
-| 4 | 中山區 | 9 | 士林區 |
-| 6 | 大安區 |   |   |
+| 1 | 中正區 | 9 | 士林區 |
+| 3 | 大同區 | 10 | 北投區 |
+| 4 | 中山區 | 11 | 內湖區 |
+| 5 | 松山區 | 12 | 南港區 |
+| 6 | 大安區 | 376 | 文山區 |
+| 7 | 萬華區 |   |   |
+| 8 | 信義區 |   |   |
 
-Other 台北市 town ids are not yet captured. To resolve more, fetch with a single
-`town[]` value and read the returned listings' `addressOrArea` district.
+Note ids are not sequential (文山區 = 376). owner-occupied uses 1/4/6/8/9
+(中正/中山/大安/信義/士林); these five were independently confirmed via
+single-town live fetches on 2026-06-27 and match this table. Other cities'
+towns live in the same embedded `var city` object on `lists/latest`.
 
 ## `parking`
 
