@@ -51,7 +51,7 @@ export function apiItemToListing(it: ListItem, historyForId: O2oForId): Listing 
     realPriceUrl: null, // not exposed by the API; intentionally dropped
     listingHistory: normalizeHistory(o2oToRawHistory(historyForId)),
     id: it.id ?? null,
-    source: it.source || null,
+    source: it.source !== null && it.source !== undefined && it.source !== '' ? String(it.source) : null,
     sourceLink: it.link || null,
     room: it.room ?? null,
     livingRoom: it.living_room ?? null,

@@ -81,3 +81,9 @@ test('listingHistory feeds tenure: earliest add_date is first listed', () => {
 test('empty history maps to an empty listingHistory array', () => {
   assert.deepEqual(apiItemToListing(ITEM, {}).listingHistory, []);
 });
+
+test('apiItemToListing coerces a numeric source to a string', () => {
+  const l = apiItemToListing({ ...ITEM, source: 591 as unknown as string }, {});
+  assert.equal(l.source, '591');
+  assert.equal(typeof l.source, 'string');
+});

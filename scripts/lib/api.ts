@@ -14,7 +14,7 @@ export const O2O_SAME_URL = 'https://api.ibigfun.com/on-market/o2o-same';
 export interface ListItem {
   id: number;
   subject: string;
-  source: string;
+  source: string | number;
   link: string;
   address: string;
   mrt: string;
