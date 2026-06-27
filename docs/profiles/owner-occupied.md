@@ -8,7 +8,16 @@ The first profile version is based on this saved iBigFun URL:
 
 `https://www.ibigfun.com/lists/latest?page=1&expand=0&method=all_case&on_market=1&city=1&town=1%2C4%2C6%2C8%2C9&price_segment=%2C7000&house_type=17&floor_segment=7%2C&main_ping_number=30%2C&house_age_segment=%2C25&parking=%E5%B9%B3%E9%9D%A2`
 
-The numeric `town` and `house_type` mappings are not considered verified until `profiles/owner-occupied.json` replaces `待驗證` with names confirmed from iBigFun.
+The first implementation can run this profile only over the current captured
+fetch universe documented in `docs/fetching.md`. It is not complete
+owner-occupied discovery while `profiles/owner-occupied.json` has
+`fetchFilters.enabled: false`; listings outside that captured universe may be
+missing. Treat these runs as `warn` until the owner-occupied fetch filters are
+verified, wired into fetch, and enabled.
+
+The numeric `town` and `house_type` mappings are not considered verified until
+`profiles/owner-occupied.json` replaces `待驗證` with names confirmed from
+iBigFun.
 
 ## Hard Criteria
 
@@ -33,6 +42,7 @@ Room, living-room, and bathroom counts are displayed but are not hard criteria i
 
 ## Notification Status
 
-- Use `warn` when there is any match, candidate, manual review, stale data, or unverified coded filter mapping.
+- Use `warn` when there is any match, candidate, manual review, stale data,
+  unverified coded filter mapping, or `fetchFilters.enabled: false`.
 - Use `ok` only when there are no matches or candidates and coded filter mappings are verified.
 - Use `fail` only when the monitor cannot complete.

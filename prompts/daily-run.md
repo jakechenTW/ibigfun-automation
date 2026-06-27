@@ -13,7 +13,7 @@ Trigger 也會在訊息裡告訴你要監測的區間。把它對應成 pipeline
 - 給了單一日期 → `--date <date>`
 - 沒給 → 省略參數，pipeline 自動用「前一個台北日」（最常見的夜跑）
 
-下文用 `[profile 參數]` 代表 `--profile <profile>`，用 `[範圍參數]` 代表日期或區間參數（可能是空字串），用 `[tool 參數]` 代表 `--tool <codex|claude>`。
+下文用 `[profile 參數]` 代表 `--profile <profile>`，用 `[範圍參數]` 代表日期或區間參數（可能是空字串），用 `[tool 參數]` 代表必要的 `--tool <codex|claude>`。
 
 ## 動手前先讀
 
@@ -44,6 +44,7 @@ Trigger 也會在訊息裡告訴你要監測的區間。把它對應成 pipeline
 ## status 對應
 
 - `warn`：有推薦/符合條件、接近門檻/候選、資料偏舊、登入 fallback、未驗證 filter 對照，或有任何 manual-review 項。
+- `owner-occupied`：在 `profiles/owner-occupied.json` 的 `fetchFilters.enabled` 仍為 `false` 時，只能代表目前 captured fetch universe，不是完整自住 profile discovery；這類 run 必須用 `warn`。
 - `ok`：乾淨、無推薦/符合條件、資料新鮮。
 - `fail`：監測無法完成（見下）。
 

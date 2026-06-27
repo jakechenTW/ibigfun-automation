@@ -10,9 +10,12 @@ before operating; follow the linked docs only when you need rule detail.
 iBigFun aggregates sale listings that originate on other sites (591, 樂居,
 rakuya, etc.). A listing's canonical URL therefore often points to the
 originating source rather than `ibigfun.com` — that is expected, not a bug. The
-daily job reads iBigFun's filtered latest-sale view for the selected profile and
-target date, evaluates each listing against `docs/reporting-rules.md` plus the
-profile rule doc, writes a report, and notifies.
+daily job reads iBigFun's latest-sale view for the selected profile and target
+date using the currently implemented fetch filters. Some profile filter sets may
+be documented but not yet wired; owner-occupied is incomplete discovery until
+its fetch filters are verified and enabled. The job evaluates each fetched
+listing against `docs/reporting-rules.md` plus the profile rule doc, writes a
+report, and notifies.
 
 ## First Run — Prerequisites
 
@@ -99,7 +102,7 @@ evaluation, and writing the report.
     --title "<short>" --tool <codex|claude>` — mark the agent report step done
     and record the notify parameters.
   - `npm run pipeline -- fail --profile <profile> [--date <d> | --from <a>
-    --to <b>] --reason "<short>" [--tool <codex|claude>] [--dry-run]` —
+    --to <b>] --reason "<short>" --tool <codex|claude> [--dry-run]` —
     headless failure escape hatch: marks the run failed, writes a safe details
     file from the (redacted) journal tail, and sends one `status=fail`
     notification. `--dry-run` writes the details and prints the composed command

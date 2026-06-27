@@ -11,8 +11,8 @@
  *   pipeline run    --profile <id> [--date <d> | --from <d> --to <d>] [--only <step>] [--force <step>] [--dry-run]
  *   pipeline status --profile <id> [--date <d> | --from <d> --to <d>]
  *   pipeline mark <step> --status <ok|failed> [--artifact <p>]
- *                 --profile <id> [--status-notify <ok|warn|fail>] [--title <s>] [--tool <codex|claude>]
- *   pipeline fail   --profile <id> [--date <d> | --from <d> --to <d>] --reason "<short>" [--tool <codex|claude>]
+ *                 --profile <id> [--status-notify <ok|warn|fail>] [--title <s>] --tool <codex|claude>
+ *   pipeline fail   --profile <id> [--date <d> | --from <d> --to <d>] --reason "<short>" --tool <codex|claude>
  *                   [--title <s>] [--dry-run]
  *
  * Default (no date flags): yesterday in Taipei time (single-day run).
@@ -65,6 +65,11 @@ function asStep(v: string | undefined, label: string): StepName | undefined {
   if (v === undefined) return undefined;
   if (!(STEP_ORDER as string[]).includes(v)) fail(`invalid ${label} "${v}"; expected one of ${STEP_ORDER.join('|')}.`);
   return v as StepName;
+}
+function requiredTool(argv: string[]): 'codex' | 'claude' {
+  const tool = flag(argv, '--tool');
+  if (tool !== 'codex' && tool !== 'claude') fail('--tool must be codex|claude.');
+  return tool;
 }
 
 async function cmdRun(argv: string[]): Promise<void> {
@@ -159,12 +164,11 @@ function cmdMark(argv: string[]): void {
   if (step === 'report' && status === 'ok') {
     const sNotify = flag(argv, '--status-notify');
     const title = flag(argv, '--title');
-    const tool = (flag(argv, '--tool') ?? 'claude');
+    const tool = requiredTool(argv);
     if (sNotify !== 'ok' && sNotify !== 'warn' && sNotify !== 'fail') {
       fail('marking report ok requires --status-notify <ok|warn|fail>.');
     }
     if (!title) fail('marking report ok requires --title "<short>".');
-    if (tool !== 'codex' && tool !== 'claude') fail('--tool must be codex|claude.');
     m.notify = { tool, status: sNotify, title } as NotifyParams;
   }
 
@@ -183,8 +187,7 @@ async function cmdFail(argv: string[]): Promise<void> {
   const range = resolveRangeOrExit(argv);
   const reason = flag(argv, '--reason');
   if (!reason || reason.startsWith('--')) fail('fail requires --reason "<short>".');
-  const tool = flag(argv, '--tool') ?? 'claude';
-  if (tool !== 'codex' && tool !== 'claude') fail('--tool must be codex|claude.');
+  const tool = requiredTool(argv);
   const title = flag(argv, '--title') ?? '每日監測中斷';
   const dryRun = has(argv, '--dry-run');
 

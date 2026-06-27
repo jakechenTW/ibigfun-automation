@@ -90,6 +90,10 @@ exclude_land=1
 The first profile-aware implementation keeps this captured request shape for all
 profiles. Profile JSON files may document desired filters, but fetch does not
 apply them until `fetchFilters.enabled` is deliberately wired and tested.
+Specifically, `owner-occupied` currently runs over this captured fetch universe,
+not over complete owner-occupied discovery. Treat owner-occupied runs as
+`warn` while `profiles/owner-occupied.json` has `fetchFilters.enabled: false`,
+because matching listings outside the captured universe may be absent.
 
 Response JSON shape: `{ data: ListItem[], total_records: number, per_page: number, current_page: number }`.
 
