@@ -177,8 +177,6 @@ async function cmdFail(argv: string[]): Promise<void> {
     console.error('notify already sent for this run; not sending a fail notification.');
     process.exit(0);
   }
-  m.failure = { reason, where: 'pipeline fail' };
-  writeManifest(m, now());
 
   const tail = readJournal(range.label).slice(-20);
   const detailsFile = path.join(runDir(range.label), 'fail-details.md');
@@ -190,11 +188,18 @@ async function cmdFail(argv: string[]): Promise<void> {
     console.error(`[dry-run] wrote ${detailsFile}; would send:\n  ${composeNotifyCommand(params, detailsFile)}`);
     process.exit(0);
   }
+  m.failure = { reason, where: 'pipeline fail' };
   journalLogger(range.label, 'notify', now).event('error', 'run.fail', `run failed: ${reason}`, { reason });
   const { exitCode, stderr } = runNotify(params, detailsFile);
   journalLogger(range.label, 'notify', now).event(exitCode === 0 ? 'info' : 'error', 'notify.sent',
     `fail notification ai-notify exited ${exitCode}`, { exitCode, stderr });
-  if (exitCode !== 0) { console.error(`✗ fail notification failed: ${stderr.trim()}`); process.exit(1); }
+  if (exitCode !== 0) {
+    writeManifest(m, now());
+    console.error(`✗ fail notification failed: ${stderr.trim()}`);
+    process.exit(1);
+  }
+  setStep(m, 'notify', { status: 'ok', endedAt: now() });
+  writeManifest(m, now());
   console.error(`✓ fail notification sent for ${range.label} (${reason}).`);
 }
 
