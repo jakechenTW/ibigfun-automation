@@ -8,7 +8,7 @@
     "fetch": "tsx scripts/fetch.ts",
     "enrich": "tsx scripts/enrich.ts",
     "route": "tsx scripts/route.ts",
-    "test": "node --import tsx --test scripts/lib/date.test.ts scripts/lib/url.test.ts scripts/lib/coords.test.ts scripts/lib/floor.test.ts scripts/lib/parse.test.ts scripts/lib/geo.test.ts scripts/lib/finance.test.ts scripts/lib/exclude.test.ts scripts/lib/mrt.test.ts scripts/lib/districts.test.ts scripts/lib/enrich-offline.test.ts scripts/lib/walk.test.ts scripts/lib/history.test.ts scripts/lib/relogin.test.ts"
+    "test": "node --import tsx --test scripts/lib/date.test.ts scripts/lib/url.test.ts scripts/lib/coords.test.ts scripts/lib/floor.test.ts scripts/lib/parse.test.ts scripts/lib/geo.test.ts scripts/lib/finance.test.ts scripts/lib/exclude.test.ts scripts/lib/mrt.test.ts scripts/lib/districts.test.ts scripts/lib/enrich-offline.test.ts scripts/lib/walk.test.ts scripts/lib/history.test.ts scripts/lib/relogin.test.ts scripts/lib/tenure.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

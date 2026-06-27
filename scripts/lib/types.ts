@@ -62,6 +62,17 @@ export interface Reliability {
   reason: string | null; // why unreliable, else null
 }
 
+/** Deterministic "how long on market" summary derived from `listingHistory`. */
+export interface ListingTenure {
+  firstListedDate: string | null; // earliest date across all records (incl. 下架)
+  daysOnMarket: number | null; // targetDate − firstListedDate; null if no history / bad date
+  recordCount: number; // total history rows
+  sourceCount: number; // distinct non-empty sources
+  priceTrend: 'flat' | 'dropped' | 'raised' | 'unknown';
+  firstPrice: number | null; // earliest record's price (萬)
+  latestPrice: number | null; // latest record's price (萬)
+}
+
 /**
  * A listing plus the deterministic fields computed by scripts/enrich.ts.
  * Estimation (market price, rent) and the final recommend/exclude judgment are
@@ -81,6 +92,7 @@ export interface EnrichedListing extends Listing {
   /** Advisory signals for agent judgment (do NOT auto-exclude). */
   signals: { auctionKeyword: boolean };
   hardExclusion: { excluded: boolean; reasons: string[] };
+  tenure: ListingTenure;
 }
 
 /** Output document written to state/enriched-<date>.json and stdout. */

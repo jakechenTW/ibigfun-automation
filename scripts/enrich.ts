@@ -117,7 +117,7 @@ async function main(): Promise<void> {
         }
       }
     }
-    enriched.push(finalizeWalk(o, routed));
+    enriched.push(finalizeWalk(o, routed, targetDate));
   }
 
   const withinWalkCount = enriched.filter((l) => l.withinWalk === true).length;

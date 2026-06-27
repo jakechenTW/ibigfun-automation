@@ -97,3 +97,22 @@ test('no auction keyword -> signal false', () => {
   assert.equal(e.signals.auctionKeyword, false);
   assert.equal(e.hardExclusion.excluded, false);
 });
+
+test('finalizeWalk computes tenure from listingHistory + targetDate', () => {
+  const o = offline({
+    listingHistory: [
+      { date: '2026-06-26', source: '樂屋網', price: '1588', active: true },
+      { date: '2025-09-07', source: '591', price: '1588', active: false },
+    ],
+  });
+  const e = finalizeWalk(o, [700], '2026-06-26');
+  assert.equal(e.tenure.firstListedDate, '2025-09-07');
+  assert.equal(e.tenure.daysOnMarket, 292);
+  assert.equal(e.tenure.priceTrend, 'flat');
+});
+
+test('finalizeWalk tenure is empty when there is no history', () => {
+  const e = finalizeWalk(offline({}), [700], '2026-06-26');
+  assert.equal(e.tenure.recordCount, 0);
+  assert.equal(e.tenure.daysOnMarket, null);
+});
