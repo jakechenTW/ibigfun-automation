@@ -1,8 +1,8 @@
 import * as fs from 'node:fs';
 import { collectListings } from './extract.ts';
-import { loadEnv } from './http.ts';
+import { loadEnv, defaultDeps } from './http.ts';
 import type { Logger } from './journal.ts';
-import type { RunContext } from './profiles.ts';
+import { searchFiltersFromProfile, type RunContext } from './profiles.ts';
 import type { StepOutput } from './run.ts';
 import { loadExits } from './mrt.ts';
 import { enrichOffline } from './enrich-offline.ts';
@@ -102,7 +102,8 @@ export async function enrichStep(ctx: RunContext, logger: Logger): Promise<StepO
 export async function fetchStep(ctx: RunContext, logger: Logger): Promise<StepOutput> {
   const { profile, range } = ctx;
   loadEnv();
-  const { listings, dropped, duplicates } = await collectListings(range, undefined, logger);
+  const filters = searchFiltersFromProfile(profile);
+  const { listings, dropped, duplicates } = await collectListings(range, defaultDeps(filters), logger);
   const result: FetchResult = {
     from: range.from,
     to: range.to,
