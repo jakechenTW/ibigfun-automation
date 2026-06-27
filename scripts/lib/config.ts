@@ -50,6 +50,10 @@ export const SELECTORS = {
     titleLink: 'a.subject_href',
     mapLink: 'a.map-address',
     realPriceLink: 'a[href*="/realprice/"]',
+    // The listing's inline 刊登紀錄 (posting history) table. Lives in a following
+    // sibling `tr.review-data` before the next listing row; class-less <a> inside,
+    // so it never matches `titleLink`. Verified against live DOM 2026-06-27.
+    historyTable: 'table.sub-table',
     // The listing's own nearest-MRT label; read the icon's parent text.
     nearbyStationIcon: 'i.fa-train',
     // Per-row cell indices (0-based). Cells hold up to two newline-separated

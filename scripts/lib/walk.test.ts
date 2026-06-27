@@ -15,7 +15,7 @@ function offline(over: Partial<OfflineEnriched>): OfflineEnriched {
   return {
     title: '美寓', url: null, addressOrArea: '台北市中正區X街', nearbyStation: null, coordinate: { lat: 25, lng: 121 },
     publishedDate: null, totalPrice: '1000萬', totalPing: '20坪', unitPrice: '50萬/坪',
-    floor: '3', totalFloors: '5', typeLayout: '公寓', age: '30', parking: '無車位', realPriceUrl: null,
+    floor: '3', totalFloors: '5', typeLayout: '公寓', age: '30', parking: '無車位', realPriceUrl: null, listingHistory: [],
     totalPriceWan: 1000, totalPriceNtd: 10_000_000, totalPingNum: 20, unitPriceWan: 50, ageNum: 30,
     monthlyMortgage: 32031, district: '中正區', coordConsistent: true,
     candidates: [cand('東門', '4', 600)], hasAuction: false, ...over,
