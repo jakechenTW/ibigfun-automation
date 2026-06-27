@@ -10,3 +10,12 @@ export function manifestPath(label: string): string {
 export function journalPath(label: string): string {
   return path.join(runDir(label), 'journal.jsonl');
 }
+export function listingsPath(label: string): string {
+  return path.join(runDir(label), 'listings.json');
+}
+export function enrichedPath(label: string): string {
+  return path.join(runDir(label), 'enriched.json');
+}
+export function reportPath(label: string): string {
+  return path.join(runDir(label), 'report.md');
+}

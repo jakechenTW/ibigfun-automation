@@ -176,7 +176,7 @@ See `data/README.md` for the dataset columns and the full distance rules, and
 
 The committed fetch script is browserless: it logs in via form POST, calls the
 two JSON APIs, paginates, normalizes each listing per the field-mapping table
-above, and writes to `state/listings-<date>.json` and stdout. It does **fetch +
+above, and writes to `state/runs/<label>/listings.json` and stdout. It does **fetch +
 normalize only** — MRT distance, estimation, and evaluation stay with the
 report step.
 

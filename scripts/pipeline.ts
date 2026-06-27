@@ -28,7 +28,7 @@ import { runStep } from './lib/run.ts';
 import { composeNotifyCommand, runNotify, renderFailDetails } from './lib/notify.ts';
 import { fetchStep, enrichStep } from './lib/steps.ts';
 import { resolveRange, rangeFlags, type RunRange } from './lib/range.ts';
-import { runDir } from './lib/runpaths.ts';
+import { runDir, reportPath } from './lib/runpaths.ts';
 
 const now = () => new Date().toISOString();
 
@@ -76,8 +76,8 @@ async function cmdRun(argv: string[]): Promise<void> {
     if (item.step === 'report') {
       console.error(
         `\n■ report is an agent step — it cannot be auto-run.\n` +
-        `  Do the agent work (triage, estimate, evaluate, write reports/${range.label}.md), then run:\n` +
-        `    npm run pipeline -- mark report --status ok --artifact reports/${range.label}.md \\\n` +
+        `  Do the agent work (triage, estimate, evaluate, write ${reportPath(range.label)}), then run:\n` +
+        `    npm run pipeline -- mark report ${rangeFlags(range)} --status ok --artifact ${reportPath(range.label)} \\\n` +
         `      --status-notify <ok|warn|fail> --title "<short>" --tool <codex|claude>\n` +
         `  Then re-run: npm run pipeline -- run ${rangeFlags(range)}\n`);
       process.exit(0);
@@ -85,11 +85,11 @@ async function cmdRun(argv: string[]): Promise<void> {
     if (item.step === 'notify') {
       if (!m.notify) fail('notify requires report to be marked first (--status-notify + --title set m.notify).');
       if (dryRun) {
-        console.error(`[dry-run] would send:\n  ${composeNotifyCommand(m.notify, `reports/${range.label}.md`)}`);
+        console.error(`[dry-run] would send:\n  ${composeNotifyCommand(m.notify, reportPath(range.label))}`);
         continue;
       }
       const status = await runStep(m, 'notify', async (logger) => {
-        const { exitCode, stderr } = runNotify(m.notify as NotifyParams, `reports/${range.label}.md`);
+        const { exitCode, stderr } = runNotify(m.notify as NotifyParams, reportPath(range.label));
         logger.event(exitCode === 0 ? 'info' : 'error', 'notify.sent',
           `ai-notify exited ${exitCode}`, { exitCode, stderr });
         if (exitCode !== 0) throw new Error(`ai-notify exited ${exitCode}: ${stderr.trim()}`);

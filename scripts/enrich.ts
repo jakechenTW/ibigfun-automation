@@ -1,12 +1,12 @@
 /**
  * Deterministic enrichment of scraped listings for the daily report.
  *
- * Reads state/listings-<date>.json and adds: parsed numbers, monthly mortgage,
+ * Reads state/runs/<label>/listings.json and adds: parsed numbers, monthly mortgage,
  * nearest MRT exit by **walking distance** (OpenRouteService foot routing over
  * OSM data, cheap haversine pre-filter to pick candidate exits), a reliability
  * gate, an objective hard-exclusion flag (>10-min walk when reliable), and an
  * advisory auction-keyword signal for the agent. Writes
- * state/enriched-<date>.json and stdout.
+ * state/runs/<label>/enriched.json and stdout.
  *
  * Estimation (market price, rent) and the recommend/exclude judgment stay with
  * the agent (docs/reporting-rules.md).
@@ -25,6 +25,7 @@ import * as fs from 'node:fs';
 import { resolveRange, rangeFlags, type RunRange } from './lib/range.ts';
 import { consoleLogger } from './lib/journal.ts';
 import { enrichStep } from './lib/steps.ts';
+import { listingsPath } from './lib/runpaths.ts';
 
 function fail(message: string): never {
   console.error(`BAD INPUT: ${message}`);
@@ -38,7 +39,7 @@ async function main(): Promise<void> {
   } catch (e) {
     fail((e as Error).message);
   }
-  const inPath = `state/listings-${range.label}.json`;
+  const inPath = listingsPath(range.label);
   if (!fs.existsSync(inPath)) {
     fail(`${inPath} not found. Run "npm run fetch -- ${rangeFlags(range)}" first.`);
   }

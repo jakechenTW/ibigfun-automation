@@ -20,7 +20,8 @@ locally; never commit `.env`. See `docs/credentials.md`.
 - `docs/` — fetching, credentials, reporting rules, automation state.
 - `data/` — static reference data (Taipei MRT exit coordinates).
 - `templates/` — notification template.
-- `reports/`, `state/` — local generated output and state; git-ignored.
+- `state/` — local generated output and state; git-ignored. Per-run artifacts
+  (`listings.json`, `enriched.json`, `report.md`) live under `state/runs/<label>/`.
 
 ## Safety
 
