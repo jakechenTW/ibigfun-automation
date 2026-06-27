@@ -19,7 +19,9 @@ locally; never commit `.env`. See `docs/credentials.md`.
 Every run requires `--profile <id>`.
 
 - `investment`: current rental-yield investment monitor.
-- `owner-occupied`: self-use monitor based on the saved iBigFun search criteria.
+- `owner-occupied`: self-use monitor with saved iBigFun search criteria
+  documented/designed, but incomplete until `fetchFilters.enabled` is true. For
+  now, runs use the captured shared fetch universe and must notify `warn`.
 
 Run artifacts live under `state/runs/<profile>/<label>/`.
 

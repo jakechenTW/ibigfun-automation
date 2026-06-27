@@ -150,8 +150,10 @@ ai-notify --tool <codex|claude> --status <ok|warn|fail> \
 - Use `.env.example` as the committed template; the real `.env` stays local.
 - Do not print `IBIGFUN_ACCOUNT` or `IBIGFUN_PASSWORD` in logs, reports,
   notifications, screenshots, or debug output.
-- If login is blocked by CAPTCHA, 2FA, or account-risk checks, stop and ask for
-  manual confirmation. Do not bypass those controls.
+- If login is blocked by CAPTCHA, 2FA, or account-risk checks, interactive
+  agents stop and ask for manual confirmation. Headless daily workers must use
+  `npm run pipeline -- fail ... --tool <codex|claude>`. Do not bypass those
+  controls.
 - Generated reports and local run state under `state/` (incl.
   `state/runs/<profile>/<label>/`) are git-ignored. Do not commit them unless
   the user explicitly asks.

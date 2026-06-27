@@ -17,7 +17,7 @@ Trigger 也會在訊息裡告訴你要監測的區間。把它對應成 pipeline
 
 ## 動手前先讀
 
-`AGENTS.md`、`docs/reporting-rules.md`、`profiles/<profile>.json`，以及 profile 裡指定的規則檔與模板——估價、評估、走路距離三角定位、可疑物件判斷都以它們為準。
+`AGENTS.md`、`docs/reporting-rules.md`、`docs/credentials.md`、`docs/automation-state.md`、`profiles/<profile>.json`，以及 profile 裡指定的規則檔與模板——估價、評估、走路距離三角定位、可疑物件判斷都以它們為準。
 
 ## 執行流程（指令照抄）
 
