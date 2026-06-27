@@ -7,6 +7,8 @@
 Trigger 必須提供 profile，例如 `investment` 或 `owner-occupied`。你不得自行猜測 profile。
 Trigger 必須提供實際 tool name（`codex` 或 `claude`），且必須和真正執行的 agent 相符。
 
+可複製的排程 trigger 範本（含兩個 profile 與錯開時間建議，Codex / Claude Code 通用）見 `prompts/schedule-triggers.md`。
+
 Trigger 也會在訊息裡告訴你要監測的區間。把它對應成 pipeline 參數，**你不自行計算日期**：
 
 - 給了起訖（from / to）→ `--from <from> --to <to>`
