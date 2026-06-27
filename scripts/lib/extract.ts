@@ -12,6 +12,7 @@ import { MAX_PAGES, HISTORY_CONCURRENCY } from './config.ts';
 import { pageCount, type SearchListResponse, type ListItem, type HistoryEntry, type OffMarketEntry } from './api.ts';
 import { apiItemToListing, onMarketToRows, offMarketToRows, mergeHistory } from './map.ts';
 import { defaultDeps } from './http.ts';
+import { consoleLogger, type Logger } from './journal.ts';
 
 export interface CollectDeps {
   ensureSession: () => Promise<void>;
@@ -34,7 +35,11 @@ async function runPool<T, R>(items: T[], limit: number, worker: (item: T, index:
   return results;
 }
 
-export async function collectListings(date: string, deps: CollectDeps = defaultDeps()): Promise<Listing[]> {
+export async function collectListings(
+  date: string,
+  deps: CollectDeps = defaultDeps(),
+  logger: Logger = consoleLogger('fetch'),
+): Promise<{ listings: Listing[]; dropped: number }> {
   await deps.ensureSession();
 
   // 1) Gather all listing rows across pages.
@@ -54,13 +59,16 @@ export async function collectListings(date: string, deps: CollectDeps = defaultD
     try {
       on = await deps.fetchOnMarketHistory(it.id);
     } catch (e) {
-      console.error(`WARN history: listing ${it.id} on-market fetch failed after retries (${(e as Error).message}); dropping history`);
+      logger.event('warn', 'history.drop',
+        `listing ${it.id} on-market fetch failed after retries; dropping history`,
+        { listingId: it.id, reason: (e as Error).message, phase: 'on-market' });
       dropped++;
       return apiItemToListing(it, []);
     }
     if (on.length === 0) {
-      // A live listing always has >=1 on-market source; empty == suspicious.
-      console.error(`WARN history: listing ${it.id} returned no on-market records (likely throttled); dropping history`);
+      logger.event('warn', 'history.drop',
+        `listing ${it.id} returned no on-market records (likely throttled); dropping history`,
+        { listingId: it.id, reason: 'empty on-market', phase: 'on-market' });
       dropped++;
       return apiItemToListing(it, []);
     }
@@ -68,11 +76,15 @@ export async function collectListings(date: string, deps: CollectDeps = defaultD
     try {
       off = await deps.fetchOffMarketHistory(it.uuid);
     } catch (e) {
-      console.error(`WARN history: listing ${it.id} off-market fetch failed after retries (${(e as Error).message}); keeping on-market only`);
+      logger.event('warn', 'history.off-market-skip',
+        `listing ${it.id} off-market fetch failed after retries; keeping on-market only`,
+        { listingId: it.id, reason: (e as Error).message, phase: 'off-market' });
     }
     return apiItemToListing(it, mergeHistory(onMarketToRows(on), offMarketToRows(off)));
   });
 
-  console.error(`history: ${items.length - dropped} listings ok, ${dropped} dropped (see WARN above)`);
-  return listings;
+  logger.event('info', 'history.summary',
+    `${items.length - dropped} listings ok, ${dropped} dropped`,
+    { ok: items.length - dropped, dropped });
+  return { listings, dropped };
 }
