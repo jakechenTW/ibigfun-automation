@@ -87,13 +87,19 @@ exclude_land=1
 
 (The request also sends empty `price_segment[min_val]=` and `total_floor[min_val]=` params.)
 
-The first profile-aware implementation keeps this captured request shape for all
-profiles. Profile JSON files may document desired filters, but fetch does not
-apply them until `fetchFilters.enabled` is deliberately wired and tested.
-Specifically, `owner-occupied` currently runs over this captured fetch universe,
-not over complete owner-occupied discovery. Treat owner-occupied runs as
-`warn` while `profiles/owner-occupied.json` has `fetchFilters.enabled: false`,
-because matching listings outside the captured universe may be absent.
+The fetch body is profile-aware. With no profile filters (or a profile whose
+`fetchFilters.enabled` is `false`) the captured investment shape above is sent.
+When a profile has `fetchFilters.enabled: true`, `buildSearchBody` emits that
+profile's filters instead: `city`, `town[]`, `house_type[]`,
+`price_segment[max_val]`, `floor_segment[min_val]` (no max), `main_ping_number[min_val]`,
+`house_age_segment[max_val]`, and `parking` (the `total_floor` cap and the
+investment `floor 2–4` window are omitted). The `method`, `on_market`, `expand`,
+`exclude_land`, and `source_web[]`/`source[]` allow-list are shared by both shapes.
+`owner-occupied` enabled and verified its filters on 2026-06-27.
+
+`main_ping_number` is a server-side filter only: `/api/search/list` returns
+`total_ping`, not 主建物 ping, so a `main_ping >= 30` constraint cannot be
+re-verified from the response.
 
 Response JSON shape: `{ data: ListItem[], total_records: number, per_page: number, current_page: number }`.
 

@@ -44,7 +44,7 @@ Trigger 也會在訊息裡告訴你要監測的區間。把它對應成 pipeline
 ## status 對應
 
 - `warn`：有推薦/符合條件、接近門檻/候選、資料偏舊、登入 fallback、未驗證 filter 對照，或有任何 manual-review 項。
-- `owner-occupied`：在 `profiles/owner-occupied.json` 的 `fetchFilters.enabled` 仍為 `false` 時，只能代表目前 captured fetch universe，不是完整自住 profile discovery；這類 run 必須用 `warn`。
+- `owner-occupied`：`fetchFilters.enabled=true` 後為完整自住 discovery；依一般 status 規則判斷（有符合/候選/manual 即 `warn`，乾淨無符合且資料新鮮可 `ok`）。若任何 town/house_type 對照仍標「待驗證」，仍以 `warn` 處理。
 - `ok`：乾淨、無推薦/符合條件、資料新鮮。
 - `fail`：監測無法完成（見下）。
 

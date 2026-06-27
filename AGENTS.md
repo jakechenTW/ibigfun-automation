@@ -12,8 +12,8 @@ rakuya, etc.). A listing's canonical URL therefore often points to the
 originating source rather than `ibigfun.com` — that is expected, not a bug. The
 daily job reads iBigFun's latest-sale view for the selected profile and target
 date using the currently implemented fetch filters. Some profile filter sets may
-be documented but not yet wired; owner-occupied is incomplete discovery until
-its fetch filters are verified and enabled. The job evaluates each fetched
+be documented but not yet wired; owner-occupied applies its own fetch filters
+(verified and enabled 2026-06-27). The job evaluates each fetched
 listing against `docs/reporting-rules.md` plus the profile rule doc, writes a
 report, and notifies.
 
