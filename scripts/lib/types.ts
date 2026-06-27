@@ -46,9 +46,10 @@ export interface Listing {
   bathroom: number | null;
 }
 
-/** Output document written to state/listings-<date>.json and stdout. */
+/** Output document written to state/listings-<label>.json and stdout. */
 export interface FetchResult {
-  targetDate: string;
+  from: string;
+  to: string;
   fetchedAt: string;
   count: number;
   listings: Listing[];
@@ -75,7 +76,7 @@ export interface Reliability {
 /** Deterministic "how long on market" summary derived from `listingHistory`. */
 export interface ListingTenure {
   firstListedDate: string | null; // earliest date across all records (incl. 下架)
-  daysOnMarket: number | null; // targetDate − firstListedDate; null if no history / bad date
+  daysOnMarket: number | null; // anchorDate − firstListedDate; null if no history / bad date
   recordCount: number; // total history rows
   sourceCount: number; // distinct non-empty sources
   priceTrend: 'flat' | 'dropped' | 'raised' | 'unknown';
@@ -105,9 +106,10 @@ export interface EnrichedListing extends Listing {
   tenure: ListingTenure;
 }
 
-/** Output document written to state/enriched-<date>.json and stdout. */
+/** Output document written to state/enriched-<label>.json and stdout. */
 export interface EnrichResult {
-  targetDate: string;
+  from: string;
+  to: string;
   enrichedAt: string;
   count: number;
   withinWalkCount: number;
