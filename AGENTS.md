@@ -31,9 +31,9 @@ Do these once before the first run; stop and ask the user if any fails:
 2. Compute the target date: the previous calendar day in `Asia/Taipei` (see
    "Report Date" below). A run on `2026-06-27` targets `2026-06-26`.
 3. Fetch the target date's listings → `docs/fetching.md`
-   (`npm run fetch -- --date <target>` writes `state/listings-<target>.json`).
+   (`npm run fetch -- --date <target>` writes `state/runs/<label>/listings.json`).
 4. Enrich deterministically (`npm run enrich -- --date <target>` writes
-   `state/enriched-<target>.json`): nearest MRT exit by **walking distance**
+   `state/runs/<label>/enriched.json`): nearest MRT exit by **walking distance**
    (OpenRouteService foot routing over OSM), monthly mortgage, parsed numbers,
    objective hard-exclusion flags (>10-min walk when data is reliable), and an
    advisory `signals.auctionKeyword` flag the agent weighs (no longer an
@@ -50,7 +50,7 @@ Do these once before the first run; stop and ask the user if any fails:
    `docs/reporting-rules.md`.
 8. Evaluate against the investment criteria, exclusions, and sorting, using the
    enriched fields plus your estimates → `docs/reporting-rules.md`.
-9. Write `reports/YYYY-MM-DD.md` (target date in the filename) using
+9. Write `state/runs/<label>/report.md` using
    `templates/daily-notify-template.md` as the structure.
 10. Notify with the canonical command below.
 
@@ -62,12 +62,12 @@ evaluation, and writing the report.
 - `npm run fetch -- --date <target>` — Browserless fetch. Logs in from `.env`
   via a form POST, calls iBigFun's JSON APIs (`/api/search/list` +
   `on-market/o2o-same`), paginates by `total_records`, writes normalized
-  listings to `state/listings-<target>.json`. Details: `docs/fetching.md`.
+  listings to `state/runs/<label>/listings.json`. Details: `docs/fetching.md`.
 - `npm run enrich -- --date <target>` — reads that file and adds walking
   distance to the nearest MRT exit (needs `ORS_API_KEY` in `.env`; results
   cached in `state/route-cache.json`), mortgage, parsed numbers, a reliability
   gate, hard-exclusion (walk only), and the advisory auction-keyword signal →
-  `state/enriched-<target>.json`. Estimation
+  `state/runs/<label>/enriched.json`. Estimation
   and the final recommend/exclude judgment stay with the agent. The decision is
   `withinWalk` (true ≤10-min walk / false too far / null unreliable→manual).
 - `npm run route -- --lat <> --lng <>` — deterministic nearest-walk exit for one
@@ -78,15 +78,14 @@ evaluation, and writing the report.
   inclusive date range; a single day is the default (previous Taipei day) and
   uses the bare date as its label. A multi-day range uses the label
   `<from>_<to>`. One run per label is recorded under `state/runs/<label>/`;
-  artifacts are `state/listings-<label>.json`, `state/enriched-<label>.json`,
-  `reports/<label>.md`. A whole range is fetched in **one** query
+  artifacts are `state/runs/<label>/{listings.json, enriched.json, report.md}`. A whole range is fetched in **one** query
   (`add_date`/`add_date_max`), deduped by listing id, and emitted as **one**
   merged report + **one** notification. Already-ok steps are skipped, so
   re-running resumes.
   - `npm run pipeline -- status [--date <target> | --from <a> --to <b>]` —
     per-step status, timing, summary, last error, and the journal tail.
   - `npm run pipeline -- mark report [--date <target> | --from <a> --to <b>]
-    --status ok --artifact reports/<label>.md --status-notify <ok|warn|fail>
+    --status ok --artifact state/runs/<label>/report.md --status-notify <ok|warn|fail>
     --title "<short>" --tool <codex|claude>` — mark the agent report step done
     and record the notify parameters.
   - `npm run pipeline -- fail [--date <d> | --from <a> --to <b>] --reason "<short>"
@@ -104,7 +103,7 @@ covered by `npm test`.
 
 Default recurring runs report on the previous calendar day in `Asia/Taipei`, not
 the run date — this avoids an incomplete same-day report. Set both `add_date`
-and `add_date_max` to the target date, write `reports/<target>.md`, and title the
+and `add_date_max` to the target date, write `state/runs/<label>/report.md`, and title the
 report for the target date. Only use the run date itself when the user explicitly
 asks for a same-day/intraday check, and mark such output as incomplete/intraday.
 
@@ -115,7 +114,7 @@ Send the finished report only after it is written. Use this exact command shape:
 ```bash
 ai-notify --tool <codex|claude> --status <ok|warn|fail> \
   --task "每日 iBigFun 投資房源監測" --title "<short title>" \
-  --details-file reports/YYYY-MM-DD.md
+  --details-file state/runs/<label>/report.md
 ```
 
 - `--tool`: the agent actually running (`codex` or `claude`).
@@ -135,7 +134,7 @@ ai-notify --tool <codex|claude> --status <ok|warn|fail> \
   notifications, screenshots, or debug output.
 - If login is blocked by CAPTCHA, 2FA, or account-risk checks, stop and ask for
   manual confirmation. Do not bypass those controls.
-- Generated reports under `reports/` and local state under `state/` are
+- Generated reports and local run state under `state/` (incl. `state/runs/<label>/`) are
   git-ignored. Do not commit them unless the user explicitly asks.
 
 ## Source-Of-Truth Map
