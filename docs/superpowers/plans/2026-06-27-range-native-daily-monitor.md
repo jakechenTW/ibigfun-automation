@@ -238,6 +238,7 @@ Replace the manifest's single `targetDate` with `from`/`to` and add a run-level 
   - `writeManifest(m: Manifest, now: string): void` (unchanged signature; resolves dir via `rangeLabel(m.from, m.to)`)
 
 - [ ] **Step 1: Update `manifest.test.ts` to the new shape (failing).** Apply these edits:
+  - Remove the **duplicate** `import { planNextSteps } from './manifest.ts';` at line 31 (it is already imported on line 5 — this is a pre-existing `tsc` error that must go).
   - Replace every `createManifest('2026-06-26', X)` with `createManifest('2026-06-26', '2026-06-26', X)`, and `createManifest(date, X)` (the round-trip test) with `createManifest(date, date, X)`.
   - In the first test, replace `assert.equal(m.targetDate, '2026-06-26');` with:
     ```ts
@@ -822,8 +823,8 @@ Thread `RunRange` through `run` / `status` / `mark`; update the standalone `fetc
         fail(`${inPath} not found. Run "npm run fetch -- ${rangeFlags(range)}" first.`);
       }
       const { artifacts } = await enrichStep(range, consoleLogger('enrich'));
-      console.error(`Wrote enriched listings to ${artifacts[0]}`);
-      process.stdout.write(fs.readFileSync(artifacts[0], 'utf8'));
+      console.error(`Wrote enriched listings to ${artifacts![0]}`);
+      process.stdout.write(fs.readFileSync(artifacts![0], 'utf8'));
     }
     ```
     (`fail` returns `never`, so `range` is definitely assigned after the try/catch.)
