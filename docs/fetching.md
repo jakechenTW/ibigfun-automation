@@ -42,7 +42,7 @@ CAPTCHA / 2FA / risk / missing creds still hard-stop. See `scripts/lib/http.ts`.
 POST https://www.ibigfun.com/api/search/list
 ```
 
-Headers: `x-requested-with: XMLHttpRequest`, `content-type: application/x-www-form-urlencoded`, `accept: application/json`, plus the session cookie.
+Headers: `x-requested-with: XMLHttpRequest`, `content-type: application/x-www-form-urlencoded`, `accept: application/json, text/javascript, */*; q=0.01`, plus the session cookie.
 
 Body (filter + source allow-list, captured 2026-06-27):
 
@@ -84,6 +84,8 @@ source[]=590
 exclude_land=1
 ```
 
+(The request also sends empty `price_segment[min_val]=` and `total_floor[min_val]=` params.)
+
 Response JSON shape: `{ data: ListItem[], total_records: number, per_page: number, current_page: number }`.
 
 ### Endpoint 2 — listing history (刊登紀錄)
@@ -121,7 +123,7 @@ The API returns camelCase/snake_case fields; these map to the normalized `Listin
 
 | API field | Listing field | Notes |
 |---|---|---|
-| `id` | `id` | String (coerce from number if needed) |
+| `id` | `id` | Number — stable iBigFun listing id; also the o2o-same key |
 | `source` | `source` | String (coerce from number if needed) |
 | `subject` | `title` | |
 | `link` | `url`, `sourceLink` | Canonical URL — may point to 591, rakuya, etc. (see source model in `AGENTS.md`) |
