@@ -6,15 +6,15 @@
   "templatePath": "templates/owner-occupied-notify-template.md",
   "requiresFilterVerification": true,
   "fetchFilters": {
-    "enabled": false,
+    "enabled": true,
     "sourceUrl": "https://www.ibigfun.com/lists/latest?page=1&expand=0&method=all_case&on_market=1&city=1&town=1%2C4%2C6%2C8%2C9&price_segment=%2C7000&house_type=17&floor_segment=7%2C&main_ping_number=30%2C&house_age_segment=%2C25&parking=%E5%B9%B3%E9%9D%A2",
     "city": { "id": "1", "nameZh": "台北市" },
     "towns": [
-      { "id": "1", "nameZh": "待驗證" },
-      { "id": "4", "nameZh": "待驗證" },
-      { "id": "6", "nameZh": "待驗證" },
-      { "id": "8", "nameZh": "待驗證" },
-      { "id": "9", "nameZh": "待驗證" }
+      { "id": "1", "nameZh": "中正區" },
+      { "id": "4", "nameZh": "中山區" },
+      { "id": "6", "nameZh": "大安區" },
+      { "id": "8", "nameZh": "信義區" },
+      { "id": "9", "nameZh": "士林區" }
     ],
     "houseType": { "id": "17", "nameZh": "待驗證" },
     "priceMaxWan": 7000,

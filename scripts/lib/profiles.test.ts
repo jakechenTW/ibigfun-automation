@@ -23,14 +23,14 @@ test('loadProfile validates and returns investment metadata', () => {
   assert.equal(p.fetchFilters.enabled, false);
 });
 
-test('loadProfile keeps owner-occupied coded filters readable and unverified', () => {
+test('loadProfile keeps owner-occupied coded filters readable and verified', () => {
   const p = loadProfile('owner-occupied');
   assert.equal(p.id, 'owner-occupied');
   assert.equal(p.requiresFilterVerification, true);
-  assert.equal(p.fetchFilters.enabled, false);
+  assert.equal(p.fetchFilters.enabled, true);
   assert.equal(p.fetchFilters.city?.nameZh, '台北市');
   assert.deepEqual(p.fetchFilters.towns?.map((t) => t.id), ['1', '4', '6', '8', '9']);
-  assert.ok(p.fetchFilters.towns?.every((t) => t.nameZh === '待驗證'));
+  assert.deepEqual(p.fetchFilters.towns?.map((t) => t.nameZh), ['中正區', '中山區', '大安區', '信義區', '士林區']);
   assert.equal(p.fetchFilters.houseType?.id, '17');
   assert.deepEqual(p.hardCriteria.houseType, { id: '17', nameZh: '待驗證' });
   assert.equal(p.fetchFilters.priceMaxWan, 7000);
