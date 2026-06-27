@@ -11,19 +11,24 @@
  *   pipeline status [--date <d> | --from <d> --to <d>]
  *   pipeline mark <step> --status <ok|failed> [--artifact <p>]
  *                 [--status-notify <ok|warn|fail>] [--title <s>] [--tool <codex|claude>]
+ *   pipeline fail   [--date <d> | --from <d> --to <d>] --reason "<short>" [--tool <codex|claude>]
+ *                   [--title <s>] [--dry-run]
  *
  * Default (no date flags): yesterday in Taipei time (single-day run).
  * Exit codes: 0 ok / stopped-at-agent · 1 a step failed · 2 bad input.
  */
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import {
   loadOrCreateManifest, readManifest, writeManifest, setStep, planNextSteps,
   STEP_ORDER, type StepName, type NotifyParams,
 } from './lib/manifest.ts';
 import { readJournal, journalLogger } from './lib/journal.ts';
 import { runStep } from './lib/run.ts';
-import { composeNotifyCommand, runNotify } from './lib/notify.ts';
+import { composeNotifyCommand, runNotify, renderFailDetails } from './lib/notify.ts';
 import { fetchStep, enrichStep } from './lib/steps.ts';
 import { resolveRange, rangeFlags, type RunRange } from './lib/range.ts';
+import { runDir } from './lib/runpaths.ts';
 
 const now = () => new Date().toISOString();
 
@@ -158,12 +163,48 @@ function cmdMark(argv: string[]): void {
   console.error(`✓ marked ${step} ${status} for ${range.label}.`);
 }
 
+async function cmdFail(argv: string[]): Promise<void> {
+  const range = resolveRangeOrExit(argv);
+  const reason = flag(argv, '--reason');
+  if (!reason || reason.startsWith('--')) fail('fail requires --reason "<short>".');
+  const tool = flag(argv, '--tool') ?? 'claude';
+  if (tool !== 'codex' && tool !== 'claude') fail('--tool must be codex|claude.');
+  const title = flag(argv, '--title') ?? '每日監測中斷';
+  const dryRun = has(argv, '--dry-run');
+
+  const m = readManifest(range.label) ?? loadOrCreateManifest(range.from, range.to, now());
+  if (m.steps.notify.status === 'ok') {
+    console.error('notify already sent for this run; not sending a fail notification.');
+    process.exit(0);
+  }
+  m.failure = { reason, where: 'pipeline fail' };
+  writeManifest(m, now());
+
+  const tail = readJournal(range.label).slice(-20);
+  const detailsFile = path.join(runDir(range.label), 'fail-details.md');
+  fs.mkdirSync(runDir(range.label), { recursive: true });
+  fs.writeFileSync(detailsFile, renderFailDetails(range, reason, tail));
+
+  const params: NotifyParams = { tool, status: 'fail', title };
+  if (dryRun) {
+    console.error(`[dry-run] wrote ${detailsFile}; would send:\n  ${composeNotifyCommand(params, detailsFile)}`);
+    process.exit(0);
+  }
+  journalLogger(range.label, 'notify', now).event('error', 'run.fail', `run failed: ${reason}`, { reason });
+  const { exitCode, stderr } = runNotify(params, detailsFile);
+  journalLogger(range.label, 'notify', now).event(exitCode === 0 ? 'info' : 'error', 'notify.sent',
+    `fail notification ai-notify exited ${exitCode}`, { exitCode, stderr });
+  if (exitCode !== 0) { console.error(`✗ fail notification failed: ${stderr.trim()}`); process.exit(1); }
+  console.error(`✓ fail notification sent for ${range.label} (${reason}).`);
+}
+
 async function main(): Promise<void> {
   const [cmd, ...rest] = process.argv.slice(2);
   if (cmd === 'run') return cmdRun(rest);
   if (cmd === 'status') return cmdStatus(rest);
   if (cmd === 'mark') return cmdMark(rest);
-  fail(`unknown command "${cmd ?? ''}"; expected run|status|mark.`);
+  if (cmd === 'fail') return cmdFail(rest);
+  fail(`unknown command "${cmd ?? ''}"; expected run|status|mark|fail.`);
 }
 
 main().catch((err) => { console.error(err); process.exit(1); });
