@@ -22,6 +22,8 @@ Use this profile for rental-yield-oriented investment screening.
   `docs/reporting-rules.md`（Market Price & Premium）。
 - 行情資料若僅有過期／弱／逾時／跨站來源，物件不可標推薦。
 - 租金：agent 粗估同區同類型可比租金，僅供參考、不影響分桶；一律標低信心與人工確認。
+- 地上權／使用權等非自由持分物件：開價不可直接比自由持分行情，依 `docs/reporting-rules.md`
+  的「非自由持分（地上權／使用權）校正」處理（標可疑/待查或排除，不得標推薦）。
 
 ## Report Buckets
 
