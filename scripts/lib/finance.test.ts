@@ -16,10 +16,10 @@ test('zero-rate loan is principal split evenly', () => {
   assert.equal(monthlyMortgage(360000, 0, 30), 1000);
 });
 
-test('discountPercent matches the report example (55 vs 35.2 -> 36%)', () => {
+test('discountPercent: 55 vs 35.2 -> 36%', () => {
   assert.ok(Math.abs(discountPercent(55, 35.2) - 36.0) < 0.1);
 });
 
-test('rentCoverage matches the report example (34000 / 40449 -> ~0.84)', () => {
+test('rentCoverage: 34000 / 40449 -> ~0.84', () => {
   assert.ok(Math.abs(rentCoverage(34000, 40449) - 0.84) < 0.01);
 });
