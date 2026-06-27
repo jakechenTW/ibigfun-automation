@@ -5,6 +5,7 @@
 ## 監測 profile 與區間（由 trigger 注入）
 
 Trigger 必須提供 profile，例如 `investment` 或 `owner-occupied`。你不得自行猜測 profile。
+Trigger 必須提供實際 tool name（`codex` 或 `claude`），且必須和真正執行的 agent 相符。
 
 Trigger 也會在訊息裡告訴你要監測的區間。把它對應成 pipeline 參數，**你不自行計算日期**：
 
@@ -12,7 +13,7 @@ Trigger 也會在訊息裡告訴你要監測的區間。把它對應成 pipeline
 - 給了單一日期 → `--date <date>`
 - 沒給 → 省略參數，pipeline 自動用「前一個台北日」（最常見的夜跑）
 
-下文用 `[profile 參數]` 代表 `--profile <profile>`，用 `[範圍參數]` 代表日期或區間參數（可能是空字串）。
+下文用 `[profile 參數]` 代表 `--profile <profile>`，用 `[範圍參數]` 代表日期或區間參數（可能是空字串），用 `[tool 參數]` 代表 `--tool <codex|claude>`。
 
 ## 動手前先讀
 
@@ -34,7 +35,7 @@ Trigger 也會在訊息裡告訴你要監測的區間。把它對應成 pipeline
 
    ```
    npm run pipeline -- mark report [profile 參數] [範圍參數] --status ok --artifact state/runs/<profile>/<label>/report.md \
-     --status-notify <ok|warn|fail> --title "<short>" --tool claude
+     --status-notify <ok|warn|fail> --title "<short>" [tool 參數]
    npm run pipeline -- run [profile 參數] [範圍參數]
    ```
 
@@ -54,7 +55,7 @@ Trigger 也會在訊息裡告訴你要監測的區間。把它對應成 pipeline
 - 失敗逃生口（唯一一條）：
 
   ```
-  npm run pipeline -- fail [profile 參數] [範圍參數] --reason "<短原因>" --tool claude
+  npm run pipeline -- fail [profile 參數] [範圍參數] --reason "<短原因>" [tool 參數]
   ```
 
   它會記錄 run-level 失敗、用安全的 journal tail 組一份 details，送出**一則** `status=fail` 通知，然後停。送出前可先加 `--dry-run` 檢查要送的內容。
