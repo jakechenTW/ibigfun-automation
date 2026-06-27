@@ -10,6 +10,7 @@ state/
 .auth/
 .browser-profiles/
 storageState.json
+.cookies.json
 *.har
 *.trace
 trace.zip
