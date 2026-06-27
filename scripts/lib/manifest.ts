@@ -72,3 +72,32 @@ export function loadOrCreateManifest(date: string, now: string): Manifest {
 export function setStep(m: Manifest, name: StepName, patch: Partial<StepState>): void {
   m.steps[name] = { ...m.steps[name], ...patch };
 }
+
+export interface PlanOpts {
+  only?: StepName;
+  from?: StepName;
+  force?: StepName[];
+}
+export interface PlanItem {
+  step: StepName;
+  action: 'run' | 'skip';
+  reason: string;
+}
+
+/**
+ * Pure resume logic: given a manifest and options, decide which steps to run.
+ * Skips already-ok steps (resume picks up at the first non-ok step); honors
+ * --only / --from / --force. Execution-time control (stop at first failure,
+ * halt at agent steps) lives in pipeline.ts, not here.
+ */
+export function planNextSteps(m: Manifest, opts: PlanOpts = {}): PlanItem[] {
+  const force = new Set(opts.force ?? []);
+  const fromIdx = opts.from ? STEP_ORDER.indexOf(opts.from) : 0;
+  return STEP_ORDER.map((step, idx): PlanItem => {
+    if (opts.only && step !== opts.only) return { step, action: 'skip', reason: 'not --only target' };
+    if (idx < fromIdx) return { step, action: 'skip', reason: 'before --from' };
+    if (force.has(step)) return { step, action: 'run', reason: 'forced' };
+    if (m.steps[step].status === 'ok') return { step, action: 'skip', reason: 'already ok' };
+    return { step, action: 'run', reason: 'not yet ok' };
+  });
+}
