@@ -46,9 +46,9 @@ test('collectListings paginates by total_records/per_page and maps items in orde
     fetchPage: async (_d, p) => pages[p],
     fetchOnMarketHistory: async (id) => [on(id)],
   })));
-  assert.equal(out.length, 3);
-  assert.equal(out[0].id, 1);
-  assert.equal(out[2].id, 3);
+  assert.equal(out.listings.length, 3);
+  assert.equal(out.listings[0].id, 1);
+  assert.equal(out.listings[2].id, 3);
 });
 
 test('collectListings stops at an empty page', async () => {
@@ -56,7 +56,7 @@ test('collectListings stops at an empty page', async () => {
   const { out } = await captureErr(() => collectListings('2026-06-26', okDeps({
     fetchPage: async (_d, p) => pages[p] ?? page([], 100),
   })));
-  assert.equal(out.length, 1);
+  assert.equal(out.listings.length, 1);
 });
 
 test('collectListings merges on-market and off-market history', async () => {
@@ -65,7 +65,7 @@ test('collectListings merges on-market and off-market history', async () => {
     fetchOnMarketHistory: async () => [{ source: '樂屋網', source_id: 'a', total: 1688, subject: 's', add_time: '2026-06-27', link: 'x' }],
     fetchOffMarketHistory: async () => [{ source: '信義房屋', source_id: 'b', total: '1,500', subject: 's', add_time: '2025-12-01', link: 'y' }],
   })));
-  const h = out[0].listingHistory;
+  const h = out.listings[0].listingHistory;
   assert.equal(h.length, 2);
   const off = h.find((e) => e.source === '信義房屋');
   assert.equal(off?.active, false);
@@ -77,8 +77,8 @@ test('collectListings drops history and warns when a listing fetch fails', async
     fetchPage: async () => page([item(1), item(2)], 2),
     fetchOnMarketHistory: async (id) => { if (id === 1) throw new Error('boom'); return [on(id)]; },
   })));
-  assert.deepEqual(out.find((l) => l.id === 1)?.listingHistory, []);
-  assert.equal(out.find((l) => l.id === 2)?.listingHistory.length, 1);
+  assert.deepEqual(out.listings.find((l) => l.id === 1)?.listingHistory, []);
+  assert.equal(out.listings.find((l) => l.id === 2)?.listingHistory.length, 1);
   assert.ok(errs.some((e) => /WARN/.test(e) && e.includes('1')));
   assert.ok(errs.some((e) => /1 dropped/.test(e)));
 });
@@ -88,7 +88,7 @@ test('collectListings treats an empty on-market history as a drop', async () => 
     fetchPage: async () => page([item(5)], 1),
     fetchOnMarketHistory: async () => [],
   })));
-  assert.deepEqual(out[0].listingHistory, []);
+  assert.deepEqual(out.listings[0].listingHistory, []);
   assert.ok(errs.some((e) => /1 dropped/.test(e)));
 });
 
@@ -98,7 +98,23 @@ test('collectListings keeps on-market history when only off-market fails', async
     fetchOnMarketHistory: async (id) => [on(id)],
     fetchOffMarketHistory: async () => { throw new Error('throttled'); },
   })));
-  assert.equal(out[0].listingHistory.length, 1); // on-market survived
+  assert.equal(out.listings[0].listingHistory.length, 1); // on-market survived
   assert.ok(errs.some((e) => /off-market/.test(e) && e.includes('8')));
   assert.ok(errs.some((e) => /0 dropped/.test(e))); // off-market-only fail is not a drop
+});
+
+test('collectListings emits a history.drop event when on-market history is empty', async () => {
+  const events: string[] = [];
+  const logger = { event: (_l: string, ev: string) => { events.push(ev); } };
+  const deps = {
+    ensureSession: async () => {},
+    fetchPage: async () => ({ status: 'ok', total_records: 1, per_page: 30,
+      data: [{ id: 1, uuid: 'u1' }] } as any),
+    fetchOnMarketHistory: async () => [],          // empty => drop
+    fetchOffMarketHistory: async () => [],
+  };
+  const { listings, dropped } = await collectListings('2026-06-26', deps as any, logger as any);
+  assert.equal(listings.length, 1);
+  assert.equal(dropped, 1);
+  assert.ok(events.includes('history.drop'));
 });

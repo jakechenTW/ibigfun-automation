@@ -13,12 +13,10 @@
  * needs a human).
  */
 import * as fs from 'node:fs';
-import * as path from 'node:path';
 import { previousTaipeiDay, isValidDateString } from './lib/date.ts';
 import { BlockedError } from './lib/errors.ts';
-import { loadEnv } from './lib/http.ts';
-import { collectListings } from './lib/extract.ts';
-import type { FetchResult } from './lib/types.ts';
+import { consoleLogger } from './lib/journal.ts';
+import { fetchStep } from './lib/steps.ts';
 
 /** Parse `--date YYYY-MM-DD` (or `--date=...`); default = previous Taipei day. */
 function resolveTargetDate(argv: string[]): string {
@@ -36,21 +34,9 @@ function resolveTargetDate(argv: string[]): string {
 
 async function main(): Promise<void> {
   const targetDate = resolveTargetDate(process.argv.slice(2));
-
-  loadEnv();
-  const listings = await collectListings(targetDate);
-  const result: FetchResult = {
-    targetDate,
-    fetchedAt: new Date().toISOString(),
-    count: listings.length,
-    listings,
-  };
-
-  fs.mkdirSync('state', { recursive: true });
-  const outPath = path.join('state', `listings-${targetDate}.json`);
-  fs.writeFileSync(outPath, JSON.stringify(result, null, 2));
-  console.error(`Wrote ${listings.length} listings to ${outPath}`);
-  process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+  const { artifacts } = await fetchStep(targetDate, consoleLogger('fetch'));
+  console.error(`Wrote listings to ${artifacts![0]}`);
+  process.stdout.write(fs.readFileSync(artifacts![0], 'utf8'));
 }
 
 main().catch((err) => {
