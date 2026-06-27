@@ -8,8 +8,6 @@
 export const SIGNIN_URL = 'https://www.ibigfun.com/user/signin';
 export const LOGIN_URL = 'https://www.ibigfun.com/user/login';
 export const SEARCH_LIST_URL = 'https://www.ibigfun.com/api/search/list';
-export const O2O_SAME_URL = 'https://api.ibigfun.com/on-market/o2o-same';
-
 /** On-market cross-source posting history for one listing (id in the path). */
 export function historyUrl(id: number): string {
   return `https://api.ibigfun.com/on-market/${id}/history`;
@@ -58,22 +56,6 @@ export interface SearchListResponse {
   per_page: number;
   current_page: number;
   data: ListItem[];
-}
-
-/** One cross-source posting record from on-market/o2o-same. */
-export interface O2oEntry {
-  source_id: string;
-  link: string;
-  total: number;
-  add_date: string;
-}
-
-/** sourceName -> record, for a single listing id. */
-export type O2oForId = Record<string, O2oEntry>;
-
-export interface O2oResponse {
-  status: string;
-  data: Record<string, O2oForId>;
 }
 
 /** One on-market posting from /on-market/{id}/history. `total` is a number. */

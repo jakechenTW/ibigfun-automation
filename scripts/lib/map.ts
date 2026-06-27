@@ -1,9 +1,9 @@
 /**
- * Pure mapping from iBigFun's /api/search/list + on-market/o2o-same JSON into
- * the normalized `Listing`. Values stay as display strings (downstream enrich
- * parses numbers) except `coordinate`. No network, no DOM — unit-tested.
+ * Pure mapping from iBigFun's /api/search/list JSON into the normalized
+ * `Listing`. Values stay as display strings (downstream enrich parses numbers)
+ * except `coordinate`. No network, no DOM — unit-tested.
  */
-import type { ListItem, O2oForId, HistoryEntry, OffMarketEntry } from './api.ts';
+import type { ListItem, HistoryEntry, OffMarketEntry } from './api.ts';
 import type { Coordinate } from './coords.ts';
 import type { Listing, ListingHistoryEntry } from './types.ts';
 import { normalizeHistory, type RawHistoryRow } from './history.ts';
@@ -57,16 +57,6 @@ function coordinateOf(it: ListItem): Coordinate | null {
     return { lat: it.lat, lng: it.lng };
   }
   return null;
-}
-
-/** Convert one listing's o2o-same map into raw history rows (all active). */
-export function o2oToRawHistory(forId: O2oForId): RawHistoryRow[] {
-  return Object.entries(forId).map(([source, e]) => ({
-    price: e.total !== null && e.total !== undefined ? String(e.total) : null,
-    source,
-    date: e.add_date ?? null,
-    active: true, // o2o-same exposes no 下架 flag; see spec fidelity note
-  }));
 }
 
 /** Map one API item (+ its already-merged history) to a Listing. */

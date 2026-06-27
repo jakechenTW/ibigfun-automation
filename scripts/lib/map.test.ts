@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { apiItemToListing, o2oToRawHistory, onMarketToRows, offMarketToRows, mergeHistory } from './map.ts';
+import { apiItemToListing, onMarketToRows, offMarketToRows, mergeHistory } from './map.ts';
 import { computeTenure } from './tenure.ts';
-import type { ListItem, O2oForId, HistoryEntry, OffMarketEntry } from './api.ts';
+import type { ListItem, HistoryEntry, OffMarketEntry } from './api.ts';
 import type { ListingHistoryEntry } from './types.ts';
 
 const ITEM: ListItem = {
@@ -28,11 +28,6 @@ const ITEM: ListItem = {
   bathroom: 1,
   id_encode: '2lrnjfzqiahur',
   uuid: 'A_1FF424',
-};
-
-const HISTORY: O2oForId = {
-  '591': { source_id: '20167211', link: 'x', total: 1790, add_date: '2026-05-09' },
-  '中信房屋': { source_id: '2036990', link: 'y', total: 1790, add_date: '2025-06-21' },
 };
 
 const MERGED: ListingHistoryEntry[] = [
@@ -67,13 +62,6 @@ test('apiItemToListing fills the new structured fields', () => {
   assert.equal(l.room, 3);
   assert.equal(l.livingRoom, 2);
   assert.equal(l.bathroom, 1);
-});
-
-test('o2oToRawHistory turns each source into a raw history row', () => {
-  const rows = o2oToRawHistory(HISTORY);
-  assert.equal(rows.length, 2);
-  const cic = rows.find((r) => r.source === '中信房屋');
-  assert.deepEqual(cic, { price: '1790', source: '中信房屋', date: '2025-06-21', active: true });
 });
 
 test('listingHistory feeds tenure: earliest record is first listed', () => {

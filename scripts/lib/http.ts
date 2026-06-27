@@ -4,8 +4,8 @@
  * cookie jar, and calls the iBigFun JSON APIs with those cookies. Reuses the
  * pure relogin loop (relogin.ts) to recover from a mid-run session kick.
  */
-import { SIGNIN_URL, LOGIN_URL, SEARCH_LIST_URL, O2O_SAME_URL, buildSearchBody, historyUrl, OFF_MARKET_URL, buildOffMarketBody } from './api.ts';
-import type { SearchListResponse, O2oResponse, HistoryResponse, OffMarketResponse, HistoryEntry, OffMarketEntry } from './api.ts';
+import { SIGNIN_URL, LOGIN_URL, SEARCH_LIST_URL, buildSearchBody, historyUrl, OFF_MARKET_URL, buildOffMarketBody } from './api.ts';
+import type { SearchListResponse, HistoryResponse, OffMarketResponse, HistoryEntry, OffMarketEntry } from './api.ts';
 import { applySetCookies, cookieHeader, loadJar, saveJar, type Jar } from './cookies.ts';
 import { SIGNIN_PATH_FRAGMENT, BLOCKING_SIGNALS, COOKIE_JAR_PATH, HISTORY_RETRIES, HISTORY_RETRY_BASE_MS } from './config.ts';
 import { openWithRelogin } from './relogin.ts';
@@ -163,18 +163,6 @@ async function fetchPage(date: string, page: number): Promise<SearchListResponse
     const parsed = JSON.parse(r.text) as SearchListResponse;
     assertApiOk('/api/search/list', r.status, parsed.status);
     return { kicked: false, value: parsed };
-  });
-}
-
-async function fetchHistory(ids: number[]): Promise<O2oResponse['data']> {
-  if (ids.length === 0) return {};
-  return withRelogin(async () => {
-    const r = await rawGet(`${O2O_SAME_URL}?ids=${ids.join('%2C')}`);
-    applySetCookies(getJar(), r.setCookies);
-    if (looksLikeSignin(r)) return { kicked: true };
-    const parsed = JSON.parse(r.text) as O2oResponse;
-    assertApiOk('o2o-same', r.status, parsed.status);
-    return { kicked: false, value: parsed.data ?? {} };
   });
 }
 

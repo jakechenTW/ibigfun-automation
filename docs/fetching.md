@@ -88,21 +88,33 @@ exclude_land=1
 
 Response JSON shape: `{ data: ListItem[], total_records: number, per_page: number, current_page: number }`.
 
-### Endpoint 2 — listing history (刊登紀錄)
+### Listing history (刊登紀錄)
 
-```
-GET https://api.ibigfun.com/on-market/o2o-same?ids=<id,id,...>
-```
+History is fetched per listing from the two endpoints the live site uses:
 
-Pass the `id` field from the listing table results (batch multiple ids in one
-call). Response shape: `data[listingId][sourceName] = { source_id, link, total, add_date }`.
+- On-market: `GET https://api.ibigfun.com/on-market/{id}/history` — `{id}` is the
+  numeric listing id from `search/list`. Returns `{ status, data: [{ source,
+  source_id, total (number), subject, add_time, link }] }`, the cross-source
+  posting list (each `add_time` is that source's listing date).
+- Off-market (下架): `POST https://www.ibigfun.com/api/query_off_market_by_id`
+  with form body `id_encode=<uuid>` (the `uuid` from `search/list`, NOT the
+  numeric id). Returns `{ status, msg, total_records, data: [{ source, total
+  (comma string), add_time, … }] }` — delisted postings (UI shows the latest 10).
 
-**History fidelity note (confirmed live 2026-06-27):** o2o-same returns only
-currently-active cross-source records; 下架 (delisted) rows are not represented.
-Every `listingHistory` entry is therefore `active: true`. This is harmless for
-`tenure.firstListedDate` (the earliest `add_date` is still the earliest known
-date) but means `recordCount` reflects only currently-listed sources, not all
-historical sources.
+On-market rows map to `active: true`, off-market rows to `active: false`; they
+are merged (dedup key `source|date|active`) into `listingHistory` and feed
+`computeTenure`. Calls run through a concurrency pool (`HISTORY_CONCURRENCY`)
+with retry + exponential backoff (`HISTORY_RETRIES`, `HISTORY_RETRY_BASE_MS`).
+
+A listing whose history can't be fetched after retries — or whose on-market
+history comes back empty for a still-live listing (a sign of throttling) — is
+kept with empty history, logged as a `WARN` with its id, and counted in the
+end-of-run summary. Never dropped silently.
+
+**Accepted limitation:** under heavy throttle the API can return `200 ok` with
+an empty `data` array, which is indistinguishable from a genuinely-empty result
+for off-market records (empty is normal there). This is only flagged for
+on-market history (empty-when-live → WARN).
 
 ### Pagination
 
@@ -143,7 +155,7 @@ The API returns camelCase/snake_case fields; these map to the normalized `Listin
 | `living_room` | `livingRoom` | |
 | `bathroom` | `bathroom` | |
 | — | `realPriceUrl` | Always `null` — the API does not expose it |
-| o2o-same response | `listingHistory` | Each entry: `{ date, source, price, active: true }` (see history-fidelity note above) — used by enrich to compute how long the property has been on market |
+| history + off-market responses | `listingHistory` | Each entry: `{ date, source, price, active }` — used by enrich to compute how long the property has been on market |
 
 ## MRT Distance
 
