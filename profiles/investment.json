@@ -7,7 +7,7 @@
   "requiresFilterVerification": false,
   "fetchFilters": {
     "enabled": false,
-    "description": "Uses the existing captured investment search request shape in scripts/lib/api.ts."
+    "description": "Uses the captured investment search shape in scripts/lib/api.ts (buildSearchBody default branch): city=1 (台北市), price_segment max 2500萬, floor_segment 2-4, total_floor max 5. It sends NO town[] or house_type[] filter, so it returns all 12 台北市 districts and every house type within the floor/price window (the low-rise 公寓 bias comes from the floor/total_floor limits, not a house_type filter). Verified against the 2026-06-26 fetch (78 listings spanning all 12 districts). See data/ibigfun-filter-mappings.md."
   },
   "hardCriteria": {
     "profile": "investment"

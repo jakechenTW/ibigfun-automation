@@ -10,6 +10,21 @@ this file is the human-readable key.
   open the authenticated listing view, read the caption spans, or DevTools-capture
   the `/api/search/list` XHR body — see `docs/fetching.md`).
 
+## Profile filter usage
+
+Which of these filters each committed profile actually sends:
+
+- **owner-occupied** (`fetchFilters.enabled: true`): `city=1`, `town[]`
+  (1/4/6/8/9), `house_type[]=17` (電梯大樓), plus price/floor/main_ping/age/parking
+  ranges. All ids verified 2026-06-27.
+- **investment** (`fetchFilters.enabled: false` → captured shape in
+  `scripts/lib/api.ts`): `city=1`, `price_segment` max 2500萬, `floor_segment`
+  2–4, `total_floor` max 5. It sends **no `town[]` and no `house_type[]`**, so it
+  returns all 12 台北市 districts and every house type in that floor/price window
+  (the low-rise 公寓 bias is a side effect of the floor/total_floor limits, not a
+  house_type filter). Verified against the 2026-06-26 fetch (78 listings across
+  all 12 districts) — so there are no town/house_type ids to record for it.
+
 ## `city` (city id → name)
 
 Complete list (22 entries) as shown in the filter UI:
