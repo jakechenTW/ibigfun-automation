@@ -1,10 +1,16 @@
 # Reporting Rules
 
+## Profile Rules
+
+Shared rules live in this file. Profile-specific decision thresholds live in:
+
+- `docs/profiles/investment.md`
+- `docs/profiles/owner-occupied.md`
+
 ## Investment Criteria
 
-- Mortgage assumption: 80% loan-to-value, 2.6% annual interest, 30-year principal and interest repayment.
-- Recommended listing: below market by at least 10% and rent coverage at least 1.0.
-- Near-threshold listing: rent coverage at least 0.8.
+Investment-specific thresholds and estimation rules are owned by
+`docs/profiles/investment.md`.
 
 ## Hard Exclusions
 
@@ -31,8 +37,11 @@ Apply these exclusions before ranking recommended, near-threshold, and excluded 
 
 ## Market Price & Rent Estimation
 
-These are the inputs to the discount and rent-coverage calculations above.
-Document the source used for each, as required by the data-quality rules below.
+For the investment profile, these are the inputs to the discount and
+rent-coverage calculations above. Document the source used for each, as required
+by the data-quality rules below. Profiles that do not use market/rent estimates
+should still document their profile-specific judgment source and confidence in
+their profile report notes.
 
 ### Market Price (推估區域行情)
 
@@ -177,7 +186,7 @@ listing lacking solid data cannot be labeled recommended.
 - Append inline metrics to the header: recommended `｜ 低於行情 {discount_percent}%・覆蓋率 {rent_coverage}`; near-threshold `｜ 覆蓋率 {rent_coverage}・差在 {near_threshold_reason}`; suspicious `｜ \`{suspicious_label}\`` where suspicious_label is `clean` / `suspicious` / `likely-auction`.
 - Render `detail_page_checked` as a short phrase (e.g. 已點詳情頁 / 未查證), not a raw boolean.
 - Do not emit a 刊登日 line in recommended or near-threshold listings.
-- Recommended and near-threshold use the full compact layout (walk line, one basics line `總價／坪數／單價・樓層・屋齡・地址`, one financial line `行情・月租・房貸・現金流`, then reason/risk or manual-check). Hard-excluded, suspicious, and excluded use the shorter layout shown in `templates/daily-notify-template.md`.
+- Recommended and near-threshold use the full compact layout (walk line, one basics line `總價／坪數／單價・樓層・屋齡・地址`, one financial line `行情・月租・房貸・現金流`, then reason/risk or manual-check). Hard-excluded, suspicious, and excluded use the shorter layout shown in the selected profile template.
 - Emit the 🚶 walk line in 前置排除, 推薦, and 接近門檻 only — never in 可疑/待查 or 目標日排除. Compose it from the listing's enriched `walk` and `coordinate`:
   - Reliable (`walk` present): `🚶 {stationZh} {exitId} 號出口・{minutes} 分鐘（[地圖]({map_url})）`. If `exitId` is missing, drop the 出口 part: `🚶 {stationZh}・{minutes} 分鐘（[地圖]({map_url})）`.
   - Unreliable but `coordinate` present (`walk` is null — e.g. coordinate inconsistent, route ratio implausible): show the triage result and mark it pending: `🚶 約{station}・步行待確認（[地圖]({map_url})）`, or `🚶 步行待人工確認（[地圖]({map_url})）` when no station can be inferred.
@@ -203,4 +212,7 @@ listing lacking solid data cannot be labeled recommended.
 
 ## Rule Ownership
 
-Keep durable investment, sorting, notification, and data-quality rules in this file. Keep the daily execution sequence in `AGENTS.md`. Keep recent run history and one-off operational observations in automation memory.
+Keep durable shared sorting, notification, and data-quality rules in this file.
+Keep profile-specific thresholds and report buckets in `docs/profiles/*.md`.
+Keep the daily execution sequence in `AGENTS.md`. Keep recent run history and
+one-off operational observations in automation memory.

@@ -86,6 +86,10 @@ exclude_land=1
 
 (The request also sends empty `price_segment[min_val]=` and `total_floor[min_val]=` params.)
 
+The first profile-aware implementation keeps this captured request shape for all
+profiles. Profile JSON files may document desired filters, but fetch does not
+apply them until `fetchFilters.enabled` is deliberately wired and tested.
+
 Response JSON shape: `{ data: ListItem[], total_records: number, per_page: number, current_page: number }`.
 
 ### Listing history (刊登紀錄)
@@ -176,9 +180,9 @@ See `data/README.md` for the dataset columns and the full distance rules, and
 
 The committed fetch script is browserless: it logs in via form POST, calls the
 two JSON APIs, paginates, normalizes each listing per the field-mapping table
-above, and writes to `state/runs/<label>/listings.json` and stdout. It does **fetch +
-normalize only** — MRT distance, estimation, and evaluation stay with the
-report step.
+above, and writes to `state/runs/<profile>/<label>/listings.json` and stdout. It
+does **fetch + normalize only** — MRT distance, estimation, and evaluation stay
+with the report step.
 
 ### One-time setup
 
@@ -189,8 +193,8 @@ npm install   # toolchain (tsx, TypeScript — no Chromium needed)
 ### Run
 
 ```bash
-npm run fetch -- --date 2026-06-26   # explicit target date
-npm run fetch                        # defaults to the previous Taipei day
+npm run fetch -- --profile investment --date 2026-06-26   # explicit target date
+npm run fetch -- --profile investment                     # defaults to the previous Taipei day
 ```
 
 Exit codes: `0` ok, `1` unexpected error, `2` blocked (`BlockedError` — login
