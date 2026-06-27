@@ -62,7 +62,10 @@ export function readManifest(date: string): Manifest | null {
 export function writeManifest(m: Manifest, now: string): void {
   m.updatedAt = now;
   fs.mkdirSync(runDir(m.targetDate), { recursive: true });
-  fs.writeFileSync(manifestPath(m.targetDate), JSON.stringify(m, null, 2));
+  const final = manifestPath(m.targetDate);
+  const tmp = final + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(m, null, 2));
+  fs.renameSync(tmp, final);
 }
 
 export function loadOrCreateManifest(date: string, now: string): Manifest {

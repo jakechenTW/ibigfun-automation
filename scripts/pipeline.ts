@@ -40,9 +40,12 @@ function has(argv: string[], name: string): boolean {
   return argv.includes(name);
 }
 function resolveDate(argv: string[]): string {
+  const present = argv.some((a) => a === '--date' || a.startsWith('--date='));
+  if (!present) return previousTaipeiDay(new Date());
   const raw = flag(argv, '--date');
-  if (raw === undefined) return previousTaipeiDay(new Date());
-  if (!isValidDateString(raw)) fail(`invalid --date "${raw}"; expected YYYY-MM-DD.`);
+  if (raw === undefined || raw.startsWith('--') || !isValidDateString(raw)) {
+    fail(`invalid --date "${raw ?? ''}"; expected YYYY-MM-DD.`);
+  }
   return raw;
 }
 function asStep(v: string | undefined, label: string): StepName | undefined {

@@ -51,3 +51,15 @@ test('appendJournal then readJournal round-trips and redacts data', () => {
     fs.rmSync(runDir(date), { recursive: true, force: true });
   }
 });
+
+test('appendJournal caps an over-long msg to a bounded snippet', () => {
+  const date = '0005-05-05';
+  try {
+    appendJournal(date, { ts: 't', step: 'notify', level: 'error', event: 'notify.sent', msg: 'x'.repeat(900) });
+    const evs = readJournal(date);
+    assert.ok(evs[0].msg.length < 600);
+    assert.ok(evs[0].msg.endsWith('…'));
+  } finally {
+    fs.rmSync(runDir(date), { recursive: true, force: true });
+  }
+});

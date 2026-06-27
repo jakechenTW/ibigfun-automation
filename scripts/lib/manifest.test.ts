@@ -1,8 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import * as fs from 'node:fs';
 import {
-  createManifest, setStep, STEP_ORDER, STEP_KIND, planNextSteps,
+  createManifest, setStep, writeManifest, readManifest, STEP_ORDER, STEP_KIND, planNextSteps,
 } from './manifest.ts';
+import { runDir } from './runpaths.ts';
 
 test('createManifest seeds all four steps as pending with correct kinds', () => {
   const m = createManifest('2026-06-26', '2026-06-27T00:00:00.000Z');
@@ -66,4 +68,22 @@ test('planNextSteps: --from skips steps before the named one', () => {
   assert.equal(plan.find((p) => p.step === 'fetch')!.action, 'skip');
   assert.equal(plan.find((p) => p.step === 'enrich')!.action, 'skip');
   assert.equal(plan.find((p) => p.step === 'report')!.action, 'run');
+});
+
+test('writeManifest then readManifest round-trips and produces valid JSON', () => {
+  const date = '0004-04-04';
+  try {
+    const m = createManifest(date, '2026-06-27T00:00:00.000Z');
+    setStep(m, 'fetch', { status: 'ok', summary: { listings: 5 } });
+    writeManifest(m, '2026-06-27T00:01:00.000Z');
+    const back = readManifest(date);
+    assert.equal(back!.targetDate, date);
+    assert.equal(back!.updatedAt, '2026-06-27T00:01:00.000Z');
+    assert.equal(back!.steps.fetch.status, 'ok');
+    assert.deepEqual(back!.steps.fetch.summary, { listings: 5 });
+    // no leftover temp file
+    assert.equal(fs.existsSync(`state/runs/${date}/manifest.json.tmp`), false);
+  } finally {
+    fs.rmSync(runDir(date), { recursive: true, force: true });
+  }
 });

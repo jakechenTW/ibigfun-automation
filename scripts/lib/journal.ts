@@ -37,8 +37,10 @@ export function redact(value: unknown): unknown {
 
 export function appendJournal(date: string, ev: JournalEvent): void {
   fs.mkdirSync(runDir(date), { recursive: true });
+  const msg = ev.msg.length > SNIPPET_MAX ? ev.msg.slice(0, SNIPPET_MAX) + '…' : ev.msg;
   const safe: JournalEvent = {
     ...ev,
+    msg,
     data: ev.data === undefined ? undefined : redact(ev.data),
   };
   fs.appendFileSync(journalPath(date), JSON.stringify(safe) + '\n');
