@@ -3,14 +3,52 @@
  * the normalized `Listing`. Values stay as display strings (downstream enrich
  * parses numbers) except `coordinate`. No network, no DOM — unit-tested.
  */
-import type { ListItem, O2oForId } from './api.ts';
+import type { ListItem, O2oForId, HistoryEntry, OffMarketEntry } from './api.ts';
 import type { Coordinate } from './coords.ts';
-import type { Listing } from './types.ts';
+import type { Listing, ListingHistoryEntry } from './types.ts';
 import { normalizeHistory, type RawHistoryRow } from './history.ts';
 
 /** Stringify a numeric field, or null when it is null/undefined. */
 function numStr(n: number | null | undefined): string | null {
   return n === null || n === undefined ? null : String(n);
+}
+
+/** A listing `total` (number on-market, comma-string off-market) as a raw price token. */
+function totalToPrice(total: string | number | null | undefined): string | null {
+  return total === null || total === undefined ? null : String(total);
+}
+
+/** On-market /history entries → raw rows (all active). */
+export function onMarketToRows(entries: HistoryEntry[]): RawHistoryRow[] {
+  return entries.map((e) => ({
+    price: totalToPrice(e.total),
+    source: e.source ?? '',
+    date: e.add_time ?? null,
+    active: true,
+  }));
+}
+
+/** Off-market (下架) entries → raw rows (all inactive). */
+export function offMarketToRows(entries: OffMarketEntry[]): RawHistoryRow[] {
+  return entries.map((e) => ({
+    price: totalToPrice(e.total),
+    source: e.source ?? '',
+    date: e.add_time ?? null,
+    active: false,
+  }));
+}
+
+/** Merge on+off raw rows, dedupe by source|date|active, then normalize. */
+export function mergeHistory(onRows: RawHistoryRow[], offRows: RawHistoryRow[]): ListingHistoryEntry[] {
+  const seen = new Set<string>();
+  const merged: RawHistoryRow[] = [];
+  for (const r of [...onRows, ...offRows]) {
+    const key = `${r.source}|${r.date}|${r.active}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(r);
+  }
+  return normalizeHistory(merged);
 }
 
 /** Build a Coordinate from lat/lng when both are finite, else null. */

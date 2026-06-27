@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { apiItemToListing, o2oToRawHistory } from './map.ts';
+import { apiItemToListing, o2oToRawHistory, onMarketToRows, offMarketToRows, mergeHistory } from './map.ts';
 import { computeTenure } from './tenure.ts';
-import type { ListItem, O2oForId } from './api.ts';
+import type { ListItem, O2oForId, HistoryEntry, OffMarketEntry } from './api.ts';
 
 const ITEM: ListItem = {
   id: 53199422,
@@ -86,4 +86,37 @@ test('apiItemToListing coerces a numeric source to a string', () => {
   const l = apiItemToListing({ ...ITEM, source: 591 as unknown as string }, {});
   assert.equal(l.source, '591');
   assert.equal(typeof l.source, 'string');
+});
+
+const ON: HistoryEntry[] = [
+  { source: '樂屋網', source_id: 'a', total: 1688, subject: 's', add_time: '2026-06-27', link: 'x' },
+];
+const OFF: OffMarketEntry[] = [
+  { source: '住商', source_id: 'b', total: '1,234', subject: 's', add_time: '2025-12-01', link: 'y' },
+];
+
+test('onMarketToRows maps numeric total to a string price, active:true', () => {
+  assert.deepEqual(onMarketToRows(ON), [
+    { price: '1688', source: '樂屋網', date: '2026-06-27', active: true },
+  ]);
+});
+
+test('offMarketToRows keeps the comma-string total, active:false', () => {
+  assert.deepEqual(offMarketToRows(OFF), [
+    { price: '1,234', source: '住商', date: '2025-12-01', active: false },
+  ]);
+});
+
+test('mergeHistory normalizes on+off and keeps same source/date when active differs', () => {
+  const on = onMarketToRows([{ source: 'A', source_id: '1', total: 100, subject: '', add_time: '2026-01-01', link: '' }]);
+  const off = offMarketToRows([{ source: 'A', source_id: '1', total: '100', subject: '', add_time: '2026-01-01', link: '' }]);
+  assert.equal(mergeHistory(on, off).length, 2); // active true vs false -> distinct
+});
+
+test('mergeHistory dedupes identical rows', () => {
+  assert.equal(mergeHistory(onMarketToRows(ON), onMarketToRows(ON)).length, 1);
+});
+
+test('mergeHistory of empty inputs is empty', () => {
+  assert.deepEqual(mergeHistory([], []), []);
 });
