@@ -5,6 +5,7 @@ import {
   loadProfile,
   resolveProfileFromArgs,
   profileFlags,
+  searchFiltersFromProfile,
   type Profile,
 } from './profiles.ts';
 
@@ -68,4 +69,24 @@ test('resolveProfileFromArgs rejects a missing flag value', () => {
 test('profileFlags reproduces the selected profile flag', () => {
   const p = { id: 'owner-occupied' } as Profile;
   assert.equal(profileFlags(p), '--profile owner-occupied');
+});
+
+test('searchFiltersFromProfile returns undefined when fetchFilters disabled', () => {
+  const p = loadProfile('investment');
+  assert.equal(searchFiltersFromProfile(p), undefined);
+});
+
+test('searchFiltersFromProfile maps owner-occupied filters when enabled', () => {
+  const base = loadProfile('owner-occupied');
+  const p = { ...base, fetchFilters: { ...base.fetchFilters, enabled: true } } as typeof base;
+  const f = searchFiltersFromProfile(p);
+  assert.ok(f);
+  assert.equal(f!.city, '1');
+  assert.deepEqual(f!.town, ['1', '4', '6', '8', '9']);
+  assert.deepEqual(f!.houseType, ['17']);
+  assert.equal(f!.priceMaxWan, 7000);
+  assert.equal(f!.floorMin, 7);
+  assert.equal(f!.mainPingMin, 30);
+  assert.equal(f!.ageMax, 25);
+  assert.equal(f!.parking, '平面');
 });

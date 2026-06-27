@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { RunRange } from './range.ts';
+import type { SearchFilters } from './api.ts';
 
 export interface NamedFilterValue {
   id: string;
@@ -127,4 +128,21 @@ export function resolveProfileFromArgs(argv: string[]): Profile {
 
 export function profileFlags(profile: Pick<Profile, 'id'>): string {
   return `--profile ${profile.id}`;
+}
+
+/** Convert a profile into /api/search/list filters, or undefined when its
+ *  fetch filters are not enabled (caller then uses the captured default shape). */
+export function searchFiltersFromProfile(profile: Profile): SearchFilters | undefined {
+  const f = profile.fetchFilters;
+  if (!f.enabled) return undefined;
+  return {
+    city: f.city?.id,
+    town: f.towns?.map((t) => t.id),
+    houseType: f.houseType ? [f.houseType.id] : undefined,
+    priceMaxWan: f.priceMaxWan,
+    floorMin: f.floorMin,
+    mainPingMin: f.mainPingMin,
+    ageMax: f.ageMax,
+    parking: f.parking,
+  };
 }
