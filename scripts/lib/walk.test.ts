@@ -15,7 +15,7 @@ function offline(over: Partial<OfflineEnriched>): OfflineEnriched {
   return {
     title: '美寓', url: null, addressOrArea: '台北市中正區X街', nearbyStation: null, coordinate: { lat: 25, lng: 121 },
     publishedDate: null, totalPrice: '1000萬', totalPing: '20坪', unitPrice: '50萬/坪',
-    floor: '3', totalFloors: '5', typeLayout: '公寓', age: '30', parking: '無車位', realPriceUrl: null,
+    floor: '3', totalFloors: '5', typeLayout: '公寓', age: '30', parking: '無車位', realPriceUrl: null, listingHistory: [],
     totalPriceWan: 1000, totalPriceNtd: 10_000_000, totalPingNum: 20, unitPriceWan: 50, ageNum: 30,
     monthlyMortgage: 32031, district: '中正區', coordConsistent: true,
     candidates: [cand('東門', '4', 600)], hasAuction: false, ...over,
@@ -96,4 +96,23 @@ test('no auction keyword -> signal false', () => {
   const e = finalizeWalk(offline({ hasAuction: false }), [600]);
   assert.equal(e.signals.auctionKeyword, false);
   assert.equal(e.hardExclusion.excluded, false);
+});
+
+test('finalizeWalk computes tenure from listingHistory + targetDate', () => {
+  const o = offline({
+    listingHistory: [
+      { date: '2026-06-26', source: '樂屋網', price: '1588', active: true },
+      { date: '2025-09-07', source: '591', price: '1588', active: false },
+    ],
+  });
+  const e = finalizeWalk(o, [700], '2026-06-26');
+  assert.equal(e.tenure.firstListedDate, '2025-09-07');
+  assert.equal(e.tenure.daysOnMarket, 292);
+  assert.equal(e.tenure.priceTrend, 'flat');
+});
+
+test('finalizeWalk tenure is empty when there is no history', () => {
+  const e = finalizeWalk(offline({}), [700], '2026-06-26');
+  assert.equal(e.tenure.recordCount, 0);
+  assert.equal(e.tenure.daysOnMarket, null);
 });

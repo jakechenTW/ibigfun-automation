@@ -183,6 +183,15 @@ listing lacking solid data cannot be labeled recommended.
   - Unreliable but `coordinate` present (`walk` is null — e.g. coordinate inconsistent, route ratio implausible): show the triage result and mark it pending: `🚶 約{station}・步行待確認（[地圖]({map_url})）`, or `🚶 步行待人工確認（[地圖]({map_url})）` when no station can be inferred.
   - No `coordinate`: `🚶 無位置資訊` (no map link).
 - Map link `{map_url}` is exactly `https://www.google.com/maps?q=<lat>,<lng>` using the listing `coordinate`, with link text `地圖`.
+- Emit the 🕒 tenure line (`{{tenure_line}}`) in every listing block (前置排除, 推薦, 接近門檻, 可疑/待查, 目標日排除). Compose it from the listing's enriched `tenure`:
+  - `recordCount === 0` (no 刊登紀錄 parsed): `🕒 刊登史不明`.
+  - `daysOnMarket` is `0` (earliest record is the target date — genuinely fresh): `🕒 本日新上架`.
+  - Otherwise: `🕒 已刊登 {daysOnMarket} 天・{price_part}（最早 {firstListedDate}・{sourceCount} 來源）`, where `{price_part}` is:
+    - `priceTrend === 'flat'` → `未降價`
+    - `priceTrend === 'dropped'` → `曾降價 {firstPrice}→{latestPrice}萬`
+    - `priceTrend === 'raised'` → `曾調漲 {firstPrice}→{latestPrice}萬`
+    - `priceTrend === 'unknown'` → drop the `・{price_part}` segment entirely: `🕒 已刊登 {daysOnMarket} 天（最早 {firstListedDate}・{sourceCount} 來源）`
+  - This line is information-only: it never changes the recommend / exclusion / suspicious decision.
 - When any field (月租, 現金流, 行情, 屋齡, 地址 等) is null, render it as `—` rather than dropping the line.
 - Render each listed property with a 1-based `rank` value inside its section.
 - If the target-date new-listing count is 10 or lower, list all excluded properties.

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { previousTaipeiDay, isValidDateString } from './date.ts';
+import { previousTaipeiDay, isValidDateString, daysBetween } from './date.ts';
 
 test('previousTaipeiDay: instant in Taipei morning returns prior calendar day', () => {
   // 2026-06-27T00:30:00Z => Taipei 2026-06-27 08:30 => prev day 2026-06-26
@@ -31,4 +31,11 @@ test('isValidDateString rejects bad month, junk, and unpadded values', () => {
   assert.equal(isValidDateString('not-a-date'), false);
   assert.equal(isValidDateString('2026-6-1'), false);
   assert.equal(isValidDateString('2026-02-30'), false);
+});
+
+test('daysBetween counts whole calendar days, crossing months', () => {
+  assert.equal(daysBetween('2026-06-26', '2026-06-26'), 0);
+  assert.equal(daysBetween('2026-06-05', '2026-06-26'), 21);
+  assert.equal(daysBetween('2025-09-07', '2026-06-26'), 292);
+  assert.equal(daysBetween('2026-06-26', '2026-06-05'), -21); // reversed -> negative
 });

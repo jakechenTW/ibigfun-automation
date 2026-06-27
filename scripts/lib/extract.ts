@@ -6,6 +6,7 @@ import { parseFloorField } from './floor.ts';
 import { logIn } from './session.ts';
 import { openWithRelogin } from './relogin.ts';
 import type { Listing } from './types.ts';
+import { normalizeHistory, type RawHistoryRow } from './history.ts';
 
 /** Max auto re-logins per page when the session is kicked mid-run. */
 const MAX_RELOGIN = 2;
@@ -24,6 +25,7 @@ interface RawCard {
   typePattern: string[];
   ageParking: string[];
   realPriceUrl: string | null;
+  historyRows: RawHistoryRow[];
 }
 
 /** Normalize one raw row into a Listing. */
@@ -47,6 +49,7 @@ function toListing(r: RawCard): Listing {
     age: r.ageParking[0] ?? null,
     parking: r.ageParking[1] ?? null,
     realPriceUrl: r.realPriceUrl,
+    listingHistory: normalizeHistory(r.historyRows),
   };
 }
 
@@ -64,35 +67,65 @@ export async function extractListingsOnPage(page: Page): Promise<Listing[]> {
               .map((x) => x.trim())
               .filter(Boolean)
           : [];
-      return rows
-        .filter((r) => r.querySelector(s.titleLink))
-        .map((r) => {
-          const subj = r.querySelector(s.titleLink) as HTMLAnchorElement | null;
-          const map = r.querySelector(s.mapLink) as HTMLAnchorElement | null;
-          const real = r.querySelector(
-            s.realPriceLink,
-          ) as HTMLAnchorElement | null;
-          const trainIcon = r.querySelector(s.nearbyStationIcon);
-          const tds = Array.from(r.querySelectorAll(':scope > td'));
-          const td = (i: number) => tds[i] ?? null;
-          return {
-            title: txt(subj) ?? '',
-            url: subj ? subj.href : null,
-            addressOrArea: txt(map),
-            nearbyStation:
-              trainIcon && trainIcon.parentElement
-                ? trainIcon.parentElement.innerText.trim() || null
-                : null,
-            mapHref: map ? map.getAttribute('href') : null,
-            publishedDate: txt(td(s.td.date)),
-            priceLines: lines(td(s.td.price)),
-            pingLines: lines(td(s.td.ping)),
-            landFloor: lines(td(s.td.landFloor)),
-            typePattern: lines(td(s.td.typePattern)),
-            ageParking: lines(td(s.td.ageParking)),
-            realPriceUrl: real ? real.href : null,
-          };
+      // Columns read by fixed index (verified live DOM): [總價, 名稱, 來源, 刊登日].
+      // If iBigFun reorders columns, normalizeHistory's date-validity filter drops
+      // the rows, so the listing degrades gracefully to empty history rather than
+      // emitting corrupted numbers.
+      const parseHistory = (sub: Element) =>
+        Array.from(sub.querySelectorAll('tr'))
+          .filter((tr) => !tr.querySelector('th')) // skip the header row
+          .map((tr) => {
+            const c = tr.querySelectorAll('td');
+            if (c.length < 4) return null;
+            return {
+              price: (c[0] as HTMLElement).innerText.trim() || null,
+              source: (c[2] as HTMLElement).innerText.trim() || null,
+              date: (c[3] as HTMLElement).innerText.trim() || null,
+              active: !!c[1].querySelector('a'),
+            };
+          })
+          .filter((x): x is NonNullable<typeof x> => x !== null);
+
+      const out = [];
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        if (!r.querySelector(s.titleLink)) continue;
+        // The history table sits in a sibling row before the next listing row.
+        let historyRows: ReturnType<typeof parseHistory> = [];
+        for (let j = i + 1; j < rows.length; j++) {
+          if (rows[j].querySelector(s.titleLink)) break;
+          const sub = rows[j].querySelector(s.historyTable);
+          if (sub) {
+            historyRows = parseHistory(sub);
+            break;
+          }
+        }
+        const subj = r.querySelector(s.titleLink) as HTMLAnchorElement | null;
+        const map = r.querySelector(s.mapLink) as HTMLAnchorElement | null;
+        const real = r.querySelector(s.realPriceLink) as HTMLAnchorElement | null;
+        const trainIcon = r.querySelector(s.nearbyStationIcon);
+        const tds = Array.from(r.querySelectorAll(':scope > td'));
+        const td = (k: number) => tds[k] ?? null;
+        out.push({
+          title: txt(subj) ?? '',
+          url: subj ? subj.href : null,
+          addressOrArea: txt(map),
+          nearbyStation:
+            trainIcon && trainIcon.parentElement
+              ? trainIcon.parentElement.innerText.trim() || null
+              : null,
+          mapHref: map ? map.getAttribute('href') : null,
+          publishedDate: txt(td(s.td.date)),
+          priceLines: lines(td(s.td.price)),
+          pingLines: lines(td(s.td.ping)),
+          landFloor: lines(td(s.td.landFloor)),
+          typePattern: lines(td(s.td.typePattern)),
+          ageParking: lines(td(s.td.ageParking)),
+          realPriceUrl: real ? real.href : null,
+          historyRows,
         });
+      }
+      return out;
     },
     SELECTORS.list,
   );

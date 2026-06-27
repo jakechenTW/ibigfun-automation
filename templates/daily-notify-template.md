@@ -27,6 +27,7 @@
 #### {{rank}}. [{{title}}]({{url}})
 
 - {{walk_line}}
+- {{tenure_line}}
 - 前置排除：{{hard_exclusion_reason}}（{{hard_exclusion_evidence}}）
 
 {{/each}}
@@ -46,6 +47,7 @@
 #### {{rank}}. [{{title}}]({{url}}) ｜ 低於行情 {{discount_percent}}%・覆蓋率 {{rent_coverage}}
 
 - {{walk_line}}
+- {{tenure_line}}
 - {{price}} 萬／{{ping}} 坪／{{unit_price}} 萬/坪・{{floor}}/{{total_floor}} 樓・屋齡 {{age}}・{{address_or_area}}
 - 行情 {{market_unit_price}} 萬/坪・月租 ~{{estimated_rent}}・房貸 {{monthly_mortgage}}・現金流 {{monthly_cash_flow}}/月
 - 推薦理由：{{recommendation_reason}}
@@ -68,6 +70,7 @@
 #### {{rank}}. [{{title}}]({{url}}) ｜ 覆蓋率 {{rent_coverage}}・差在 {{near_threshold_reason}}
 
 - {{walk_line}}
+- {{tenure_line}}
 - {{price}} 萬／{{ping}} 坪／{{unit_price}} 萬/坪・{{floor}}/{{total_floor}} 樓・屋齡 {{age}}・{{address_or_area}}
 - 行情 {{market_unit_price}} 萬/坪・月租 ~{{estimated_rent}}・房貸 {{monthly_mortgage}}・現金流 {{monthly_cash_flow}}/月
 - 需人工確認：{{manual_checks}}
@@ -88,6 +91,7 @@
 
 #### {{rank}}. [{{title}}]({{url}}) ｜ `{{suspicious_label}}`
 
+- {{tenure_line}}
 - 命中訊號：{{suspicious_signals}}
 - 理由：{{suspicious_reason}}（信心：{{suspicious_confidence}}・{{detail_page_checked}}）
 
@@ -108,6 +112,7 @@
 #### {{rank}}. [{{title}}]({{url}})
 
 - {{price}} 萬／{{ping}} 坪／{{unit_price}} 萬/坪・覆蓋率 {{rent_coverage}}
+- {{tenure_line}}
 - 排除：{{exclusion_reason}}
 
 {{/each}}

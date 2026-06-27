@@ -66,6 +66,9 @@ Normalize each listing with at least:
 - age
 - parking
 - iBigFun real-price (實價登錄) URL when available
+- listing history (刊登紀錄): the inline `table.sub-table` rows for the listing —
+  each as `{ date, source, price, active }` (active=false for `(下架)` records),
+  used by enrich to compute how long the property has been on market
 
 ## MRT Distance
 
