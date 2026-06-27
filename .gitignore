@@ -3,7 +3,6 @@
 !.env.example
 .DS_Store
 
-reports/
 state/
 
 # Browser automation artifacts and sensitive session output.

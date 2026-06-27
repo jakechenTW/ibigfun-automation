@@ -5,21 +5,21 @@ import { composeNotifyArgs, composeNotifyCommand, renderFailDetails, NOTIFY_TASK
 const params = { tool: 'claude', status: 'warn', title: '3 件待覆核' } as const;
 
 test('composeNotifyArgs builds the canonical argv with the given details file', () => {
-  assert.deepEqual(composeNotifyArgs(params, 'reports/2026-06-26.md'), [
+  assert.deepEqual(composeNotifyArgs(params, 'state/runs/2026-06-26/report.md'), [
     '--tool', 'claude',
     '--status', 'warn',
     '--task', NOTIFY_TASK,
     '--title', '3 件待覆核',
-    '--details-file', 'reports/2026-06-26.md',
+    '--details-file', 'state/runs/2026-06-26/report.md',
   ]);
 });
 
 test('composeNotifyCommand quotes args with spaces for safe display', () => {
-  const cmd = composeNotifyCommand(params, 'reports/2026-06-26.md');
+  const cmd = composeNotifyCommand(params, 'state/runs/2026-06-26/report.md');
   assert.ok(cmd.startsWith('ai-notify --tool claude --status warn'));
   assert.ok(cmd.includes("--task '每日 iBigFun 投資房源監測'"));
   assert.ok(cmd.includes("--title '3 件待覆核'"));
-  assert.ok(cmd.includes('--details-file reports/2026-06-26.md'));
+  assert.ok(cmd.includes('--details-file state/runs/2026-06-26/report.md'));
 });
 
 test('renderFailDetails includes the range, reason, and journal tail lines', () => {
