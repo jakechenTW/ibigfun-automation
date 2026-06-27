@@ -183,8 +183,8 @@ reporting decisions.
 The committed fetch script is browserless: it logs in via form POST, calls the
 two JSON APIs, paginates, normalizes each listing per the field-mapping table
 above, and writes to `state/runs/<profile>/<label>/listings.json` and stdout. It
-does **fetch + normalize only** — MRT distance, estimation, and evaluation stay
-with the report step.
+does **fetch + normalize only**. MRT/walking signals are produced by enrich;
+profile-specific estimation and evaluation stay with the report step.
 
 ### One-time setup
 

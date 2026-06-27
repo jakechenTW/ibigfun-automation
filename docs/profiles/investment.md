@@ -37,8 +37,13 @@ investment-specific and should not be applied to owner-occupied reports:
 
 - Each listing section header is `#### {rank}. [title](url)`; do not emit a `- 狀態：...` line because the section heading already names the bucket.
 - Append inline metrics to the header: recommended `｜ 低於行情 {discount_percent}%・覆蓋率 {rent_coverage}`; near-threshold `｜ 覆蓋率 {rent_coverage}・差在 {near_threshold_reason}`; suspicious `｜ \`{suspicious_label}\`` where suspicious_label is `clean` / `suspicious` / `likely-auction`.
-- Do not emit a 刊登日 line in recommended or near-threshold listings.
-- Recommended and near-threshold use the full compact layout: walk line, one basics line `總價／坪數／單價・樓層・屋齡・地址`, one financial line `行情・月租・房貸・現金流`, then reason/risk or manual-check.
+- Do not emit the old raw `刊登日` / `publishedDate` line in recommended or
+  near-threshold listings; do emit `{{tenure_line}}` exactly as shown in the
+  template.
+- Recommended and near-threshold use the full compact layout: walk line, one
+  tenure line `{{tenure_line}}`, one basics line
+  `總價／坪數／單價・樓層・屋齡・地址`, one financial line
+  `行情・月租・房貸・現金流`, then reason/risk or manual-check.
 - Pre-excluded, suspicious, and excluded listings use the shorter layouts shown in the template.
 - Emit the 🚶 walk line in 前置排除, 推薦, and 接近門檻 only; do not emit it in 可疑/待查 or 目標日排除.
 - If the target-date new-listing count is 10 or lower, list all excluded properties. If it is above 10, list only the 5 excluded properties closest to the threshold.
