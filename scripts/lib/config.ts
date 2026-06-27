@@ -74,5 +74,5 @@ export const SELECTORS = {
 /** Safety cap on pagination so a selector mismatch can't loop forever. */
 export const MAX_PAGES = 50;
 
-/** Where the browser session is cached between runs (git-ignored). */
-export const STORAGE_STATE_PATH = 'storageState.json';
+/** Where the cookie jar is cached between runs (git-ignored). */
+export const COOKIE_JAR_PATH = '.cookies.json';
