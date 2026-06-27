@@ -73,19 +73,26 @@ evaluation, and writing the report.
 - `npm run route -- --lat <> --lng <>` — deterministic nearest-walk exit for one
   coordinate (shared ORS cache). Used during triage (step 5) to get a trustworthy
   walking distance after re-locating a listing from its address.
-- `npm run pipeline -- run [--date <target>]` — thin orchestrator over the daily
-  steps fetch → enrich → report → notify. One run per date is recorded under
-  `state/runs/<target>/` (`manifest.json` = resumable state, `journal.jsonl` =
-  event timeline). Already-ok steps are skipped, so **re-running resumes** from
-  the first non-ok step; it stops at the agent `report` step and prints the
-  `mark` command to run when the report is written. `notify` is auto-run from the
-  status/title recorded at the report mark (idempotent; `--dry-run` prints the
-  composed `ai-notify` command without sending).
+- `npm run pipeline -- run [--date <target> | --from <a> --to <b>]` — thin
+  orchestrator over fetch → enrich → report → notify. A run covers an
+  inclusive date range; a single day is the default (previous Taipei day) and
+  uses the bare date as its label. A multi-day range uses the label
+  `<from>_<to>`. One run per label is recorded under `state/runs/<label>/`;
+  artifacts are `state/listings-<label>.json`, `state/enriched-<label>.json`,
+  `reports/<label>.md`. A whole range is fetched in **one** query
+  (`add_date`/`add_date_max`), deduped by listing id, and emitted as **one**
+  merged report + **one** notification. Already-ok steps are skipped, so
+  re-running resumes.
   - `npm run pipeline -- status [--date <target>]` — per-step status, timing,
     summary, last error, and the journal tail.
   - `npm run pipeline -- mark report --status ok --artifact reports/<target>.md
     --status-notify <ok|warn|fail> --title "<short>" --tool <codex|claude>` —
     mark the agent report step done and record the notify parameters.
+  - `npm run pipeline -- fail [--date <d> | --from <a> --to <b>] --reason "<short>"
+    [--tool <codex|claude>] [--dry-run]` — headless failure escape hatch: marks
+    the run failed, writes a safe details file from the (redacted) journal tail,
+    and sends one `status=fail` notification. `--dry-run` writes the details and
+    prints the composed command without sending.
   - `fetch`/`enrich` remain runnable standalone; under the pipeline their
     warnings/summaries flow to the journal instead of stderr.
 
@@ -141,5 +148,7 @@ ai-notify --tool <codex|claude> --status <ok|warn|fail> \
 - `docs/automation-state.md`: durable state and deduplication conventions.
 - `templates/daily-notify-template.md`: report/notification structure.
 - `data/README.md`: MRT reference dataset and distance rules.
+- `prompts/daily-run.md`: the committed headless worker prompt for the daily
+  automated run (range-agnostic; the trigger injects the date range).
 - Automation memory: recent run summaries and short-lived notes only. When a
   decision becomes durable, promote it into the relevant doc above.
