@@ -34,6 +34,16 @@ export interface Listing {
   realPriceUrl: string | null;
   /** Cross-source posting history from iBigFun's 刊登紀錄 (incl. delisted); [] if none. */
   listingHistory: ListingHistoryEntry[];
+  /** Stable iBigFun listing id (also the o2o-same key); null if absent. */
+  id: number | null;
+  /** Origin platform label, e.g. "樂屋"; null if absent. */
+  source: string | null;
+  /** Canonical source-site URL for the listing (same value as `url`). */
+  sourceLink: string | null;
+  /** Room counts parsed by iBigFun; null if absent. */
+  room: number | null;
+  livingRoom: number | null;
+  bathroom: number | null;
 }
 
 /** Output document written to state/listings-<date>.json and stdout. */

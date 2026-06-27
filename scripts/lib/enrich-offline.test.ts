@@ -15,7 +15,8 @@ function listing(over: Partial<Listing>): Listing {
   return {
     title: '美寓', url: null, addressOrArea: '台北市中正區金山南路一段', nearbyStation: null, coordinate: { lat: 25.033, lng: 121.522 },
     publishedDate: null, totalPrice: '1000萬', totalPing: '20坪', unitPrice: '50萬/坪',
-    floor: '3', totalFloors: '5', typeLayout: '公寓', age: '30', parking: '無車位', realPriceUrl: null, listingHistory: [], ...over,
+    floor: '3', totalFloors: '5', typeLayout: '公寓', age: '30', parking: '無車位', realPriceUrl: null, listingHistory: [],
+    id: null, source: null, sourceLink: null, room: null, livingRoom: null, bathroom: null, ...over,
   };
 }
 

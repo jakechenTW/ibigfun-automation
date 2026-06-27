@@ -22,8 +22,7 @@ Do these once before the first run; stop and ask the user if any fails:
 - [ ] `.env` exists and is filled (`cp .env.example .env`): `IBIGFUN_ACCOUNT`/
   `IBIGFUN_PASSWORD` (see `docs/credentials.md`) and `ORS_API_KEY` for the
   enrich step's walking distances (free key at openrouteservice.org/dev).
-- [ ] Toolchain installed: `npm install` and `npx playwright install chromium`.
-- [ ] A browser tool is available for the fetch step (see `docs/fetching.md`).
+- [ ] Toolchain installed: `npm install`.
 
 ## Daily Run Sequence
 
@@ -60,9 +59,10 @@ Do these once before the first run; stop and ask the user if any fails:
 Two committed scripts cover the deterministic steps; the agent does estimation,
 evaluation, and writing the report.
 
-- `npm run fetch -- --date <target>` — Playwright scraper. Logs in from `.env`,
-  paginates the filtered view, writes normalized listings to
-  `state/listings-<target>.json`. Details: `docs/fetching.md`.
+- `npm run fetch -- --date <target>` — Browserless fetch. Logs in from `.env`
+  via a form POST, calls iBigFun's JSON APIs (`/api/search/list` +
+  `on-market/o2o-same`), paginates by `total_records`, writes normalized
+  listings to `state/listings-<target>.json`. Details: `docs/fetching.md`.
 - `npm run enrich -- --date <target>` — reads that file and adds walking
   distance to the nearest MRT exit (needs `ORS_API_KEY` in `.env`; results
   cached in `state/route-cache.json`), mortgage, parsed numbers, a reliability
