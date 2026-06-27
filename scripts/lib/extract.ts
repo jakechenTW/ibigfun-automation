@@ -67,6 +67,10 @@ export async function extractListingsOnPage(page: Page): Promise<Listing[]> {
               .map((x) => x.trim())
               .filter(Boolean)
           : [];
+      // Columns read by fixed index (verified live DOM): [總價, 名稱, 來源, 刊登日].
+      // If iBigFun reorders columns, normalizeHistory's date-validity filter drops
+      // the rows, so the listing degrades gracefully to empty history rather than
+      // emitting corrupted numbers.
       const parseHistory = (sub: Element) =>
         Array.from(sub.querySelectorAll('tr'))
           .filter((tr) => !tr.querySelector('th')) // skip the header row

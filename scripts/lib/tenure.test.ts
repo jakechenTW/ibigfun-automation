@@ -54,3 +54,10 @@ test('invalid targetDate -> daysOnMarket null but rest computed', () => {
   assert.equal(t.daysOnMarket, null);
   assert.equal(t.recordCount, 1);
 });
+
+test('comma-formatted prices are parsed (comma value drives firstPrice)', () => {
+  const t = computeTenure([e('2026-01-01', '1,680'), e('2026-03-01', '1588')], '2026-03-10');
+  assert.equal(t.firstPrice, 1680);
+  assert.equal(t.latestPrice, 1588);
+  assert.equal(t.priceTrend, 'dropped');
+});
