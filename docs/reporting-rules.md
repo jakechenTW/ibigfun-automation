@@ -36,42 +36,42 @@ exclusion.
 
 ## Calculations
 
-- Market discount percentage must use: `(market_unit_price - listing_unit_price) / market_unit_price * 100`.
-- A positive discount means the listing is below estimated market price.
-- A negative discount means the listing is above estimated market price.
-- A listing satisfies `below market by at least 10%` only when discount percentage is `>= 10`.
-- Rent coverage must use: `estimated_monthly_rent / monthly_mortgage_payment`.
+- 開價溢價（asking premium）須用：`(物件開價單價 − 成交行情單價) / 成交行情單價 * 100`。
+  正值＝開價高於成交行情（常態）；負值＝開價低於成交行情（罕見、強訊號）。
+- 典型開價溢價 `p*` 由各市成交議價率 `r` 換算：`p* = r / (1 − r)`，`r` 取自
+  `data/negotiation-rate.md`。
+- 投資 profile 的分桶門檻（推薦 `溢價 ≤ p*/2`、接近 `p*/2 < 溢價 ≤ p*`、排除 `溢價 > p*`、
+  可疑含 `溢價 ≤ −10%`）見 `docs/profiles/investment.md`。
 - Monthly mortgage payment must use total price, 80% loan-to-value, 2.6% annual interest, and 30-year principal and interest repayment.
+- 租金覆蓋率 `估計月租 / 月房貸` 與現金流 `月租 − 房貸` 僅供參考顯示，不參與分桶或排序
+  （見下方 Rent 段）。
 
-## Market Price & Rent Estimation
+## Market Price (成交行情) & Premium
 
-For the investment profile, these are the inputs to the discount and
-rent-coverage calculations above. Document the source used for each, as required
-by the data-quality rules below. Profiles that do not use market/rent estimates
-should still document their profile-specific judgment source and confidence in
-their profile report notes.
+成交行情單價是開價溢價計算的基準。開價（iBigFun 上的委託價）系統性高於成交行情，
+因此幾乎每筆物件的溢價為正；以成交行情為錨點、用各市議價率換算的 `p*` 畫門檻，
+正是為了吸收這個結構性落差。
 
-### Market Price (推估區域行情)
+### 行情來源優先序
 
-Use this precedence:
-
-1. iBigFun's own real-price / 實價登錄 link for the listing, when available.
-2. Otherwise, agent-gathered comparable transactions matched on area, age,
-   floor, and property type.
-3. If only stale, weak, timed-out, or cross-site data is available, the listing
-   **cannot be labeled `recommended`**. Route it to near-threshold or excluded
-   and flag it for manual confirmation.
-
-### Rent (預估月租金)
-
-Estimate from comparable rental listings for the same area and property type.
-Always flag the rent figure as needing manual confirmation of the actual
-achievable rent and expected vacancy.
+1. **好時價 AVM（邊界物件優先）**：對接近門檻／數字夠強值得驗證的物件，agent 以好時價
+   逐址估值（單價 萬/坪 + 總價 萬）當成交行情錨點。涵蓋 19 縣市，免費，公布 MAPE ≈ 8–10%
+   作為行情信心帶。只對邊界物件查，比照下方 Quality / Suspicious-Listing 開詳情頁的
+   bounded 模式；不對全量物件查、不逆向其內部 endpoint、不做無頭全量自動化。
+2. iBigFun 自身的實價登錄連結，或 agent 蒐集的可比成交（依面積、屋齡、樓層、型態比對）。
+3. 僅有過期／弱／逾時／跨站資料時，物件**不可標 recommended**，降到接近門檻或排除並標人工確認。
 
 ### Source Visibility
 
-Keep the source used for each market and rent estimate visible in that
-listing's notes.
+每筆物件的行情估計都要在備註標明來源（好時價／實價登錄／樂居）與信心。好時價查不到的
+縣市／地址退回第 2 項並註記。
+
+## Rent (預估月租金，僅供參考)
+
+- 租金降為純參考：只顯示 `月租 ~X（參考·低信心）` 與 `現金流 ~Y/月（參考）`
+  （現金流 = 月租 − 房貸），**永不影響分桶或排序**。
+- 由 agent 粗估同區同類型可比租金即可；不建租金資料集。標來源（若有）與低信心。
+- 一律提醒人工確認實際可租金額與空置期。
 
 ## Manual Checks
 
