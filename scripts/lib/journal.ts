@@ -35,29 +35,29 @@ export function redact(value: unknown): unknown {
   return value;
 }
 
-export function appendJournal(label: string, ev: JournalEvent): void {
-  fs.mkdirSync(runDir(label), { recursive: true });
+export function appendJournal(profileId: string, label: string, ev: JournalEvent): void {
+  fs.mkdirSync(runDir(profileId, label), { recursive: true });
   const msg = ev.msg.length > SNIPPET_MAX ? ev.msg.slice(0, SNIPPET_MAX) + '…' : ev.msg;
   const safe: JournalEvent = {
     ...ev,
     msg,
     data: ev.data === undefined ? undefined : redact(ev.data),
   };
-  fs.appendFileSync(journalPath(label), JSON.stringify(safe) + '\n');
+  fs.appendFileSync(journalPath(profileId, label), JSON.stringify(safe) + '\n');
 }
 
-export function readJournal(label: string): JournalEvent[] {
-  const p = journalPath(label);
+export function readJournal(profileId: string, label: string): JournalEvent[] {
+  const p = journalPath(profileId, label);
   if (!fs.existsSync(p)) return [];
   return fs.readFileSync(p, 'utf8').split('\n').filter(Boolean)
     .map((l) => JSON.parse(l) as JournalEvent);
 }
 
 /** Logger that appends redacted events to the run journal. */
-export function journalLogger(label: string, step: string, nowFn: () => string): Logger {
+export function journalLogger(profileId: string, label: string, step: string, nowFn: () => string): Logger {
   return {
     event(level, event, msg, data) {
-      appendJournal(label, { ts: nowFn(), step, level, event, msg, data });
+      appendJournal(profileId, label, { ts: nowFn(), step, level, event, msg, data });
     },
   };
 }

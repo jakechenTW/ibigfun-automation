@@ -30,6 +30,7 @@ export interface NotifyParams {
 }
 
 export interface Manifest {
+  profileId: string;
   from: string;
   to: string;
   createdAt: string;
@@ -46,9 +47,9 @@ function emptyStep(kind: StepKind): StepState {
   };
 }
 
-export function createManifest(from: string, to: string, now: string): Manifest {
+export function createManifest(profileId: string, from: string, to: string, now: string): Manifest {
   return {
-    from, to, createdAt: now, updatedAt: now, notify: null, failure: null,
+    profileId, from, to, createdAt: now, updatedAt: now, notify: null, failure: null,
     steps: {
       fetch: emptyStep('script'), enrich: emptyStep('script'),
       report: emptyStep('agent'), notify: emptyStep('script'),
@@ -56,8 +57,8 @@ export function createManifest(from: string, to: string, now: string): Manifest 
   };
 }
 
-export function readManifest(label: string): Manifest | null {
-  const p = manifestPath(label);
+export function readManifest(profileId: string, label: string): Manifest | null {
+  const p = manifestPath(profileId, label);
   if (!fs.existsSync(p)) return null;
   return JSON.parse(fs.readFileSync(p, 'utf8')) as Manifest;
 }
@@ -65,15 +66,15 @@ export function readManifest(label: string): Manifest | null {
 export function writeManifest(m: Manifest, now: string): void {
   m.updatedAt = now;
   const label = rangeLabel(m.from, m.to);
-  fs.mkdirSync(runDir(label), { recursive: true });
-  const final = manifestPath(label);
+  fs.mkdirSync(runDir(m.profileId, label), { recursive: true });
+  const final = manifestPath(m.profileId, label);
   const tmp = final + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(m, null, 2));
   fs.renameSync(tmp, final);
 }
 
-export function loadOrCreateManifest(from: string, to: string, now: string): Manifest {
-  return readManifest(rangeLabel(from, to)) ?? createManifest(from, to, now);
+export function loadOrCreateManifest(profileId: string, from: string, to: string, now: string): Manifest {
+  return readManifest(profileId, rangeLabel(from, to)) ?? createManifest(profileId, from, to, now);
 }
 
 export function setStep(m: Manifest, name: StepName, patch: Partial<StepState>): void {

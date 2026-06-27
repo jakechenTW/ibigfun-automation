@@ -20,7 +20,7 @@ export async function runStep(
   fn: StepFn,
   now: () => string,
 ): Promise<'ok' | 'failed'> {
-  const logger = journalLogger(rangeLabel(m.from, m.to), name, now);
+  const logger = journalLogger(m.profileId, rangeLabel(m.from, m.to), name, now);
   const startedAt = now();
   const t0 = Date.parse(startedAt);
   setStep(m, name, {

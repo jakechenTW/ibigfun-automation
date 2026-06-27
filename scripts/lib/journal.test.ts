@@ -38,28 +38,30 @@ import { appendJournal, readJournal } from './journal.ts';
 import { runDir } from './runpaths.ts';
 
 test('appendJournal then readJournal round-trips and redacts data', () => {
+  const profileId = 'investment';
   const date = '0002-02-02'; // throwaway run dir
   try {
-    appendJournal(date, { ts: 't1', step: 'fetch', level: 'info', event: 'step.start', msg: 'go' });
-    appendJournal(date, { ts: 't2', step: 'fetch', level: 'error', event: 'history.drop',
+    appendJournal(profileId, date, { ts: 't1', step: 'fetch', level: 'info', event: 'step.start', msg: 'go' });
+    appendJournal(profileId, date, { ts: 't2', step: 'fetch', level: 'error', event: 'history.drop',
       msg: 'boom', data: { cookie: 'secret', listingId: 5 } });
-    const evs = readJournal(date);
+    const evs = readJournal(profileId, date);
     assert.equal(evs.length, 2);
     assert.equal(evs[0].event, 'step.start');
     assert.deepEqual(evs[1].data, { cookie: '[redacted]', listingId: 5 });
   } finally {
-    fs.rmSync(runDir(date), { recursive: true, force: true });
+    fs.rmSync(runDir(profileId, date), { recursive: true, force: true });
   }
 });
 
 test('appendJournal caps an over-long msg to a bounded snippet', () => {
+  const profileId = 'owner-occupied';
   const date = '0005-05-05';
   try {
-    appendJournal(date, { ts: 't', step: 'notify', level: 'error', event: 'notify.sent', msg: 'x'.repeat(900) });
-    const evs = readJournal(date);
+    appendJournal(profileId, date, { ts: 't', step: 'notify', level: 'error', event: 'notify.sent', msg: 'x'.repeat(900) });
+    const evs = readJournal(profileId, date);
     assert.ok(evs[0].msg.length < 600);
     assert.ok(evs[0].msg.endsWith('…'));
   } finally {
-    fs.rmSync(runDir(date), { recursive: true, force: true });
+    fs.rmSync(runDir(profileId, date), { recursive: true, force: true });
   }
 });
