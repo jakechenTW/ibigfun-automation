@@ -97,8 +97,8 @@ const SOURCE = [
   '376', '377', '378', '379', '463', '464', '478', '579', '590',
 ];
 
-/** Build the URL-encoded /api/search/list POST body for a date + page. */
-export function buildSearchBody(date: string, page = 1): string {
+/** Build the URL-encoded /api/search/list POST body for a date range + page. */
+export function buildSearchBody(from: string, to: string, page = 1): string {
   const p = new URLSearchParams();
   p.set('page', String(page));
   p.set('expand', '0');
@@ -111,8 +111,8 @@ export function buildSearchBody(date: string, page = 1): string {
   p.set('floor_segment[max_val]', '4');
   p.set('total_floor[min_val]', '');
   p.set('total_floor[max_val]', '5');
-  p.set('add_date', date);
-  p.set('add_date_max', date);
+  p.set('add_date', from);
+  p.set('add_date_max', to);
   for (const s of SOURCE_WEB) p.append('source_web[]', s);
   for (const s of SOURCE) p.append('source[]', s);
   p.set('exclude_land', '1');

@@ -3,14 +3,20 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildSearchBody, pageCount, SEARCH_LIST_URL, historyUrl, OFF_MARKET_URL, buildOffMarketBody } from './api.ts';
 
-test('buildSearchBody sets both add_date params to the target date', () => {
-  const b = buildSearchBody('2026-06-26', 1);
+test('buildSearchBody maps a single day to equal add_date / add_date_max', () => {
+  const b = buildSearchBody('2026-06-26', '2026-06-26', 1);
   assert.match(b, /(^|&)add_date=2026-06-26(&|$)/);
   assert.match(b, /(^|&)add_date_max=2026-06-26(&|$)/);
 });
 
+test('buildSearchBody maps a range to add_date=from, add_date_max=to', () => {
+  const b = buildSearchBody('2026-06-20', '2026-06-25', 1);
+  assert.match(b, /(^|&)add_date=2026-06-20(&|$)/);
+  assert.match(b, /(^|&)add_date_max=2026-06-25(&|$)/);
+});
+
 test('buildSearchBody keeps the captured filter + source allow-list', () => {
-  const b = buildSearchBody('2026-06-26', 2);
+  const b = buildSearchBody('2026-06-26', '2026-06-26', 2);
   assert.match(b, /(^|&)page=2(&|$)/);
   assert.match(b, /method=all_case/);
   assert.match(b, /on_market=1/);
@@ -24,7 +30,7 @@ test('buildSearchBody keeps the captured filter + source allow-list', () => {
 });
 
 test('buildSearchBody defaults to page 1', () => {
-  assert.match(buildSearchBody('2026-06-26'), /(^|&)page=1(&|$)/);
+  assert.match(buildSearchBody('2026-06-26', '2026-06-26'), /(^|&)page=1(&|$)/);
 });
 
 test('pageCount = ceil(total / perPage), 0 when perPage invalid', () => {
