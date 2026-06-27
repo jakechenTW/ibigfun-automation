@@ -73,6 +73,21 @@ evaluation, and writing the report.
 - `npm run route -- --lat <> --lng <>` — deterministic nearest-walk exit for one
   coordinate (shared ORS cache). Used during triage (step 5) to get a trustworthy
   walking distance after re-locating a listing from its address.
+- `npm run pipeline -- run [--date <target>]` — thin orchestrator over the daily
+  steps fetch → enrich → report → notify. One run per date is recorded under
+  `state/runs/<target>/` (`manifest.json` = resumable state, `journal.jsonl` =
+  event timeline). Already-ok steps are skipped, so **re-running resumes** from
+  the first non-ok step; it stops at the agent `report` step and prints the
+  `mark` command to run when the report is written. `notify` is auto-run from the
+  status/title recorded at the report mark (idempotent; `--dry-run` prints the
+  composed `ai-notify` command without sending).
+  - `npm run pipeline -- status [--date <target>]` — per-step status, timing,
+    summary, last error, and the journal tail.
+  - `npm run pipeline -- mark report --status ok --artifact reports/<target>.md
+    --status-notify <ok|warn|fail> --title "<short>" --tool <codex|claude>` —
+    mark the agent report step done and record the notify parameters.
+  - `fetch`/`enrich` remain runnable standalone; under the pipeline their
+    warnings/summaries flow to the journal instead of stderr.
 
 Both default to the previous Taipei day when `--date` is omitted. Pure logic is
 covered by `npm test`.
