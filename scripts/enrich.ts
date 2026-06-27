@@ -22,7 +22,7 @@
  * Exit codes: 0 ok · 1 unexpected error · 2 bad input (missing/invalid file or date).
  */
 import * as fs from 'node:fs';
-import { previousTaipeiDay, isValidDateString } from './lib/date.ts';
+import { resolveRange, rangeFlags, type RunRange } from './lib/range.ts';
 import { consoleLogger } from './lib/journal.ts';
 import { enrichStep } from './lib/steps.ts';
 
@@ -31,25 +31,20 @@ function fail(message: string): never {
   process.exit(2);
 }
 
-function resolveTargetDate(argv: string[]): string {
-  const idx = argv.findIndex((a) => a === '--date' || a.startsWith('--date='));
-  if (idx === -1) return previousTaipeiDay(new Date());
-  const raw = argv[idx].includes('=')
-    ? argv[idx].split('=').slice(1).join('=')
-    : argv[idx + 1];
-  if (!raw || !isValidDateString(raw)) fail(`invalid --date "${raw ?? ''}"; expected YYYY-MM-DD.`);
-  return raw;
-}
-
 async function main(): Promise<void> {
-  const targetDate = resolveTargetDate(process.argv.slice(2));
-  const inPath = `state/listings-${targetDate}.json`;
-  if (!fs.existsSync(inPath)) {
-    fail(`${inPath} not found. Run "npm run fetch -- --date ${targetDate}" first.`);
+  let range: RunRange;
+  try {
+    range = resolveRange(process.argv.slice(2), new Date());
+  } catch (e) {
+    fail((e as Error).message);
   }
-  const { artifacts } = await enrichStep(targetDate, consoleLogger('enrich'));
-  console.error(`Wrote enriched listings to ${artifacts[0]}`);
-  process.stdout.write(fs.readFileSync(artifacts[0], 'utf8'));
+  const inPath = `state/listings-${range.label}.json`;
+  if (!fs.existsSync(inPath)) {
+    fail(`${inPath} not found. Run "npm run fetch -- ${rangeFlags(range)}" first.`);
+  }
+  const { artifacts } = await enrichStep(range, consoleLogger('enrich'));
+  console.error(`Wrote enriched listings to ${artifacts![0]}`);
+  process.stdout.write(fs.readFileSync(artifacts![0], 'utf8'));
 }
 
 main().catch((err) => {

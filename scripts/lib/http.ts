@@ -162,9 +162,9 @@ export async function withRetry<T>(
   throw lastErr;
 }
 
-async function fetchPage(date: string, page: number): Promise<SearchListResponse> {
+async function fetchPage(from: string, to: string, page: number): Promise<SearchListResponse> {
   return withRelogin(async () => {
-    const r = await rawPostForm(SEARCH_LIST_URL, buildSearchBody(date, page), 'https://www.ibigfun.com/lists/latest');
+    const r = await rawPostForm(SEARCH_LIST_URL, buildSearchBody(from, to, page), 'https://www.ibigfun.com/lists/latest');
     applySetCookies(getJar(), r.setCookies);
     if (looksLikeSignin(r)) return { kicked: true };
     const parsed = JSON.parse(r.text) as SearchListResponse;

@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { collectListings } from './extract.ts';
 import { loadEnv } from './http.ts';
 import type { Logger } from './journal.ts';
+import type { RunRange } from './range.ts';
 import type { StepOutput } from './run.ts';
 import { loadExits } from './mrt.ts';
 import { enrichOffline } from './enrich-offline.ts';
@@ -16,10 +17,10 @@ const ORS_DELAY_MS = 1600;        // ORS free tier ~40 req/min
 const ORS_RETRY_WAIT_MS = 65_000; // wait out the per-minute window once
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export async function enrichStep(date: string, logger: Logger): Promise<StepOutput> {
-  const inPath = path.join('state', `listings-${date}.json`);
+export async function enrichStep(range: RunRange, logger: Logger): Promise<StepOutput> {
+  const inPath = path.join('state', `listings-${range.label}.json`);
   if (!fs.existsSync(inPath)) {
-    throw new Error(`${inPath} not found. Run the fetch step for ${date} first.`);
+    throw new Error(`${inPath} not found. Run the fetch step for ${range.label} first.`);
   }
   try { process.loadEnvFile('.env'); } catch { /* vars may already be exported */ }
   const apiKey = process.env.ORS_API_KEY;
@@ -70,20 +71,20 @@ export async function enrichStep(date: string, logger: Logger): Promise<StepOutp
         }
       }
     }
-    enriched.push(finalizeWalk(o, routed, date));
+    enriched.push(finalizeWalk(o, routed, range.to));
   }
 
   const withinWalkCount = enriched.filter((l) => l.withinWalk === true).length;
   const manualReviewCount = enriched.filter((l) => l.withinWalk === null).length;
   const hardExcludedCount = enriched.filter((l) => l.hardExclusion.excluded).length;
   const result: EnrichResult = {
-    targetDate: date, enrichedAt: new Date().toISOString(), count: enriched.length,
+    from: range.from, to: range.to, enrichedAt: new Date().toISOString(), count: enriched.length,
     withinWalkCount, manualReviewCount, hardExcludedCount, listings: enriched,
   };
 
   fs.mkdirSync('state', { recursive: true });
   saveCache(cache);
-  const outPath = path.join('state', `enriched-${date}.json`);
+  const outPath = path.join('state', `enriched-${range.label}.json`);
   fs.writeFileSync(outPath, JSON.stringify(result, null, 2));
   logger.event('info', 'enrich.summary',
     `enriched ${enriched.length}: ${withinWalkCount} within-walk, ${manualReviewCount} manual-review, ` +
@@ -97,17 +98,18 @@ export async function enrichStep(date: string, logger: Logger): Promise<StepOutp
   };
 }
 
-export async function fetchStep(date: string, logger: Logger): Promise<StepOutput> {
+export async function fetchStep(range: RunRange, logger: Logger): Promise<StepOutput> {
   loadEnv();
-  const { listings, dropped } = await collectListings(date, undefined, logger);
+  const { listings, dropped, duplicates } = await collectListings(range, undefined, logger);
   const result: FetchResult = {
-    targetDate: date,
+    from: range.from,
+    to: range.to,
     fetchedAt: new Date().toISOString(),
     count: listings.length,
     listings,
   };
   fs.mkdirSync('state', { recursive: true });
-  const outPath = path.join('state', `listings-${date}.json`);
+  const outPath = path.join('state', `listings-${range.label}.json`);
   fs.writeFileSync(outPath, JSON.stringify(result, null, 2));
-  return { summary: { listings: listings.length, historyDropped: dropped }, artifacts: [outPath] };
+  return { summary: { listings: listings.length, historyDropped: dropped, duplicates }, artifacts: [outPath] };
 }

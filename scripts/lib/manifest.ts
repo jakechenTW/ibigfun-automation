@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import { manifestPath, runDir } from './runpaths.ts';
+import { rangeLabel } from './date.ts';
 
 export type StepName = 'fetch' | 'enrich' | 'report' | 'notify';
 export type StepStatus = 'pending' | 'running' | 'ok' | 'failed' | 'skipped';
@@ -29,11 +30,13 @@ export interface NotifyParams {
 }
 
 export interface Manifest {
-  targetDate: string;
+  from: string;
+  to: string;
   createdAt: string;
   updatedAt: string;
   notify: NotifyParams | null;
   steps: Record<StepName, StepState>;
+  failure: { reason: string; where: string } | null;
 }
 
 function emptyStep(kind: StepKind): StepState {
@@ -43,9 +46,9 @@ function emptyStep(kind: StepKind): StepState {
   };
 }
 
-export function createManifest(date: string, now: string): Manifest {
+export function createManifest(from: string, to: string, now: string): Manifest {
   return {
-    targetDate: date, createdAt: now, updatedAt: now, notify: null,
+    from, to, createdAt: now, updatedAt: now, notify: null, failure: null,
     steps: {
       fetch: emptyStep('script'), enrich: emptyStep('script'),
       report: emptyStep('agent'), notify: emptyStep('script'),
@@ -53,23 +56,24 @@ export function createManifest(date: string, now: string): Manifest {
   };
 }
 
-export function readManifest(date: string): Manifest | null {
-  const p = manifestPath(date);
+export function readManifest(label: string): Manifest | null {
+  const p = manifestPath(label);
   if (!fs.existsSync(p)) return null;
   return JSON.parse(fs.readFileSync(p, 'utf8')) as Manifest;
 }
 
 export function writeManifest(m: Manifest, now: string): void {
   m.updatedAt = now;
-  fs.mkdirSync(runDir(m.targetDate), { recursive: true });
-  const final = manifestPath(m.targetDate);
+  const label = rangeLabel(m.from, m.to);
+  fs.mkdirSync(runDir(label), { recursive: true });
+  const final = manifestPath(label);
   const tmp = final + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(m, null, 2));
   fs.renameSync(tmp, final);
 }
 
-export function loadOrCreateManifest(date: string, now: string): Manifest {
-  return readManifest(date) ?? createManifest(date, now);
+export function loadOrCreateManifest(from: string, to: string, now: string): Manifest {
+  return readManifest(rangeLabel(from, to)) ?? createManifest(from, to, now);
 }
 
 export function setStep(m: Manifest, name: StepName, patch: Partial<StepState>): void {

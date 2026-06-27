@@ -46,3 +46,8 @@ export function daysBetween(fromYMD: string, toYMD: string): number {
   const [ty, tm, td] = toYMD.split('-').map(Number);
   return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / DAY_MS);
 }
+
+/** On-disk label for a run: the date itself for a single day, else `from_to`. */
+export function rangeLabel(from: string, to: string): string {
+  return from === to ? from : `${from}_${to}`;
+}

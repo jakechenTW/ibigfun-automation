@@ -1,5 +1,6 @@
 import { Manifest, StepName, setStep, writeManifest } from './manifest.ts';
 import { Logger, journalLogger } from './journal.ts';
+import { rangeLabel } from './date.ts';
 
 export interface StepOutput {
   summary?: Record<string, unknown>;
@@ -19,7 +20,7 @@ export async function runStep(
   fn: StepFn,
   now: () => string,
 ): Promise<'ok' | 'failed'> {
-  const logger = journalLogger(m.targetDate, name, now);
+  const logger = journalLogger(rangeLabel(m.from, m.to), name, now);
   const startedAt = now();
   const t0 = Date.parse(startedAt);
   setStep(m, name, {

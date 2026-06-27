@@ -16,7 +16,7 @@ import { consoleLogger, type Logger } from './journal.ts';
 
 export interface CollectDeps {
   ensureSession: () => Promise<void>;
-  fetchPage: (date: string, page: number) => Promise<SearchListResponse>;
+  fetchPage: (from: string, to: string, page: number) => Promise<SearchListResponse>;
   fetchOnMarketHistory: (id: number) => Promise<HistoryEntry[]>;
   fetchOffMarketHistory: (uuid: string) => Promise<OffMarketEntry[]>;
 }
@@ -36,20 +36,30 @@ async function runPool<T, R>(items: T[], limit: number, worker: (item: T, index:
 }
 
 export async function collectListings(
-  date: string,
+  range: { from: string; to: string },
   deps: CollectDeps = defaultDeps(),
   logger: Logger = consoleLogger('fetch'),
-): Promise<{ listings: Listing[]; dropped: number }> {
+): Promise<{ listings: Listing[]; dropped: number; duplicates: number }> {
   await deps.ensureSession();
 
-  // 1) Gather all listing rows across pages.
-  const first = await deps.fetchPage(date, 1);
+  // 1) Gather all listing rows across pages, deduping repeated ids (keep first).
+  const first = await deps.fetchPage(range.from, range.to, 1);
   const pages = Math.min(pageCount(first.total_records, first.per_page), MAX_PAGES);
   const items: ListItem[] = [];
+  const seen = new Set<number>();
+  let duplicates = 0;
   for (let p = 1; p <= Math.max(pages, 1); p++) {
-    const res = p === 1 ? first : await deps.fetchPage(date, p);
+    const res = p === 1 ? first : await deps.fetchPage(range.from, range.to, p);
     if (!res.data || res.data.length === 0) break;
-    items.push(...res.data);
+    for (const it of res.data) {
+      if (seen.has(it.id)) { duplicates++; continue; }
+      seen.add(it.id);
+      items.push(it);
+    }
+  }
+  if (duplicates > 0) {
+    logger.event('info', 'fetch.dedup',
+      `dropped ${duplicates} duplicate listing id(s) within range`, { duplicates });
   }
 
   // 2) Fetch per-listing history through a small pool; skip+warn on failure.
@@ -86,5 +96,5 @@ export async function collectListings(
   logger.event('info', 'history.summary',
     `${items.length - dropped} listings ok, ${dropped} dropped`,
     { ok: items.length - dropped, dropped });
-  return { listings, dropped };
+  return { listings, dropped, duplicates };
 }

@@ -13,28 +13,23 @@
  * needs a human).
  */
 import * as fs from 'node:fs';
-import { previousTaipeiDay, isValidDateString } from './lib/date.ts';
+import { resolveRange, type RunRange } from './lib/range.ts';
 import { BlockedError } from './lib/errors.ts';
 import { consoleLogger } from './lib/journal.ts';
 import { fetchStep } from './lib/steps.ts';
 
-/** Parse `--date YYYY-MM-DD` (or `--date=...`); default = previous Taipei day. */
-function resolveTargetDate(argv: string[]): string {
-  const idx = argv.findIndex((a) => a === '--date' || a.startsWith('--date='));
-  if (idx === -1) return previousTaipeiDay(new Date());
-
-  const raw = argv[idx].includes('=')
-    ? argv[idx].split('=').slice(1).join('=')
-    : argv[idx + 1];
-  if (!raw || !isValidDateString(raw)) {
-    throw new BlockedError(`Invalid --date "${raw ?? ''}"; expected YYYY-MM-DD.`);
+/** Resolve --date / --from/--to; map a bad range to a BlockedError (exit 2). */
+function resolveRangeOrThrow(argv: string[]): RunRange {
+  try {
+    return resolveRange(argv, new Date());
+  } catch (e) {
+    throw new BlockedError((e as Error).message);
   }
-  return raw;
 }
 
 async function main(): Promise<void> {
-  const targetDate = resolveTargetDate(process.argv.slice(2));
-  const { artifacts } = await fetchStep(targetDate, consoleLogger('fetch'));
+  const range = resolveRangeOrThrow(process.argv.slice(2));
+  const { artifacts } = await fetchStep(range, consoleLogger('fetch'));
   console.error(`Wrote listings to ${artifacts![0]}`);
   process.stdout.write(fs.readFileSync(artifacts![0], 'utf8'));
 }
