@@ -38,8 +38,8 @@ Do these once before the first run; stop and ask the user if any fails:
 4. Enrich deterministically (`npm run enrich -- --profile <profile> --date
    <target>` writes `state/runs/<profile>/<label>/enriched.json`): nearest MRT
    exit by **walking distance** (OpenRouteService foot routing over OSM),
-   monthly mortgage, parsed numbers, objective hard-exclusion flags (>10-min
-   walk when data is reliable), and an advisory `signals.auctionKeyword` flag
+   monthly mortgage, parsed numbers, reusable walk signals (`withinWalk`) and
+   reliability flags, and an advisory `signals.auctionKeyword` flag
    the agent weighs (no longer an auto-exclusion — see Quality /
    Suspicious-Listing Judgment in docs/reporting-rules.md). Listings with an
    unreliable coordinate/route are marked `withinWalk: null` for manual review,
@@ -52,8 +52,8 @@ Do these once before the first run; stop and ask the user if any fails:
 7. Estimate profile-specific judgment fields (for investment: market price and
    rent; for self-use: fit, risks, and missing confirmations) →
    `docs/reporting-rules.md` and `docs/profiles/<profile>.md`.
-8. Evaluate against the selected profile criteria, shared exclusions, and
-   sorting/notification rules, using the enriched fields plus your estimates →
+8. Evaluate against the selected profile criteria, shared data-quality rules,
+   and sorting/notification rules, using the enriched fields plus your estimates →
    `docs/reporting-rules.md` and `docs/profiles/<profile>.md`.
 9. Write `state/runs/<profile>/<label>/report.md` using the profile's
    configured template path from `profiles/<profile>.json` as the structure.
@@ -72,7 +72,7 @@ evaluation, and writing the report.
 - `npm run enrich -- --profile <profile> --date <target>` — reads that file and
   adds walking distance to the nearest MRT exit (needs `ORS_API_KEY` in `.env`;
   results cached in `state/route-cache.json`), mortgage, parsed numbers, a
-  reliability gate, hard-exclusion (walk only), and the advisory auction-keyword
+  reliability gate for walking distance, and the advisory auction-keyword
   signal → `state/runs/<profile>/<label>/enriched.json`. Profile-specific
   estimation and final include/exclude judgment stay with the agent. The walk
   decision is `withinWalk` (true ≤10-min walk / false too far / null
@@ -160,7 +160,7 @@ ai-notify --tool <codex|claude> --status <ok|warn|fail> \
 - `docs/fetching.md`: how to fetch listings, fields to extract, MRT distance.
 - `docs/credentials.md`: credential storage and login secrets handling.
 - `docs/reporting-rules.md`: shared calculations, data quality, sorting, and
-  notification format.
+  notification conventions.
 - `docs/profiles/*.md`: profile-specific criteria, thresholds, and report
   buckets.
 - `docs/automation-state.md`: durable state and deduplication conventions.

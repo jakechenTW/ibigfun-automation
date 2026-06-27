@@ -29,7 +29,7 @@ Room, living-room, and bathroom counts are displayed but are not hard criteria i
 - Put close matches or listings with missing fields in `候選/需確認`.
 - Summarize exclusions by count and main reason instead of listing every excluded property.
 - Treat suspicious, likely-auction, low-information, or blocked-detail listings as risk notes or exclusion reasons.
-- Walking distance is a preference and sorting signal, not a hard exclusion, unless this profile later adds an explicit walking threshold.
+- Walking distance is a preference and sorting signal, not a disqualifier, unless this profile later adds an explicit walking threshold.
 
 ## Notification Status
 

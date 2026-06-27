@@ -12,19 +12,27 @@ Shared rules live in this file. Profile-specific decision thresholds live in:
 Investment-specific thresholds and estimation rules are owned by
 `docs/profiles/investment.md`.
 
-## Hard Exclusions
+## Walking-Distance Signals
 
-Apply these exclusions before ranking recommended, near-threshold, and excluded listings:
+The enrich step produces reusable walking-distance signals. Profiles decide how
+to consume them; this shared file does not define a universal MRT hard
+exclusion.
 
-- Exclude listings that are clearly more than 800 meters from the nearest MRT station.
-- Do not exclude a listing for MRT distance when the listing data does not clearly show distance or enough station/location evidence to determine it.
-- When iBigFun provides a Google Maps coordinate link for the listing address, treat that coordinate as the listing location for MRT-distance checks unless the coordinate is visibly inconsistent with the listing address.
-- Use `data/taipei_mrt_exits.csv` as the active MRT reference data. Calculate straight-line distance from the listing coordinate to all MRT exits, choose the nearest exit, and use that nearest-exit distance as the primary MRT-distance signal.
-- For routine screening, call walking-distance routing only for the single nearest MRT exit, not every exit. Use OpenStreetMap foot routing when a walking-time estimate is needed.
-- Treat straight-line distances in the 700-900 meter range as boundary cases requiring manual walking-distance confirmation. Straight-line distance is not walking distance.
-- Construction or planned stations may be noted as future-upside context when reliable coordinates are available, but they do not replace active MRT exits for the formal 800 meter hard-exclusion rule.
-- Retired or canceled stations must not be used for either the hard-exclusion rule or future-upside notes.
-- Keep hard-exclusion counts and main reasons visible in the report summary when any are found.
+- `withinWalk === true`: the route to the nearest active MRT exit is reliable
+  and within a 10-minute walk.
+- `withinWalk === false`: the route is reliable and over a 10-minute walk.
+- `withinWalk === null`: the coordinate or route is unreliable, missing, or
+  ambiguous; never auto-exclude from this value alone.
+- Use `data/taipei_mrt_exits.csv` as the active MRT reference data. Enrich
+  computes straight-line distance from the listing coordinate to every active
+  MRT exit, chooses the nearest exit, and routes walking distance for that exit.
+- Straight-line distance is a screening signal only. Treat 700-900 m straight
+  line as a boundary range that needs walking-distance confirmation.
+- Construction or planned stations may be noted as future-upside context when
+  reliable coordinates are available, but they do not replace active MRT exits
+  for `withinWalk`.
+- Retired or canceled stations must not be used for walk signals or
+  future-upside notes.
 
 ## Calculations
 
@@ -117,7 +125,7 @@ the deterministic `withinWalk`, and never silently exclude on unreliable data.
 
 ## Quality / Suspicious-Listing Judgment (Agent)
 
-Auction/foreclosure detection is no longer a hardcoded keyword hard-exclusion.
+Auction/foreclosure detection is no longer a hardcoded keyword auto-exclusion.
 The keyword check now only sets the advisory `signals.auctionKeyword` flag on
 each enriched listing; the agent makes the final call as part of a broader
 "low-info / suspicious listing" judgment. Foreclosure is one case under this.
@@ -182,17 +190,15 @@ listing lacking solid data cannot be labeled recommended.
 - Do not use tables.
 - Put the quick summary before listing details.
 - Add a Markdown link to every listing title.
-- Each listing section header is `#### {rank}. [title](url)`; do not emit a `- 狀態：…` line — the section heading already names the bucket.
-- Append inline metrics to the header: recommended `｜ 低於行情 {discount_percent}%・覆蓋率 {rent_coverage}`; near-threshold `｜ 覆蓋率 {rent_coverage}・差在 {near_threshold_reason}`; suspicious `｜ \`{suspicious_label}\`` where suspicious_label is `clean` / `suspicious` / `likely-auction`.
 - Render `detail_page_checked` as a short phrase (e.g. 已點詳情頁 / 未查證), not a raw boolean.
-- Do not emit a 刊登日 line in recommended or near-threshold listings.
-- Recommended and near-threshold use the full compact layout (walk line, one basics line `總價／坪數／單價・樓層・屋齡・地址`, one financial line `行情・月租・房貸・現金流`, then reason/risk or manual-check). Hard-excluded, suspicious, and excluded use the shorter layout shown in the selected profile template.
-- Emit the 🚶 walk line in 前置排除, 推薦, and 接近門檻 only — never in 可疑/待查 or 目標日排除. Compose it from the listing's enriched `walk` and `coordinate`:
+- Compose walk lines from the listing's enriched `walk` and `coordinate`:
   - Reliable (`walk` present): `🚶 {stationZh} {exitId} 號出口・{minutes} 分鐘（[地圖]({map_url})）`. If `exitId` is missing, drop the 出口 part: `🚶 {stationZh}・{minutes} 分鐘（[地圖]({map_url})）`.
   - Unreliable but `coordinate` present (`walk` is null — e.g. coordinate inconsistent, route ratio implausible): show the triage result and mark it pending: `🚶 約{station}・步行待確認（[地圖]({map_url})）`, or `🚶 步行待人工確認（[地圖]({map_url})）` when no station can be inferred.
   - No `coordinate`: `🚶 無位置資訊` (no map link).
 - Map link `{map_url}` is exactly `https://www.google.com/maps?q=<lat>,<lng>` using the listing `coordinate`, with link text `地圖`.
-- Emit the 🕒 tenure line (`{{tenure_line}}`) in every listing block (前置排除, 推薦, 接近門檻, 可疑/待查, 目標日排除). Compose it from the listing's enriched `tenure`:
+- Emit the 🕒 tenure line (`{{tenure_line}}`) in every listing block unless a
+  profile template explicitly omits tenure. Compose it from the listing's
+  enriched `tenure`:
   - `recordCount === 0` (no 刊登紀錄 parsed): `🕒 刊登史不明`.
   - `daysOnMarket` is `0` (earliest record is the target date — genuinely fresh): `🕒 本日新上架`.
   - Otherwise: `🕒 已刊登 {daysOnMarket} 天・{price_part}（最早 {firstListedDate}・{sourceCount} 來源）`, where `{price_part}` is:
@@ -203,16 +209,15 @@ listing lacking solid data cannot be labeled recommended.
   - This line is information-only: it never changes the recommend / exclusion / suspicious decision.
 - When any field (月租, 現金流, 行情, 屋齡, 地址 等) is null, render it as `—` rather than dropping the line.
 - Render each listed property with a 1-based `rank` value inside its section.
-- If the target-date new-listing count is 10 or lower, list all excluded properties.
-- If the target-date new-listing count is above 10, list only the 5 excluded properties closest to the threshold.
-- Sort recommended listings by discount percentage, highest first.
-- Sort near-threshold listings by rent coverage, highest first.
-- Sort excluded listings by rent coverage, discount percentage, then lower total price.
-- Keep a single notification around 3,500 Chinese characters when possible. Compress excluded listings first; keep core numbers for recommended and near-threshold listings.
+- Use the selected profile template for bucket names, inline metrics, omitted
+  sections, exclusion-detail limits, and sorting.
+- Keep a single notification around 3,500 Chinese characters when possible.
+  Compress low-priority exclusions first; keep core numbers for the
+  highest-priority profile buckets.
 
 ## Rule Ownership
 
-Keep durable shared sorting, notification, and data-quality rules in this file.
+Keep durable shared notification and data-quality rules in this file.
 Keep profile-specific thresholds and report buckets in `docs/profiles/*.md`.
 Keep the daily execution sequence in `AGENTS.md`. Keep recent run history and
 one-off operational observations in automation memory.

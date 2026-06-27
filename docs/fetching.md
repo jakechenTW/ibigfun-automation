@@ -1,7 +1,8 @@
 # Fetching iBigFun Listings
 
 How to retrieve the target date's listings for the daily report. This is the
-mechanics referenced by step 3 and step 5 of the run sequence in `AGENTS.md`.
+mechanics behind the fetch step in `AGENTS.md`; enrichment, routing triage, and
+profile evaluation are documented separately.
 
 ## Fetch Architecture (Browserless API)
 
@@ -174,7 +175,8 @@ For listings with a credible address coordinate:
   for the single nearest exit, not every exit.
 
 See `data/README.md` for the dataset columns and the full distance rules, and
-`docs/reporting-rules.md` for how distance feeds the hard-exclusion rule.
+`docs/reporting-rules.md` plus the selected profile doc for how distance feeds
+reporting decisions.
 
 ## Automated Fetch (`scripts/fetch.ts`)
 
