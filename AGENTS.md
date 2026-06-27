@@ -83,11 +83,12 @@ evaluation, and writing the report.
   (`add_date`/`add_date_max`), deduped by listing id, and emitted as **one**
   merged report + **one** notification. Already-ok steps are skipped, so
   re-running resumes.
-  - `npm run pipeline -- status [--date <target>]` — per-step status, timing,
-    summary, last error, and the journal tail.
-  - `npm run pipeline -- mark report --status ok --artifact reports/<target>.md
-    --status-notify <ok|warn|fail> --title "<short>" --tool <codex|claude>` —
-    mark the agent report step done and record the notify parameters.
+  - `npm run pipeline -- status [--date <target> | --from <a> --to <b>]` —
+    per-step status, timing, summary, last error, and the journal tail.
+  - `npm run pipeline -- mark report [--date <target> | --from <a> --to <b>]
+    --status ok --artifact reports/<label>.md --status-notify <ok|warn|fail>
+    --title "<short>" --tool <codex|claude>` — mark the agent report step done
+    and record the notify parameters.
   - `npm run pipeline -- fail [--date <d> | --from <a> --to <b>] --reason "<short>"
     [--tool <codex|claude>] [--dry-run]` — headless failure escape hatch: marks
     the run failed, writes a safe details file from the (redacted) journal tail,
