@@ -95,7 +95,46 @@ Notes:
 For the coded ids each key accepts (`city`, `town`, `house_type`, `parking`,
 the `*_segment` / `*_number` ranges, etc.) see
 **`data/ibigfun-filter-mappings.md`** — it is the human key for the `fetch`
-keys.
+keys, with the full catalog of every tunable param.
+
+## Compose your `fetch`
+
+A worked example using each value shape. Say you want **台中市 北屯/西屯區, 公寓
+或電梯大樓, 總價 1500–3000萬, 屋齡 30 年內, 主建坪 25 坪起, 有平面車位**:
+
+```json
+{
+  "displayName": "台中北屯西屯電梯華廈自住監測",
+  "fetch": {
+    "city": "9",
+    "town": ["100", "101"],
+    "house_type": ["16", "17"],
+    "price_segment": { "min": 1500, "max": 3000 },
+    "house_age_segment": { "max": 30 },
+    "main_ping_number": { "min": 25 },
+    "parking": "平面"
+  }
+}
+```
+
+Reading it against `data/ibigfun-filter-mappings.md`:
+
+| `fetch` entry | Shape | Emits | From the catalog |
+|---|---|---|---|
+| `"city": "9"` | scalar | `city=9` | 9 = 台中市 |
+| `"town": ["100","101"]` | array | `town[]=100` & `town[]=101` | 100 北屯區, 101 西屯區 |
+| `"house_type": ["16","17"]` | array | `house_type[]=16` & `house_type[]=17` | 16 公寓, 17 電梯大樓 |
+| `"price_segment": {min,max}` | range | `price_segment[min_val]=1500` & `[max_val]=3000` | 萬; custom range (not a bucket id) |
+| `"house_age_segment": {max:30}` | range | `house_age_segment[min_val]=` & `[max_val]=30` | 年; min omitted = unbounded below |
+| `"main_ping_number": {min:25}` | range | `main_ping_number[min_val]=25` & `[max_val]=` | 坪 (主建坪) |
+| `"parking": "平面"` | literal | `parking=平面` | 平面車位 |
+
+Notes:
+
+- Omit a key entirely to leave that dimension unfiltered (don't set it to 不限).
+- In a `{min,max}`, drop the bound you don't want — it emits empty (unbounded).
+- The fixed envelope and `source[]`/`source_web[]` allow-lists are added by
+  `buildSearchBody`; never put them in `fetch`.
 
 ## Recipe: add a new search
 
