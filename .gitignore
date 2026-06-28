@@ -24,7 +24,6 @@ downloads/
 node_modules/
 
 # Private profiles — the template ships only example-* profiles.
-# Your own tuned profiles stay on disk but are not committed.
-profiles/investment-taipei/
-profiles/owner-occupied-taipei/
+# Your own tuned profiles live in profiles/<name>.local/ folders: they stay
+# on disk and are auto-discovered, but are never committed.
 profiles/*.local/
