@@ -35,7 +35,8 @@ than content.
 - Filter conditions are **data**, editable in one place; new dimensions need no
   code.
 - A profile can **inherit** from another so regional variants (e.g. 台中投資)
-  reuse a parent's rules, template, and most filters, overriding only the delta.
+  reuse a parent's evaluation rules, template, and most filters, overriding only
+  the delta.
 - Inheritance relationships and the final effective conditions are **easy to
   see**.
 
@@ -58,12 +59,12 @@ A profile is a directory under `profiles/`:
 ```
 profiles/
   investment/
-    profile.json     # data: metadata + fetch + eval (clean JSON)
-    rules.md         # agent-facing rules (was docs/profiles/investment.md)
-    template.md      # notification template (was templates/investment-notify-template.md)
+    profile.json      # data: metadata + fetch (clean JSON)
+    evaluation.md     # agent-facing evaluation (was docs/profiles/investment.md)
+    template.md       # notification template (was templates/investment-notify-template.md)
   owner-occupied/
     profile.json
-    rules.md
+    evaluation.md
     template.md
 ```
 
@@ -74,7 +75,7 @@ Adding a search = copy a folder and edit `profile.json`.
 
 The **shared** rules in `docs/reporting-rules.md` (calculations, sorting,
 data-quality, common to all profiles) stay shared and are *referenced* from each
-`rules.md`, never copied.
+`evaluation.md`, never copied.
 
 ### 2. `profile.json` shape (data-driven filters)
 
@@ -86,8 +87,7 @@ data-quality, common to all profiles) stay shared and are *referenced* from each
     "price_segment": { "max": 2500 },
     "floor_segment": { "min": 2, "max": 4 },
     "total_floor": { "max": 5 }
-  },
-  "eval": {}
+  }
 }
 ```
 
@@ -101,17 +101,10 @@ Fields:
   runnable profile; may be inherited. Used both for the console run hint **and**
   as the notification `ai-notify --task` label.
 - `fetch` (object) — generic filter map → `/api/search/list` body. May be
-  inherited and deep-merged.
-- `eval` (object, optional, default `{}`) — machine-readable criteria the agent
-  applies as its **per-listing include/exclude gate** when evaluating fetched
-  results. Distinct from `fetch`, which only narrows what the API *returns*:
-  `eval` is what the agent *enforces*, and it can re-check things the API can't
-  filter reliably (e.g. `house_type` / `main_ping`, which the API treats as
-  server-side-only). May be inherited and deep-merged; overridable via
-  `--set eval.*`. For `owner-occupied` it carries the real numeric gates
-  (`priceMaxWan`, `floorMin`, `mainPingMin`, `ageMax`, …, i.e. the old
-  `hardCriteria`). For `investment` it is `{}` — its gates (開價溢價, 行情,
-  region allowlist) are doc-driven in `rules.md`.
+  inherited and deep-merged. This is the **only structured condition block** —
+  it decides what the API returns. All agent-side evaluation (gates the fetch
+  can't express, bucketing, data-quality, risk judgment, estimation) lives in
+  `evaluation.md`, not in `profile.json`.
 - `extends` (string, optional) — parent profile id (see Inheritance).
 - `abstract` (boolean, optional, default `false`) — if `true`, not runnable
   (base only).
@@ -125,10 +118,17 @@ Dropped from the old schema:
 - `requiresFilterVerification`, `fetchFilters.enabled`, the
   `fetchFilters.description` prose.
 - `ruleDocPath` / `templatePath` — paths are now implicit (the folder's
-  `rules.md` / `template.md`, resolved through inheritance).
-- The `hardCriteria.profile` placeholder — confirmed read by no code (only
-  parsed as a generic object); it merely restated the id. `hardCriteria` is
-  renamed `eval`.
+  `evaluation.md` / `template.md`, resolved through inheritance).
+- `hardCriteria` (and the structured `eval` we briefly considered) — **removed
+  entirely.** It was read by no code (only parsed as a generic object), and its
+  contents were redundant: for `owner-occupied` the numeric gates are already
+  enforced by `fetch`, and the real agent work (bucketing, data-quality,
+  suspicious/auction risk, walk-as-sorting, market-price estimation) is prose
+  judgment that already lives in `evaluation.md`. The `house_type` / `main_ping`
+  filters are *trusted server-side* (the API applies them; the response just
+  can't re-verify them — it returns `typeLayout`/`total_ping`), so they need no
+  separate re-check gate. Result: conditions have exactly two homes — `fetch`
+  (objective filter) and `evaluation.md` (agent judgment).
 
 The descriptive prose from `fetchFilters.description` moves to
 `data/ibigfun-filter-mappings.md`, which already holds the filter-key reference.
@@ -179,13 +179,12 @@ A profile may declare `"extends": "<parent-id>"`.
 
 **Resolution (`resolveProfile(id)` → effective profile):**
 
-- **Data (`fetch`, `eval`, and the inheritable metadata `displayName`)** —
-  deep-merge per key: start from the parent's value, apply the child's keys on
-  top. So a child that sets only `fetch.city` keeps all the
-  parent's other `fetch` keys.
-- **Files (`rules.md`, `template.md`)** — whole-file fallback: if the child's
-  folder has the file, use it; otherwise use the parent's. (Prose/templates
-  can't be meaningfully merged.)
+- **Data (`fetch` and the inheritable metadata `displayName`)** — deep-merge
+  per key: start from the parent's value, apply the child's keys on top. So a
+  child that sets only `fetch.city` keeps all the parent's other `fetch` keys.
+- **Files (`evaluation.md`, `template.md`)** — whole-file fallback: if the
+  child's folder has the file, use it; otherwise use the parent's.
+  (Prose/templates can't be meaningfully merged.)
 - `abstract` and `extends` never inherit. (`id` is the folder name, not a
   field, so it cannot inherit.)
 
@@ -195,16 +194,16 @@ A profile may declare `"extends": "<parent-id>"`.
 - A profile may not `extends` its own folder name.
 - **Single level**: the parent named by `extends` must not itself have
   `extends` (no chains, so no cycles possible).
-- A runnable (non-abstract) profile must resolve to a `displayName`,
-  `notifyTask`, a non-empty effective `fetch`, an effective `rules.md`, and an
-  effective `template.md` (own or inherited).
+- A runnable (non-abstract) profile must resolve to a `displayName`, a non-empty
+  effective `fetch`, an effective `evaluation.md`, and an effective
+  `template.md` (own or inherited).
 
 ### 6. `abstract` flag (per-family base, optional)
 
 `"abstract": true` marks a profile as base-only: it is excluded from the
 runnable list and running it directly is an error
 (`profile "<id>" is abstract and cannot be run`). It can be `extends`-ed and can
-supply `fetch`/`eval`/`rules.md`/`template.md` to its children.
+supply `fetch` / `evaluation.md` / `template.md` to its children.
 
 This makes both structures expressible with one mechanism, decided **per family,
 whenever you want** — no global A-vs-B lock-in:
@@ -244,25 +243,30 @@ Three cheap, stacking mechanisms (single level keeps them all trivial):
    profile: investment-taichung  (extends investment)
      fetch.city          = "9"          (override)
      fetch.price_segment = {max:2500}   (inherited)
-     rules.md            ← investment    (inherited)
+     evaluation.md       ← investment    (inherited)
      template.md         ← investment    (inherited)
    ```
 
 ### 8. CLI overrides (ad-hoc one-off conditions)
 
-Generic, non-persisted overrides layered on a base profile:
+Generic, non-persisted overrides on the `fetch` block, layered on a base
+profile:
 
 - `--set fetch.<key>=<val>` — e.g. `--set fetch.price_segment.max=3000`
-- `--set eval.<key>=<val>` — e.g. `--set eval.priceMaxWan=8000`
-- `--unset <path>` — e.g. `--unset fetch.total_floor`
+- `--unset fetch.<path>` — e.g. `--unset fetch.total_floor`
 - comma-separated value → array, e.g. `--set fetch.town=16,17`
+
+Overrides target `fetch` only — it is the one structured block. Ad-hoc tweaks to
+agent judgment (e.g. "this run, only recommend ≤2500") are expressed in natural
+language to the agent, which reasons via `evaluation.md`; there is no structured
+gate to override.
 
 Resolution order: parent (via `extends`) → child `profile.json` → CLI
 overrides. The merged result is the **effective profile**, written to the run
 directory as `state/runs/<profile>/<label>/effective-profile.json`. The fetch
-code reads it for the API body; the agent reads it for `eval`, alongside the
-resolved `rules.md` / `template.md`. Overrides never touch the committed
-profile.
+code reads it for the API body; the agent reads the resolved `evaluation.md` /
+`template.md` (with the effective `fetch` for context). Overrides never touch the
+committed profile.
 
 **Natural language is the same primitive.** "跑投資但價格上限改 3000、也看新北"
 just means the agent composes `--set fetch.price_segment.max=3000 --set
@@ -274,8 +278,8 @@ Code:
 
 - `scripts/lib/profiles.ts` — folder discovery; drop `PROFILE_IDS`; new
   `resolveProfile` (inheritance + deep-merge + validation); remove
-  `ProfileFetchFilters` / `searchFiltersFromProfile`; `eval`/`abstract`/`extends`
-  parsing.
+  `ProfileFetchFilters` / `searchFiltersFromProfile` and the `hardCriteria`
+  field; `abstract`/`extends` parsing.
 - `scripts/lib/api.ts` — generic `buildSearchBody`; `SearchFilters` becomes the
   generic map; remove the hard-coded investment default branch.
 - `scripts/lib/api.test.ts` — assert `buildSearchBody(investmentFetch)` matches
@@ -284,31 +288,35 @@ Code:
   parsing, abstract/self/chain validation.
 - `scripts/pipeline.ts` — `profiles` subcommand (tree); write
   `effective-profile.json`; print effective profile; update the path hint
-  (lines ~96–97) to the folder's resolved `rules.md` / `template.md`.
-- CLI flag parsing for `--set` / `--unset` (in the fetch/enrich/pipeline arg
-  layer).
+  (lines ~96–97) to the folder's resolved `evaluation.md` / `template.md`.
+- CLI flag parsing for `--set fetch.*` / `--unset fetch.*` (in the
+  fetch/enrich/pipeline arg layer).
 
 Docs:
 
 - `AGENTS.md` — run sequence and source-of-truth map: profiles are folders;
-  rules = `profiles/<id>/rules.md`, template = `profiles/<id>/template.md`; the
-  notification `--task` uses `displayName`; document `extends` / `abstract` /
-  `--set`.
+  evaluation = `profiles/<id>/evaluation.md`, template =
+  `profiles/<id>/template.md`; the notification `--task` uses `displayName`;
+  conditions live in `fetch` + `evaluation.md` (no `hardCriteria`/`eval`);
+  document `extends` / `abstract` / `--set fetch.*`.
 - `docs/fetching.md` — fetch filters now come from `profile.json`'s `fetch` map;
   drop the `fetchFilters.enabled` framing.
 - `data/ibigfun-filter-mappings.md` — absorb the investment `description` prose;
   it remains the human key for `fetch` map keys.
 - `scripts/lib/region.ts` comment and `docs/reporting-rules.md` reference —
-  repoint `docs/profiles/investment.md` → `profiles/investment/rules.md`.
+  repoint `docs/profiles/investment.md` → `profiles/investment/evaluation.md`.
 
 Migration:
 
-- Move `profiles/investment.json` → `profiles/investment/profile.json` (with
-  filters lifted from `api.ts` into `fetch`, `hardCriteria` → `eval`).
-- Move `docs/profiles/investment.md` → `profiles/investment/rules.md`.
+- Move `profiles/investment.json` → `profiles/investment/profile.json` (filters
+  lifted from `api.ts` into `fetch`; drop `hardCriteria` and all other dropped
+  fields).
+- Move `docs/profiles/investment.md` → `profiles/investment/evaluation.md`.
 - Move `templates/investment-notify-template.md` →
   `profiles/investment/template.md`.
-- Same three moves for `owner-occupied`.
+- Same three moves for `owner-occupied`. Its old `hardCriteria` numeric gates
+  are already enforced by `fetch` and described in its `evaluation.md` ("Hard
+  Criteria" section), so nothing is lost by dropping the JSON copy.
 - `docs/reporting-rules.md` stays shared.
 
 ## Testing
@@ -317,13 +325,13 @@ Migration:
   fetch emits its town/house_type/range params correctly.
 - Discovery finds on-disk folders; abstract profiles excluded from runnable.
 - `resolveProfile`: child overrides only the keys it sets (deep merge); omitted
-  `rules.md`/`template.md` fall back to parent; `id`/`abstract`/`extends` don't
+  `evaluation.md`/`template.md` fall back to parent; `abstract`/`extends` don't
   inherit.
 - Profile id is derived from the folder name (no `id` field).
 - Validation errors: missing parent, self-extends, chain (parent has `extends`),
   running an abstract profile.
-- `--set` / `--unset` parsing: dotted paths, comma→array, fetch vs eval
-  namespacing; effective-profile merge order parent → child → overrides.
+- `--set fetch.*` / `--unset fetch.*` parsing: dotted paths, comma→array;
+  effective-profile merge order parent → child → overrides.
 
 ## Open Questions
 
