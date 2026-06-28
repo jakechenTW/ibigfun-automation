@@ -22,3 +22,9 @@ downloads/
 
 # Node toolchain
 node_modules/
+
+# Private profiles — the template ships only example-* profiles.
+# Your own tuned profiles stay on disk but are not committed.
+profiles/investment-taipei/
+profiles/owner-occupied-taipei/
+profiles/*.local/

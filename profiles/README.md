@@ -13,15 +13,22 @@ field anywhere — rename the folder to rename the profile.
 
 ```
 profiles/
-  investment-taipei/         # id = folder name
+  example-investment/        # id = folder name
     profile.json             # data: displayName + fetch filter map
     evaluation.md            # agent-facing evaluation rules (criteria, buckets, judgment)
     notify-template.md       # report / notification structure
-  owner-occupied-taipei/
+  example-owner-occupied/
     profile.json
     evaluation.md
     notify-template.md
 ```
+
+> **Committed vs. private.** This template commits only `example-*` profiles.
+> Your own tuned profiles are private: keep them on disk under `profiles/` and
+> they are auto-discovered, but git-ignore them (the default `.gitignore`
+> ignores `profiles/*.local/` plus the author's own folders). To start your own,
+> copy an example folder and rename it, e.g. `cp -r profiles/example-investment
+> profiles/my-investment.local`.
 
 All three files are **required**; `loadProfile` rejects a folder that is missing
 any of them. Folders are named `<family>-<city>` so future regional variants
@@ -95,7 +102,7 @@ keys.
 1. Copy an existing folder to the new id:
 
    ```bash
-   cp -r profiles/investment-taipei profiles/investment-taichung
+   cp -r profiles/example-investment profiles/investment-taichung
    ```
 
 2. Edit `profiles/investment-taichung/profile.json` — set `displayName` and the
