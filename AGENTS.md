@@ -127,7 +127,7 @@ a same-day/intraday check, and mark such output as incomplete/intraday.
 
 ## Canonical Notification Command
 
-Send the finished report only after it is written. Use this exact command shape:
+Send the finished report only after it is written. The notifier command is `NOTIFY_CMD` (default `ai-notify`); see `docs/notifications.md`. Use this exact command shape:
 
 ```bash
 ai-notify --tool <codex|claude> --status <ok|warn|fail> \
@@ -166,6 +166,7 @@ ai-notify --tool <codex|claude> --status <ok|warn|fail> \
   command, source-of-truth map.
 - `docs/fetching.md`: how to fetch listings, fields to extract, MRT distance.
 - `docs/credentials.md`: credential storage and login secrets handling.
+- `docs/notifications.md`: notifier command (`NOTIFY_CMD`) contract and no-notifier fallback.
 - `docs/reporting-rules.md`: shared calculations, data quality, sorting, and
   notification conventions.
 - `profiles/<id>/`: one self-contained folder per runnable profile —
