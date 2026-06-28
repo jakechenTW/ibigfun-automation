@@ -60,15 +60,19 @@ A profile is a self-contained directory under `profiles/`:
 
 ```
 profiles/
-  investment/
+  investment-taipei/
     profile.json        # data: displayName + fetch (clean JSON)
     evaluation.md       # agent-facing evaluation (was docs/profiles/investment.md)
     notify-template.md  # notification template (was templates/investment-notify-template.md)
-  owner-occupied/
+  owner-occupied-taipei/
     profile.json
     evaluation.md
     notify-template.md
 ```
+
+Folders are named `<family>-<city>` so future regional variants
+(`investment-taichung`, …) sit as symmetric siblings. The profile id = folder
+name, so the runnable ids are `investment-taipei` / `owner-occupied-taipei`.
 
 Each file keeps its natural format — no embedding, no fenced blocks, no heading
 demotion. The profile id is the folder name. Every runnable profile carries its
@@ -85,8 +89,9 @@ data-quality, common to all profiles) stay shared and are *referenced* from each
 ### 2. `profile.json` shape (data-driven filters)
 
 ```json
+// profiles/investment-taipei/profile.json
 {
-  "displayName": "iBigFun 投資房源監測",
+  "displayName": "iBigFun 台北投資房源監測",
   "fetch": {
     "city": "1",
     "price_segment": { "max": 2500 },
@@ -153,7 +158,7 @@ Generic emission rules for each `fetch` entry:
 | array `["1","4"]`     | `key[]=1` & `key[]=4`                                 |
 
 This single rule set reproduces the captured investment shape exactly once
-`investment/profile.json` carries the filters above. `api.test.ts` flips from
+`investment-taipei/profile.json` carries the filters above. `api.test.ts` flips from
 locking the hard-coded default branch to asserting
 `buildSearchBody(from, to, page, investmentFetch)` produces the same captured
 body — behavior provably unchanged.
@@ -196,7 +201,7 @@ touch the committed profile. The run journal / `status` prints the effective
 `fetch`, marking which keys came from `--set`:
 
 ```
-profile: investment
+profile: investment-taipei
   fetch.price_segment = {max:3000}   (--set)
   fetch.city          = "1"          (profile)
   fetch.floor_segment = {min:2,max:4}(profile)
@@ -254,6 +259,7 @@ Docs:
 - `profiles/README.md` (**new**) — the agent authoring guide (§6). Linked from
   `AGENTS.md`'s source-of-truth map.
 - `AGENTS.md` — run sequence and source-of-truth map: profiles are folders;
+  the runnable ids are now `investment-taipei` / `owner-occupied-taipei`;
   evaluation = `profiles/<id>/evaluation.md`, template =
   `profiles/<id>/notify-template.md`; the notification `--task` uses
   `displayName`; conditions live in `fetch` + `evaluation.md` (no
@@ -263,26 +269,32 @@ Docs:
 - `data/ibigfun-filter-mappings.md` — absorb the investment `description` prose;
   it remains the human key for `fetch` map keys.
 - `scripts/lib/region.ts` comment and `docs/reporting-rules.md` reference —
-  repoint `docs/profiles/investment.md` → `profiles/investment/evaluation.md`.
+  repoint `docs/profiles/investment.md` → `profiles/investment-taipei/evaluation.md`.
 
 Migration (flat folders, no base):
 
-- **investment**
-  - `profiles/investment/profile.json` — `displayName` + full `fetch`
-    (city + price/floor/total_floor, the filters lifted from `api.ts`). Drop
-    `hardCriteria` and all other dropped fields.
-  - `profiles/investment/evaluation.md` — the full `docs/profiles/investment.md`
-    (including the 台北 35-station region-allowlist rule — it stays here since
-    investment is a single profile).
-  - `profiles/investment/notify-template.md` — from
+- **investment → `investment-taipei`**
+  - `profiles/investment-taipei/profile.json` — `displayName`
+    ("iBigFun 台北投資房源監測") + full `fetch` (city + price/floor/total_floor,
+    the filters lifted from `api.ts`). Drop `hardCriteria` and all other dropped
+    fields.
+  - `profiles/investment-taipei/evaluation.md` — the full
+    `docs/profiles/investment.md` (including the 台北 35-station
+    region-allowlist rule — it stays here since this is a single 台北 profile).
+  - `profiles/investment-taipei/notify-template.md` — from
     `templates/investment-notify-template.md`.
-- **owner-occupied** — same three moves; its `fetch` carries
-  city/town/house_type/price/floor/main_ping/age/parking. Its old `hardCriteria`
-  numeric gates are already enforced by `fetch` and described in `evaluation.md`
-  ("Hard Criteria" section), so nothing is lost by dropping the JSON copy.
+- **owner-occupied → `owner-occupied-taipei`** — same three moves; its `fetch`
+  carries city/town/house_type/price/floor/main_ping/age/parking. Its old
+  `hardCriteria` numeric gates are already enforced by `fetch` and described in
+  `evaluation.md` ("Hard Criteria" section), so nothing is lost by dropping the
+  JSON copy.
 - `docs/reporting-rules.md` stays shared (referenced from each `evaluation.md`).
-- Confirm cron triggers / `prompts/` still pass `--profile investment` /
-  `--profile owner-occupied` (the ids are unchanged).
+- **The runnable ids change** (`investment` → `investment-taipei`,
+  `owner-occupied` → `owner-occupied-taipei`). Update every `--profile`
+  reference — cron triggers, `prompts/schedule-triggers.md`,
+  `prompts/daily-run.md`, and any `AGENTS.md` prose that names the old ids. New
+  runs write under `state/runs/<new-id>/...`; old git-ignored run state under the
+  former ids can be left or deleted.
 
 ## Testing
 
