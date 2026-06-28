@@ -34,19 +34,24 @@ than content.
   extra files.
 - Filter conditions are **data**, editable in one place; new dimensions need no
   code.
-- A profile can **inherit** from another so regional variants (e.g. 台中投資)
-  reuse a parent's evaluation rules, template, and most filters, overriding only
-  the delta.
+- A profile can **inherit** from a family base so regional variants (e.g.
+  台中投資) reuse the base's filters, evaluation, and template, overriding only
+  the delta. `evaluation.md` **composes** (base + variant deltas), not just
+  replace-or-inherit.
 - Inheritance relationships and the final effective conditions are **easy to
   see**.
+- An **authoring guide** lets an AI agent (Claude / Codex) write or extend a
+  profile correctly without reading the source.
 
 ## Non-Goals (YAGNI)
 
 - **Multi-level inheritance chains.** Single level only (a parent cannot itself
   `extends`). Revisit only if a real need appears.
 - **YAML/TOML profile format.** Stay zero-dependency; data stays JSON.
-- **A single global shared base.** Not forced. Per-family abstract bases are
-  *possible* via the `abstract` flag but not mandated.
+- **A single global shared base across unrelated families.** Each family gets
+  its *own* abstract base (`investment-base`, `owner-occupied-base`); there is no
+  one base shared between investment and owner-occupied (they have almost nothing
+  in common).
 - **A query DSL.** The `fetch` map maps directly onto the existing
   `/api/search/list` body params.
 
@@ -54,24 +59,35 @@ than content.
 
 ### 1. Folder per profile
 
-A profile is a directory under `profiles/`:
+A profile is a directory under `profiles/`. Each family is an **abstract base**
+(shared filters/evaluation/template) plus one or more **runnable leaves** (the
+distinguishing delta — e.g. the city/region):
 
 ```
 profiles/
-  investment/
-    profile.json      # data: metadata + fetch (clean JSON)
-    evaluation.md       # agent-facing evaluation (was docs/profiles/investment.md)
-    notify-template.md  # notification template (was templates/investment-notify-template.md)
-  owner-occupied/
-    profile.json
+  investment-base/            # abstract: not runnable; holds shared investment bits
+    profile.json              #   fetch: price/floor/total_floor (no city)
+    evaluation.md             #   generic investment evaluation (開價溢價, 行情, buckets)
+    notify-template.md        #   shared investment template
+  investment/                 # runnable leaf — 台北
+    profile.json              #   extends investment-base; fetch.city="1"; displayName
+    evaluation.md             #   台北 delta only (e.g. 35-station 捷運 allowlist)
+  owner-occupied-base/        # abstract
+    profile.json              #   fetch: house_type/price/floor/main_ping/age/parking
     evaluation.md
     notify-template.md
+  owner-occupied/             # runnable leaf — 台北
+    profile.json              #   extends owner-occupied-base; fetch.city + town; displayName
 ```
 
 Each file keeps its natural format — no embedding, no fenced blocks, no heading
-demotion. The profile id is the folder name.
+demotion. The profile id is the folder name. A leaf omits any file it inherits
+unchanged (here, the leaves keep the base's `notify-template.md`).
 
-Adding a search = copy a folder and edit `profile.json`.
+Adding a regional variant (e.g. 台中投資) = create `investment-taichung/` with a
+small `profile.json` (`extends: investment-base`, `displayName`,
+`fetch.city`) and, if its region rules differ, an `evaluation.md` holding just
+that delta. Nothing else.
 
 The **shared** rules in `docs/reporting-rules.md` (calculations, sorting,
 data-quality, common to all profiles) stay shared and are *referenced* from each
@@ -79,17 +95,33 @@ data-quality, common to all profiles) stay shared and are *referenced* from each
 
 ### 2. `profile.json` shape (data-driven filters)
 
+Abstract base — shared filters, no `city`, no `displayName` (never run):
+
 ```json
+// profiles/investment-base/profile.json
 {
-  "displayName": "iBigFun 投資房源監測",
+  "abstract": true,
   "fetch": {
-    "city": "1",
     "price_segment": { "max": 2500 },
     "floor_segment": { "min": 2, "max": 4 },
     "total_floor": { "max": 5 }
   }
 }
 ```
+
+Runnable leaf — only the delta:
+
+```json
+// profiles/investment/profile.json
+{
+  "extends": "investment-base",
+  "displayName": "iBigFun 投資房源監測",
+  "fetch": { "city": "1" }
+}
+```
+
+Effective `fetch` for `investment` = `{ city:"1", price_segment:{max:2500},
+floor_segment:{min:2,max:4}, total_floor:{max:5} }`.
 
 **The profile id is the folder name** — it is *not* a field in `profile.json`.
 This removes a field to keep in sync when copying a folder, and removes a whole
@@ -98,8 +130,8 @@ This removes a field to keep in sync when copying a folder, and removes a whole
 Fields:
 
 - `displayName` (string) — the single human-readable label. Required on a
-  runnable profile; may be inherited. Used both for the console run hint **and**
-  as the notification `ai-notify --task` label.
+  runnable (leaf) profile; not needed on an abstract base. Used both for the
+  console run hint **and** as the notification `ai-notify --task` label.
 - `fetch` (object) — generic filter map → `/api/search/list` body. May be
   inherited and deep-merged. This is the **only structured condition block** —
   it decides what the API returns. All agent-side evaluation (gates the fetch
@@ -151,11 +183,11 @@ Generic emission rules for each `fetch` entry:
 | `{min,max}` object    | `key[min_val]=<min or "">` & `key[max_val]=<max or "">` |
 | array `["1","4"]`     | `key[]=1` & `key[]=4`                                 |
 
-This single rule set reproduces the captured investment shape exactly once
-`investment/profile.json` carries the filters above. `api.test.ts` flips from
-locking the hard-coded default branch to asserting
-`buildSearchBody(from, to, page, investmentFetch)` produces the same captured
-body — behavior provably unchanged.
+This single rule set reproduces the captured investment shape exactly from the
+**resolved** `investment` fetch (`investment-base` price/floor/total_floor +
+leaf `city:"1"`). `api.test.ts` flips from locking the hard-coded default branch
+to asserting `buildSearchBody(from, to, page, resolvedInvestmentFetch)` produces
+the same captured body — behavior provably unchanged.
 
 The fixed-field `ProfileFetchFilters` interface and `searchFiltersFromProfile`
 are removed; `SearchFilters` becomes the generic map type (or `buildSearchBody`
@@ -179,12 +211,20 @@ A profile may declare `"extends": "<parent-id>"`.
 
 **Resolution (`resolveProfile(id)` → effective profile):**
 
-- **Data (`fetch` and the inheritable metadata `displayName`)** — deep-merge
-  per key: start from the parent's value, apply the child's keys on top. So a
-  child that sets only `fetch.city` keeps all the parent's other `fetch` keys.
-- **Files (`evaluation.md`, `notify-template.md`)** — whole-file fallback: if the
-  child's folder has the file, use it; otherwise use the parent's.
-  (Prose/templates can't be meaningfully merged.)
+- **`fetch` + inheritable metadata (`displayName`)** — deep-merge per key: start
+  from the parent's value, apply the child's keys on top. So a child that sets
+  only `fetch.city` keeps all the parent's other `fetch` keys.
+- **`evaluation.md` — composition (concatenation).** The effective evaluation is
+  the chain's `evaluation.md` files joined **base → leaf**, with a clear divider
+  between them. The base holds the generic family evaluation; the leaf holds only
+  its deltas (e.g. its region allowlist). **On conflict the later (leaf) section
+  governs** — stated as an explicit rule the agent follows. A leaf with no
+  `evaluation.md` just inherits the base's. The resolver returns the ordered
+  `evaluationChain`; the pipeline writes the combined result into the run dir
+  (`state/runs/<profile>/<label>/evaluation.md`) so the agent reads one file.
+- **`notify-template.md` — whole-file fallback** (replace-or-inherit): a literal
+  fill-in template can't be concatenated, so the leaf's file is used if present,
+  otherwise the base's.
 - `abstract` and `extends` never inherit. (`id` is the folder name, not a
   field, so it cannot inherit.)
 
@@ -198,41 +238,49 @@ A profile may declare `"extends": "<parent-id>"`.
   effective `fetch`, an effective `evaluation.md`, and an effective
   `notify-template.md` (own or inherited).
 
-### 6. `abstract` flag (per-family base, optional)
+### 6. `abstract` per-family base (the default structure)
 
 `"abstract": true` marks a profile as base-only: it is excluded from the
 runnable list and running it directly is an error
-(`profile "<id>" is abstract and cannot be run`). It can be `extends`-ed and can
-supply `fetch` / `evaluation.md` / `notify-template.md` to its children.
+(`profile "<id>" is abstract and cannot be run`). It is `extends`-ed by its
+family's leaves and supplies `fetch` / `evaluation.md` / `notify-template.md`.
 
-This makes both structures expressible with one mechanism, decided **per family,
-whenever you want** — no global A-vs-B lock-in:
+**Each family is extracted into an abstract base from the start** (not deferred):
 
-- **Concrete parent (start here):** `investment` is runnable *and* the parent of
-  `investment-taichung`. No `abstract`. Zero upfront ceremony.
-- **Abstract per-family base (later, if a family grows):** introduce
-  `investment-base` (`abstract: true`); `investment` (台北) and
-  `investment-taichung` both `extends` it as symmetric siblings. Because the
-  engine already supports `abstract`, this is a data move, not a code change.
+- `investment-base` (`abstract`) → `investment` (台北 leaf), later
+  `investment-taichung`, … as symmetric siblings.
+- `owner-occupied-base` (`abstract`) → `owner-occupied` (台北 leaf), …
 
-Initial migration keeps investment and owner-occupied as plain concrete
-profiles — no base extracted yet.
+Why up front rather than "concrete parent, extract later": it keeps every
+runnable profile a thin leaf and the shared bits in one place, so adding a
+variant never means retrofitting an existing runnable profile into a base, and
+changing one variant never touches its siblings. The base/leaf split also gives
+`evaluation.md` composition a natural home (generic rules in the base, region
+deltas in each leaf).
+
+The base carries everything common; the leaf carries only what distinguishes it
+(typically `fetch.city` / `fetch.town`, `displayName`, and a small
+`evaluation.md` delta). A base needs no `displayName` (never run/notified).
 
 ### 7. Inheritance visibility
 
 Three cheap, stacking mechanisms (single level keeps them all trivial):
 
-1. **Naming convention** — derived profiles named `<base>-<variant>` (e.g.
-   `investment-taichung`), so they sort under the base in `ls profiles/`.
-   Convention only, not enforced.
+1. **Naming convention** — a family base is `<family>-base`; its primary leaf
+   keeps the canonical family name (`investment`, preserved so existing
+   `--profile investment` / cron triggers keep working); further variants are
+   `<family>-<variant>` (e.g. `investment-taichung`). They sort together in
+   `ls profiles/`. Convention only, not enforced (abstract-ness comes from the
+   flag, not the name).
 2. **`npm run pipeline -- profiles`** — prints the inheritance tree computed
    from the real `extends` fields (authoritative; naming is only a hint):
 
    ```
-   investment
-   ├─ investment-taichung   (extends investment)
-   └─ investment-newpei     (extends investment)
-   owner-occupied
+   investment-base (abstract)
+   ├─ investment            (extends investment-base)
+   └─ investment-taichung   (extends investment-base)
+   owner-occupied-base (abstract)
+   └─ owner-occupied        (extends owner-occupied-base)
    ```
 
 3. **Effective profile at run time** — the run journal / `status` prints the
@@ -240,11 +288,11 @@ Three cheap, stacking mechanisms (single level keeps them all trivial):
    overridden:
 
    ```
-   profile: investment-taichung  (extends investment)
+   profile: investment-taichung  (extends investment-base)
      fetch.city          = "9"          (override)
      fetch.price_segment = {max:2500}   (inherited)
-     evaluation.md       ← investment    (inherited)
-     notify-template.md  ← investment    (inherited)
+     evaluation.md       = investment-base + investment-taichung  (composed)
+     notify-template.md  ← investment-base   (inherited)
    ```
 
 ### 8. CLI overrides (ad-hoc one-off conditions)
@@ -263,23 +311,53 @@ gate to override.
 
 Resolution order: parent (via `extends`) → child `profile.json` → CLI
 overrides. The merged result is the **effective profile**, written to the run
-directory as `state/runs/<profile>/<label>/effective-profile.json`. The fetch
-code reads it for the API body; the agent reads the resolved `evaluation.md` /
-`notify-template.md` (with the effective `fetch` for context). Overrides never touch the
-committed profile.
+directory as `state/runs/<profile>/<label>/effective-profile.json` (the resolved
+`fetch` + metadata), alongside the **composed** `evaluation.md` (base + leaf)
+and the resolved `notify-template.md`. The fetch code reads the effective profile
+for the API body; the agent reads the composed `evaluation.md` and the template
+(with the effective `fetch` for context). Overrides never touch the committed
+profile.
 
 **Natural language is the same primitive.** "跑投資但價格上限改 3000、也看新北"
 just means the agent composes `--set fetch.price_segment.max=3000 --set
 fetch.city=2`. One mechanism serves both the CLI and NL paths.
+
+### 9. Authoring guide for agents (`profiles/README.md`)
+
+A single committed doc, co-located at `profiles/README.md`, teaches an AI agent
+(Claude / Codex) **how to write or extend a profile** without reading the
+source. It is linked from `AGENTS.md`'s source-of-truth map. It covers:
+
+- **Layout** — a profile is a folder; the three files
+  (`profile.json` / `evaluation.md` / `notify-template.md`) and what each is for.
+- **`profile.json` schema** — `displayName`, `fetch`, `extends`, `abstract`;
+  which are required on a leaf vs a base.
+- **`fetch` encoding** — the scalar / `{min,max}` / array → API-body rules
+  (the §3 table), with a pointer to `data/ibigfun-filter-mappings.md` for the
+  key/id reference (city/town/house_type/etc.).
+- **Inheritance** — single-level `extends`; `fetch` deep-merge; `evaluation.md`
+  composition (base → leaf, leaf wins on conflict; author the leaf as deltas);
+  `notify-template.md` replace-or-inherit; the `<family>-base` + leaf pattern.
+- **Recipe: add a regional variant** — `mkdir profiles/<family>-<variant>/`,
+  write `profile.json` (`extends`, `displayName`, delta `fetch`), add an
+  `evaluation.md` delta only if region rules differ.
+- **CLI overrides** — `--set fetch.*` / `--unset fetch.*` for ad-hoc runs, and
+  that natural-language requests map to these.
+- **Validation & common errors** — id = folder name; `extends` must point to an
+  existing profile; single-level only; abstract can't be run; leaf must resolve
+  to all required parts.
+- **Seeing inheritance** — `npm run pipeline -- profiles` and the run-time
+  effective-profile printout.
 
 ## Affected Code & Docs
 
 Code:
 
 - `scripts/lib/profiles.ts` — folder discovery; drop `PROFILE_IDS`; new
-  `resolveProfile` (inheritance + deep-merge + validation); remove
-  `ProfileFetchFilters` / `searchFiltersFromProfile` and the `hardCriteria`
-  field; `abstract`/`extends` parsing.
+  `resolveProfile` (inheritance: `fetch` deep-merge, `displayName`,
+  `evaluationChain` ordered base→leaf, resolved `notify-template.md` path,
+  validation); remove `ProfileFetchFilters` / `searchFiltersFromProfile` and the
+  `hardCriteria` field; `abstract`/`extends` parsing.
 - `scripts/lib/api.ts` — generic `buildSearchBody`; `SearchFilters` becomes the
   generic map; remove the hard-coded investment default branch.
 - `scripts/lib/api.test.ts` — assert `buildSearchBody(investmentFetch)` matches
@@ -287,13 +365,16 @@ Code:
 - `scripts/lib/profiles.test.ts` — discovery, resolution/merge, override
   parsing, abstract/self/chain validation.
 - `scripts/pipeline.ts` — `profiles` subcommand (tree); write
-  `effective-profile.json`; print effective profile; update the path hint
-  (lines ~96–97) to the folder's resolved `evaluation.md` / `notify-template.md`.
+  `effective-profile.json` **and the composed `evaluation.md`** (concat the
+  `evaluationChain`) into the run dir; print effective profile; update the path
+  hint (lines ~96–97) to the resolved evaluation/template.
 - CLI flag parsing for `--set fetch.*` / `--unset fetch.*` (in the
   fetch/enrich/pipeline arg layer).
 
 Docs:
 
+- `profiles/README.md` (**new**) — the agent authoring guide (§9). Linked from
+  `AGENTS.md`'s source-of-truth map.
 - `AGENTS.md` — run sequence and source-of-truth map: profiles are folders;
   evaluation = `profiles/<id>/evaluation.md`, template =
   `profiles/<id>/notify-template.md`; the notification `--task` uses
@@ -307,30 +388,45 @@ Docs:
 - `scripts/lib/region.ts` comment and `docs/reporting-rules.md` reference —
   repoint `docs/profiles/investment.md` → `profiles/investment/evaluation.md`.
 
-Migration:
+Migration (split each family into abstract base + 台北 leaf):
 
-- Move `profiles/investment.json` → `profiles/investment/profile.json` (filters
-  lifted from `api.ts` into `fetch`; drop `hardCriteria` and all other dropped
-  fields).
-- Move `docs/profiles/investment.md` → `profiles/investment/evaluation.md`.
-- Move `templates/investment-notify-template.md` →
-  `profiles/investment/notify-template.md`.
-- Same three moves for `owner-occupied`. Its old `hardCriteria` numeric gates
-  are already enforced by `fetch` and described in its `evaluation.md` ("Hard
-  Criteria" section), so nothing is lost by dropping the JSON copy.
-- `docs/reporting-rules.md` stays shared.
+- **investment**
+  - `profiles/investment-base/profile.json` — `abstract: true`, `fetch` =
+    price/floor/total_floor (lifted from `api.ts`; **no** `city`). Drop
+    `hardCriteria` and all other dropped fields.
+  - `profiles/investment-base/evaluation.md` — generic investment evaluation
+    from `docs/profiles/investment.md`, **minus** the 台北-specific 35-station
+    region-allowlist rule.
+  - `profiles/investment-base/notify-template.md` — from
+    `templates/investment-notify-template.md`.
+  - `profiles/investment/profile.json` — `extends: investment-base`,
+    `displayName`, `fetch.city = "1"`.
+  - `profiles/investment/evaluation.md` — only the 台北 region-allowlist delta
+    (references `data/region-allowlist.md`).
+- **owner-occupied** — same split: base holds
+  house_type/price/floor/main_ping/age/parking `fetch` + evaluation + template;
+  leaf holds `extends`, `displayName`, `fetch.city` + `fetch.town`, and the
+  台北 district list as its `evaluation.md` delta. The old `hardCriteria` numeric
+  gates are already enforced by `fetch` and described in `evaluation.md`, so
+  nothing is lost by dropping the JSON copy.
+- `docs/reporting-rules.md` stays shared (referenced from each base's
+  `evaluation.md`).
+- Confirm cron triggers / `prompts/` still pass `--profile investment` /
+  `--profile owner-occupied` (the runnable leaf ids are unchanged).
 
 ## Testing
 
 - `buildSearchBody(investmentFetch)` == captured investment body; owner-occupied
   fetch emits its town/house_type/range params correctly.
-- Discovery finds on-disk folders; abstract profiles excluded from runnable.
-- `resolveProfile`: child overrides only the keys it sets (deep merge); omitted
-  `evaluation.md`/`notify-template.md` fall back to parent; `abstract`/`extends` don't
-  inherit.
+- Discovery finds on-disk folders; abstract profiles excluded from runnable;
+  running an abstract base errors.
+- `resolveProfile`: leaf overrides only the `fetch` keys it sets (deep merge);
+  `evaluation.md` composes base→leaf in order; a leaf with no `evaluation.md`
+  yields the base's alone; `notify-template.md` falls back to the base;
+  `abstract`/`extends` don't inherit.
 - Profile id is derived from the folder name (no `id` field).
 - Validation errors: missing parent, self-extends, chain (parent has `extends`),
-  running an abstract profile.
+  running an abstract profile, leaf missing a required resolved part.
 - `--set fetch.*` / `--unset fetch.*` parsing: dotted paths, comma→array;
   effective-profile merge order parent → child → overrides.
 
