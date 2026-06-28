@@ -80,7 +80,6 @@ data-quality, common to all profiles) stay shared and are *referenced* from each
 
 ```json
 {
-  "id": "investment",
   "displayName": "iBigFun 投資房源監測",
   "notifyTask": "每日 iBigFun 投資房源監測",
   "fetch": {
@@ -89,29 +88,41 @@ data-quality, common to all profiles) stay shared and are *referenced* from each
     "floor_segment": { "min": 2, "max": 4 },
     "total_floor": { "max": 5 }
   },
-  "eval": { "profile": "investment" }
+  "eval": {}
 }
 ```
 
+**The profile id is the folder name** — it is *not* a field in `profile.json`.
+This removes a field to keep in sync when copying a folder, and removes a whole
+"id ≠ folder name" error class.
+
 Fields:
 
-- `id` (string, required) — must equal the folder name.
 - `displayName`, `notifyTask` (string) — required on a runnable profile; may be
   inherited (see Inheritance).
 - `fetch` (object) — generic filter map → `/api/search/list` body. May be
   inherited and deep-merged.
-- `eval` (object) — free-form criteria the agent reads as its pass/fail gate.
-  May be inherited and deep-merged. **Kept separate from `fetch`** (an override
-  names which side it targets).
+- `eval` (object, optional, default `{}`) — free-form criteria the agent reads
+  as its pass/fail gate. May be inherited and deep-merged. **Kept separate from
+  `fetch`** (an override names which side it targets). For `investment` it is
+  `{}` — its real gates (開價溢價, 行情, region allowlist) are doc-driven in
+  `rules.md`.
 - `extends` (string, optional) — parent profile id (see Inheritance).
 - `abstract` (boolean, optional, default `false`) — if `true`, not runnable
   (base only).
 
-Dropped from the old schema: `requiresFilterVerification`,
-`fetchFilters.enabled`, the `fetchFilters.description` prose,
-`ruleDocPath`/`templatePath` (paths are now implicit — the folder's `rules.md` /
-`template.md`, resolved through inheritance). The old `hardCriteria` is renamed
-`eval`. The descriptive prose from `fetchFilters.description` moves to
+Dropped from the old schema:
+
+- `id` — now the folder name (above).
+- `requiresFilterVerification`, `fetchFilters.enabled`, the
+  `fetchFilters.description` prose.
+- `ruleDocPath` / `templatePath` — paths are now implicit (the folder's
+  `rules.md` / `template.md`, resolved through inheritance).
+- The `hardCriteria.profile` placeholder — confirmed read by no code (only
+  parsed as a generic object); it merely restated the id. `hardCriteria` is
+  renamed `eval`.
+
+The descriptive prose from `fetchFilters.description` moves to
 `data/ibigfun-filter-mappings.md`, which already holds the filter-key reference.
 
 ### 3. Generic `fetch` map → API body
@@ -167,12 +178,13 @@ A profile may declare `"extends": "<parent-id>"`.
 - **Files (`rules.md`, `template.md`)** — whole-file fallback: if the child's
   folder has the file, use it; otherwise use the parent's. (Prose/templates
   can't be meaningfully merged.)
-- `id` and `abstract` never inherit. `extends` itself never inherits.
+- `abstract` and `extends` never inherit. (`id` is the folder name, not a
+  field, so it cannot inherit.)
 
 **Constraints (validated on load, with clear errors):**
 
 - `extends` must point to an existing profile.
-- A profile may not `extends` itself.
+- A profile may not `extends` its own folder name.
 - **Single level**: the parent named by `extends` must not itself have
   `extends` (no chains, so no cycles possible).
 - A runnable (non-abstract) profile must resolve to a `displayName`,
@@ -298,8 +310,9 @@ Migration:
 - `resolveProfile`: child overrides only the keys it sets (deep merge); omitted
   `rules.md`/`template.md` fall back to parent; `id`/`abstract`/`extends` don't
   inherit.
+- Profile id is derived from the folder name (no `id` field).
 - Validation errors: missing parent, self-extends, chain (parent has `extends`),
-  running an abstract profile, id ≠ folder name.
+  running an abstract profile.
 - `--set` / `--unset` parsing: dotted paths, comma→array, fetch vs eval
   namespacing; effective-profile merge order parent → child → overrides.
 
