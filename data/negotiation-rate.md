@@ -1,6 +1,6 @@
 # 各縣市成交議價率（議價空間）參考表
 
-investment-taipei profile 用此表把「開價」校準到「成交行情」，計算開價溢價門檻。
+example-investment profile 用此表把「開價」校準到「成交行情」，計算開價溢價門檻。
 詳見 `docs/reporting-rules.md`（開價溢價 / Calculations）與 `profiles/investment-taipei/evaluation.md`。
 
 ## 換算公式

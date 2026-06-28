@@ -4,7 +4,7 @@
 
 ## 監測 profile 與區間（由 trigger 注入）
 
-Trigger 必須提供 profile，例如 `investment-taipei` 或 `owner-occupied-taipei`。你不得自行猜測 profile。
+Trigger 必須提供 profile，例如 `example-investment` 或 `example-owner-occupied`。你不得自行猜測 profile。
 Trigger 必須提供實際 tool name（`codex` 或 `claude`），且必須和真正執行的 agent 相符。
 
 可複製的排程 trigger 範本（含兩個 profile 與錯開時間建議，Codex / Claude Code 通用）見 `prompts/schedule-triggers.md`。
@@ -46,7 +46,7 @@ Trigger 也會在訊息裡告訴你要監測的區間。把它對應成 pipeline
 ## status 對應
 
 - `warn`：有推薦/符合條件、接近門檻/候選、資料偏舊、登入 fallback、未驗證 filter 對照，或有任何 manual-review 項。
-- `owner-occupied-taipei`：以 profile `fetch` map 做完整自住 discovery；依一般 status 規則判斷（有符合/候選/manual 即 `warn`，乾淨無符合且資料新鮮可 `ok`）。
+- `example-owner-occupied`：以 profile `fetch` map 做完整自住 discovery；依一般 status 規則判斷（有符合/候選/manual 即 `warn`，乾淨無符合且資料新鮮可 `ok`）。
 - `ok`：乾淨、無推薦/符合條件、資料新鮮。
 - `fail`：監測無法完成（見下）。
 

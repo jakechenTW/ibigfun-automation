@@ -5,7 +5,7 @@
 ### 快速摘要
 
 - 新刊登物件：{{new_listing_count}} 筆
-- iBigFun 查詢：[開啟目標日篩選](https://www.ibigfun.com/lists/latest?page=1&expand=0&method=all_case&on_market=1&city=1&price_segment=%2C2500&floor_segment=2%2C4&total_floor=%2C5&add_date={{date}}&add_date_max={{date}})
+- iBigFun 查詢：[開啟目標日篩選](https://www.ibigfun.com/lists/latest?page=1&expand=0&method=all_case&on_market=1&city=1&price_segment=%2C3000&floor_segment=2%2C4&total_floor=%2C5&add_date={{date}}&add_date_max={{date}})
 - 區域閘門｜目標捷運站外：{{out_of_region_count}} 筆・站內走路過遠：{{in_region_too_far_count}} 筆・待人工確認：{{manual_review_count}} 筆
 - 推薦物件：{{recommended_count}} 筆
 - 接近門檻：{{near_threshold_count}} 筆

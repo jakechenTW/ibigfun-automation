@@ -125,7 +125,7 @@ on at the command line. They target the `fetch` block only:
 Example:
 
 ```bash
-npm run pipeline -- run --profile investment-taipei \
+npm run pipeline -- run --profile example-investment \
   --set fetch.price_segment.max=3000 --set fetch.city=2
 ```
 
