@@ -118,5 +118,7 @@ export interface EnrichResult {
   withinWalkCount: number;
   manualReviewCount: number; // withinWalk === null
   hardExcludedCount: number;
+  outOfRegionCount: number; // regionGate === 'out-of-region'
+  inRegionTooFarCount: number; // regionGate === 'in-region-too-far'
   listings: EnrichedListing[];
 }
