@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { finalizeWalk, pickWalk } from './walk.ts';
+import { classifyRegion } from './region.ts';
 import type { OfflineEnriched } from './enrich-offline.ts';
 import type { MrtExit, NearestExit } from './mrt.ts';
 
@@ -116,4 +117,29 @@ test('finalizeWalk tenure is empty when there is no history', () => {
   const e = finalizeWalk(offline({}), [700], '2026-06-26');
   assert.equal(e.tenure.recordCount, 0);
   assert.equal(e.tenure.daysOnMarket, null);
+});
+
+test('regionGate in: allowlist station within walk', () => {
+  const e = finalizeWalk(offline({ candidates: [cand('東門', '4', 600)] }), [700]);
+  assert.equal(e.regionGate, 'in');
+});
+
+test('regionGate out-of-region: nearest station not in allowlist', () => {
+  const e = finalizeWalk(offline({ candidates: [cand('後山埤', '1', 600)] }), [700]);
+  assert.equal(e.regionGate, 'out-of-region');
+});
+
+test('regionGate in-region-too-far: allowlist station but >10-min walk', () => {
+  const e = finalizeWalk(offline({ candidates: [cand('東門', '4', 800)] }), [1000]);
+  assert.equal(e.regionGate, 'in-region-too-far');
+});
+
+test('regionGate review: unreliable coordinate', () => {
+  const e = finalizeWalk(offline({ coordConsistent: false }), [700]);
+  assert.equal(e.regionGate, 'review');
+});
+
+test('regionGate matches classifyRegion of walk.stationZh + withinWalk', () => {
+  const e = finalizeWalk(offline({ candidates: [cand('大安', '2', 600)] }), [650]);
+  assert.equal(e.regionGate, classifyRegion(e.walk?.stationZh ?? null, e.withinWalk));
 });

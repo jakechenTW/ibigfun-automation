@@ -1,4 +1,5 @@
 import type { Coordinate } from './coords.ts';
+import type { RegionGate } from './region.ts';
 
 /** One row of iBigFun's 刊登紀錄: this property's appearance on one source/date. */
 export interface ListingHistoryEntry {
@@ -99,6 +100,8 @@ export interface EnrichedListing extends Listing {
   district: string | null;
   walk: WalkInfo | null;
   withinWalk: boolean | null; // <=10-min walk; null = data unreliable, manual review
+  /** Investment region gate from nearest station + withinWalk (see region.ts). */
+  regionGate: RegionGate;
   reliability: Reliability;
   /** Advisory signals for agent judgment (do NOT auto-exclude). */
   signals: { auctionKeyword: boolean };

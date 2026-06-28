@@ -12,6 +12,7 @@ import type { OfflineEnriched } from './enrich-offline.ts';
 import type { NearestExit } from './mrt.ts';
 import type { EnrichedListing, Reliability, WalkInfo } from './types.ts';
 import { computeTenure } from './tenure.ts';
+import { classifyRegion } from './region.ts';
 
 /** ≤10-min walk threshold (~800m at 80 m/min); transparent and tunable. */
 export const WALK_THRESHOLD_M = 800;
@@ -117,6 +118,7 @@ export function finalizeWalk(
     ...listingBase(o),
     walk,
     withinWalk,
+    regionGate: classifyRegion(walk?.stationZh ?? null, withinWalk),
     reliability,
     signals: { auctionKeyword: o.hasAuction },
     hardExclusion: { excluded: reasons.length > 0, reasons },
