@@ -49,10 +49,10 @@ The three files:
 
 ```json
 {
-  "displayName": "iBigFun 台北投資房源監測",
+  "displayName": "iBigFun 台北投資房源監測（範例）",
   "fetch": {
     "city": "1",
-    "price_segment": { "max": 2500 },
+    "price_segment": { "max": 3000 },
     "floor_segment": { "min": 2, "max": 4 },
     "total_floor": { "max": 5 }
   }
