@@ -4,13 +4,13 @@
 
 Shared rules live in this file. Profile-specific decision thresholds live in:
 
-- `profiles/investment-taipei/evaluation.md`
-- `profiles/owner-occupied-taipei/evaluation.md`
+- `profiles/example-investment/evaluation.md`
+- `profiles/example-owner-occupied/evaluation.md`
 
 ## Investment Criteria
 
 Investment-specific thresholds and estimation rules are owned by
-`profiles/investment-taipei/evaluation.md`.
+`profiles/example-investment/evaluation.md`.
 
 ## Walking-Distance Signals
 
@@ -58,7 +58,7 @@ exclusion.
 - 典型開價溢價 `p*` 由各市成交議價率 `r` 換算：`p* = r / (1 − r)`，`r` 取自
   `data/negotiation-rate.md`。
 - 投資 profile 的分桶門檻（推薦 `溢價 ≤ p*/2`、接近 `p*/2 < 溢價 ≤ p*`、排除 `溢價 > p*`、
-  可疑含 `溢價 ≤ −10%`）見 `profiles/investment-taipei/evaluation.md`。
+  可疑含 `溢價 ≤ −10%`）見 `profiles/example-investment/evaluation.md`。
 - Monthly mortgage payment must use total price, 80% loan-to-value, 2.6% annual interest, and 30-year principal and interest repayment.
 - 租金覆蓋率 `估計月租 / 月房貸` 與現金流 `月租 − 房貸` 僅供參考顯示，不參與分桶或排序
   （見下方 Rent 段）。

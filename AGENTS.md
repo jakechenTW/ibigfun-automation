@@ -31,8 +31,8 @@ Do these once before the first run; stop and ask the user if any fails:
 
 1. Read this file, `docs/reporting-rules.md`, `docs/credentials.md`, and
    `docs/automation-state.md` before generating a report or changing behavior.
-2. Identify the target profile explicitly (`investment-taipei` or
-   `owner-occupied-taipei`). Do not infer a profile. Ad-hoc one-off conditions
+2. Identify the target profile explicitly (`example-investment` or
+   `example-owner-occupied`). Do not infer a profile. Ad-hoc one-off conditions
    can be layered on with `--set fetch.<key>=<val>` / `--unset fetch.<path>`
    (see `profiles/README.md`); natural-language tweaks map to the same flags.
    Compute the target date: the previous calendar day
@@ -127,7 +127,7 @@ a same-day/intraday check, and mark such output as incomplete/intraday.
 
 ## Canonical Notification Command
 
-Send the finished report only after it is written. Use this exact command shape:
+Send the finished report only after it is written. The notifier command is `NOTIFY_CMD` (default `ai-notify`); see `docs/notifications.md`. Use this exact command shape:
 
 ```bash
 ai-notify --tool <codex|claude> --status <ok|warn|fail> \
@@ -166,13 +166,14 @@ ai-notify --tool <codex|claude> --status <ok|warn|fail> \
   command, source-of-truth map.
 - `docs/fetching.md`: how to fetch listings, fields to extract, MRT distance.
 - `docs/credentials.md`: credential storage and login secrets handling.
+- `docs/notifications.md`: notifier command (`NOTIFY_CMD`) contract and no-notifier fallback.
 - `docs/reporting-rules.md`: shared calculations, data quality, sorting, and
   notification conventions.
 - `profiles/<id>/`: one self-contained folder per runnable profile —
   `profile.json` (`displayName` + `fetch` filter map), `evaluation.md`
   (profile-specific criteria, thresholds, report buckets), and
   `notify-template.md` (report/notification structure). Runnable ids are the
-  folder names: `investment-taipei`, `owner-occupied-taipei`.
+  folder names: `example-investment`, `example-owner-occupied`.
 - `profiles/README.md`: how to author a profile (folder layout, `profile.json`
   schema, the `fetch` encoding, the add-a-search recipe, `--set fetch.*`
   overrides).

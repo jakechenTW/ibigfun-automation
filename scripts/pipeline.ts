@@ -108,10 +108,10 @@ async function cmdRun(argv: string[]): Promise<void> {
         continue;
       }
       const status = await runStep(m, 'notify', async (logger) => {
-        const { exitCode, stderr } = runNotify(m.notify as NotifyParams, profile.displayName, reportPath(profile.id, range.label));
+        const { exitCode, stderr, command } = runNotify(m.notify as NotifyParams, profile.displayName, reportPath(profile.id, range.label));
         logger.event(exitCode === 0 ? 'info' : 'error', 'notify.sent',
-          `ai-notify exited ${exitCode}`, { exitCode, stderr });
-        if (exitCode !== 0) throw new Error(`ai-notify exited ${exitCode}: ${stderr.trim()}`);
+          `${command} exited ${exitCode}`, { exitCode, stderr });
+        if (exitCode !== 0) throw new Error(`${command} exited ${exitCode}: ${stderr.trim()}`);
         return { summary: { exitCode, status: m.notify!.status } };
       }, now);
       if (status === 'failed') { console.error('✗ notify failed; see status.'); process.exit(1); }
@@ -210,9 +210,9 @@ async function cmdFail(argv: string[]): Promise<void> {
   }
   m.failure = { reason, where: 'pipeline fail' };
   journalLogger(profile.id, range.label, 'notify', now).event('error', 'run.fail', `run failed: ${reason}`, { reason });
-  const { exitCode, stderr } = runNotify(params, profile.displayName, detailsFile);
+  const { exitCode, stderr, command } = runNotify(params, profile.displayName, detailsFile);
   journalLogger(profile.id, range.label, 'notify', now).event(exitCode === 0 ? 'info' : 'error', 'notify.sent',
-    `fail notification ai-notify exited ${exitCode}`, { exitCode, stderr });
+    `fail notification ${command} exited ${exitCode}`, { exitCode, stderr });
   if (exitCode !== 0) {
     writeManifest(m, now());
     console.error(`✗ fail notification failed: ${stderr.trim()}`);

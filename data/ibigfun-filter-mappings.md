@@ -16,14 +16,15 @@ human-readable key.
 Which of these filters each committed profile's `fetch` map (in
 `profiles/<id>/profile.json`) actually sends:
 
-- **investment-taipei**: `city=1`, `price_segment` max 2500萬, `floor_segment`
+- **example-investment**: `city=1`, `price_segment` max 3000萬, `floor_segment`
   2–4, `total_floor` max 5. It sends **no `town[]` and no `house_type[]`**, so it
   returns all 12 台北市 districts and every house type in that floor/price window
   (the low-rise 公寓 bias is a side effect of the floor/total_floor limits, not a
   house_type filter). Verified against the 2026-06-26 fetch (78 listings across
   all 12 districts) — so there are no town/house_type ids to record for it.
-- **owner-occupied-taipei**: `city=1`, `town[]` (1/4/6/8/9),
-  `house_type[]=17` (電梯大樓), plus price/floor/main_ping/age/parking ranges.
+- **example-owner-occupied**: `city=1`, `town[]` (1/4, 中正/中山),
+  `house_type[]=17` (電梯大樓), `price_segment` max 8000萬, `floor_segment` min 7,
+  `main_ping_number` min 30, `house_age_segment` max 25, `parking=平面`.
   All ids verified 2026-06-27.
 
 ## `city` (city id → name)
@@ -66,7 +67,7 @@ Captured 2026-06-27 (22 cities, 366 districts). Ids are **not sequential** and
 are unique across cities (e.g. 文山區=376), so always map by id, never by
 position.
 
-owner-occupied-taipei uses 台北市 1/4/6/8/9 (中正/中山/大安/信義/士林),
+example-owner-occupied uses 台北市 1/4 (中正/中山),
 independently confirmed via single-town live fetches on 2026-06-27 and matching
 this table.
 

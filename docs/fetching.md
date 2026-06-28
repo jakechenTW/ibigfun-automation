@@ -53,7 +53,7 @@ expand=0
 method=all_case
 on_market=1
 city=1
-price_segment[max_val]=2500
+price_segment[max_val]=3000
 floor_segment[min_val]=2
 floor_segment[max_val]=4
 total_floor[max_val]=5
@@ -91,16 +91,16 @@ The fetch body is profile-driven. The variable filters come entirely from the
 selected profile's `fetch` map in `profiles/<id>/profile.json`, which
 `buildSearchBody` walks generically (scalar → `key=value`, `{min,max}` →
 `key[min_val]`/`key[max_val]`, array → repeated `key[]`). The captured shape
-above is exactly what `investment-taipei`'s `fetch` produces (`city`,
-`price_segment` max, `floor_segment` 2–4, `total_floor` max). `owner-occupied-taipei`
+above is exactly what `example-investment`'s `fetch` produces (`city`,
+`price_segment` max, `floor_segment` 2–4, `total_floor` max). `example-owner-occupied`
 carries a different map: `city`, `town[]`, `house_type[]`,
 `price_segment[max_val]`, `floor_segment[min_val]` (no max),
 `main_ping_number[min_val]`, `house_age_segment[max_val]`, and `parking` (no
 `total_floor` cap, no `floor` window). The `method`, `on_market`, `expand`,
 `exclude_land`, `page`, `add_date`/`add_date_max`, and `source_web[]`/`source[]`
 allow-list are the fixed envelope (the API contract), shared by every profile
-and emitted regardless of the `fetch` map. The coded ids for owner-occupied were
-resolved from the filter UI (town 1/4/6/8/9→中正/中山/大安/信義/士林,
+and emitted regardless of the `fetch` map. The coded ids for example-owner-occupied were
+resolved from the filter UI (town 1/4→中正/中山,
 `house_type=17`→電梯大樓). See `data/ibigfun-filter-mappings.md` for the id→name
 reference and `profiles/README.md` for how to author the `fetch` map.
 
@@ -213,8 +213,8 @@ npm install   # toolchain (tsx, TypeScript — no Chromium needed)
 ### Run
 
 ```bash
-npm run fetch -- --profile investment-taipei --date 2026-06-26   # explicit target date
-npm run fetch -- --profile investment-taipei                     # defaults to the previous Taipei day
+npm run fetch -- --profile example-investment --date 2026-06-26   # explicit target date
+npm run fetch -- --profile example-investment                     # defaults to the previous Taipei day
 ```
 
 Exit codes: `0` ok, `1` unexpected error, `2` blocked (`BlockedError` — login

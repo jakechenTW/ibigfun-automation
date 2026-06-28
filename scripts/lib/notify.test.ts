@@ -36,3 +36,51 @@ test('renderFailDetails includes the profile, range, reason, and journal tail li
   assert.ok(md.includes('login blocked'));
   assert.ok(md.includes('fetch:step.error fetch failed: boom'));
 });
+
+import { resolveNotifyCommand, runNotify } from './notify.ts';
+
+test('resolveNotifyCommand defaults to ai-notify when NOTIFY_CMD unset', () => {
+  assert.deepEqual(resolveNotifyCommand({}), { command: 'ai-notify', explicit: false });
+});
+
+test('resolveNotifyCommand uses NOTIFY_CMD when set', () => {
+  assert.deepEqual(resolveNotifyCommand({ NOTIFY_CMD: 'my-notify' }), { command: 'my-notify', explicit: true });
+});
+
+test('resolveNotifyCommand treats blank/whitespace NOTIFY_CMD as unset', () => {
+  assert.deepEqual(resolveNotifyCommand({ NOTIFY_CMD: '   ' }), { command: 'ai-notify', explicit: false });
+});
+
+test('runNotify returns the spawn exit code on success', () => {
+  const spawn = () => ({ status: 0, stderr: '' });
+  const r = runNotify(params, investmentTask, 'r.md', { env: { NOTIFY_CMD: 'my-notify' }, spawn });
+  assert.equal(r.exitCode, 0);
+  assert.equal(r.skipped, undefined);
+  assert.equal(r.command, 'my-notify');
+});
+
+test('runNotify soft-skips with exit 0 when the default notifier is missing', () => {
+  const spawn = () => ({ status: null, error: Object.assign(new Error('not found'), { code: 'ENOENT' }) });
+  const r = runNotify(params, investmentTask, 'r.md', { env: {}, spawn });
+  assert.equal(r.exitCode, 0);
+  assert.equal(r.skipped, true);
+});
+
+test('runNotify surfaces a real error when an explicitly configured notifier is missing', () => {
+  const spawn = () => ({ status: null, error: Object.assign(new Error('not found'), { code: 'ENOENT' }) });
+  const r = runNotify(params, investmentTask, 'r.md', { env: { NOTIFY_CMD: 'broken-notify' }, spawn });
+  assert.equal(r.exitCode, 1);
+  assert.equal(r.skipped, undefined);
+});
+
+test('runNotify surfaces non-zero exit from a configured notifier', () => {
+  const spawn = () => ({ status: 3, stderr: 'boom' });
+  const r = runNotify(params, investmentTask, 'r.md', { env: { NOTIFY_CMD: 'my-notify' }, spawn });
+  assert.equal(r.exitCode, 3);
+  assert.equal(r.stderr, 'boom');
+});
+
+test('composeNotifyCommand prefixes the resolved command name', () => {
+  const cmd = composeNotifyCommand(params, investmentTask, 'r.md', { NOTIFY_CMD: 'my-notify' });
+  assert.ok(cmd.startsWith('my-notify --tool claude'));
+});

@@ -13,15 +13,22 @@ field anywhere — rename the folder to rename the profile.
 
 ```
 profiles/
-  investment-taipei/         # id = folder name
+  example-investment/        # id = folder name
     profile.json             # data: displayName + fetch filter map
     evaluation.md            # agent-facing evaluation rules (criteria, buckets, judgment)
     notify-template.md       # report / notification structure
-  owner-occupied-taipei/
+  example-owner-occupied/
     profile.json
     evaluation.md
     notify-template.md
 ```
+
+> **Committed vs. private.** This template commits only `example-*` profiles.
+> Your own tuned profiles are private: keep them on disk under `profiles/` and
+> they are auto-discovered, but git-ignore them (the default `.gitignore`
+> ignores `profiles/*.local/` plus the author's own folders). To start your own,
+> copy an example folder and rename it, e.g. `cp -r profiles/example-investment
+> profiles/my-investment.local`.
 
 All three files are **required**; `loadProfile` rejects a folder that is missing
 any of them. Folders are named `<family>-<city>` so future regional variants
@@ -42,10 +49,10 @@ The three files:
 
 ```json
 {
-  "displayName": "iBigFun 台北投資房源監測",
+  "displayName": "iBigFun 台北投資房源監測（範例）",
   "fetch": {
     "city": "1",
-    "price_segment": { "max": 2500 },
+    "price_segment": { "max": 3000 },
     "floor_segment": { "min": 2, "max": 4 },
     "total_floor": { "max": 5 }
   }
@@ -95,7 +102,7 @@ keys.
 1. Copy an existing folder to the new id:
 
    ```bash
-   cp -r profiles/investment-taipei profiles/investment-taichung
+   cp -r profiles/example-investment profiles/investment-taichung
    ```
 
 2. Edit `profiles/investment-taichung/profile.json` — set `displayName` and the
@@ -118,7 +125,7 @@ on at the command line. They target the `fetch` block only:
 Example:
 
 ```bash
-npm run pipeline -- run --profile investment-taipei \
+npm run pipeline -- run --profile example-investment \
   --set fetch.price_segment.max=3000 --set fetch.city=2
 ```
 

@@ -1,10 +1,10 @@
 {
-  "displayName": "iBigFun 台北自住房源監測",
+  "displayName": "iBigFun 台北自住房源監測（範例）",
   "fetch": {
     "city": "1",
-    "town": ["1", "4", "6", "8", "9"],
+    "town": ["1", "4"],
     "house_type": ["17"],
-    "price_segment": { "max": 7000 },
+    "price_segment": { "max": 8000 },
     "floor_segment": { "min": 7 },
     "main_ping_number": { "min": 30 },
     "house_age_segment": { "max": 25 },
