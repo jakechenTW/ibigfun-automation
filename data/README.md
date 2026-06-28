@@ -46,5 +46,5 @@ Distance rules:
 ## `region-allowlist.md`
 
 投資 profile 的目標捷運站白名單與 `regionGate` 規則（站外 / 站內走路過遠 /
-待人工）。`profiles/investment-taipei/evaluation.md` 與 enrich 的 `regionGate`
+待人工）。`profiles/example-investment/evaluation.md` 與 enrich 的 `regionGate`
 判定依此清單。每次調整目標捷運範圍時更新。
