@@ -5,11 +5,43 @@ Reference for the coded ids iBigFun uses in its `lists/latest` search filters an
 `profiles/<id>/profile.json` (see `profiles/README.md`); this file is the
 human-readable key.
 
-- Source: the authenticated `https://www.ibigfun.com/lists/latest` filter UI,
-  read from `<span id="<filter>_caption_<id>">name</span>` markup.
-- Captured: 2026-06-27. Re-confirm if iBigFun changes its filter set (same method:
-  open the authenticated listing view, read the caption spans, or DevTools-capture
-  the `/api/search/list` XHR body — see `docs/fetching.md`).
+- Source: the authenticated `https://www.ibigfun.com/lists/latest` filter UI —
+  the filter-control `<input>` value/label pairs, the inline `var city = {…}`
+  object, and one captured `/api/search/list` XHR POST body.
+- Captured: 2026-06-29. Re-confirm if iBigFun changes its filter set (same method:
+  open the authenticated listing view, read each filter panel's options, or
+  DevTools-capture the `/api/search/list` XHR body — see `docs/fetching.md`).
+
+## Filter catalog (every fetch-tunable param)
+
+Every `/api/search/list` body param a profile's `fetch` map can set, with the
+shape `buildSearchBody` emits it as. The **fixed envelope** (`page`, `method`,
+`on_market`, `expand`, `exclude_land`, `add_date`/`add_date_max`) and the
+`source[]` / `source_web[]` allow-lists are **API contract, not `fetch`-tunable**
+— see the request-body encoding section; they are intentionally absent here.
+
+| `fetch` key | Value shape | Allowed values | Section |
+|---|---|---|---|
+| `city` | scalar id | 22 city ids | `city` |
+| `town` | array `key[]` | 366 district ids | `town` |
+| `house_type` | array `key[]` | 12 type ids | `house_type` |
+| `price_segment` | scalar bucket id **or** `{min,max}` | 8 buckets, or free 萬 range | `price_segment` |
+| `pattern_code` | `{min,max}` | free 房 (room count) range | Range filters |
+| `bathroom` | `{min,max}` | free 衛 (bathroom count) range | Range filters |
+| `floor_segment` | `{min,max}` | free 樓 (floor) range | Range filters |
+| `ping_number` | `{min,max}` | free 坪 (總坪數) range | Range filters |
+| `main_ping_number` | `{min,max}` | free 坪 (主建坪) range | Range filters |
+| `house_age_segment` | `{min,max}`, or scalar `-1` | free 年 range; `-1`=預售屋 | Range filters |
+| `price_ave` | `{min,max}` | free 萬 (單價/坪) range | Range filters |
+| `total_floor` | `{min,max}` | free 樓 (總樓層) range | Range filters |
+| `land_ping` | `{min,max}` | free 坪 (土地坪) range | Range filters |
+| `parking` | scalar literal | 有車位 / 無車位 / 機械 / 平面 | `parking` |
+
+Value shapes (how `buildSearchBody` in `scripts/lib/api.ts` encodes each):
+scalar → `key=value`; `{min,max}` → `key[min_val]`/`key[max_val]` (omitted
+bound = empty = unbounded); array → repeated `key[]`. The web URL/GET form uses
+a comma form for ranges (`house_age_segment=5,30`); the **POST body does not** —
+it always uses `key[min_val]`/`key[max_val]`.
 
 ## Profile filter usage
 
@@ -161,10 +193,64 @@ Format: `id 區名` separated by `・`, one block per city (`city_id 縣市名 (
 
 365 南竿鄉 ・ 366 北竿鄉 ・ 367 莒光鄉 ・ 368 東引鄉
 
+## `price_segment` (price 買賣總價)
+
+`price_segment` (價格區間) is the one filter with **two valid forms**:
+
+1. **Preset bucket** — a scalar id → `price_segment=<id>`:
+
+   | id | range | id | range |
+   |---|---|---|---|
+   | 333 | 500萬以下 | 338 | 2500~4000萬 |
+   | 334 | 500~1000萬 | 339 | 3800~6000萬 |
+   | 335 | 800~1500萬 | 340 | 6000萬以上 |
+   | 336 | 1200~2000萬 | 360 | 不限 (no filter — omit the key) |
+   | 337 | 1800~2800萬 | 361 | 其他 (custom range, see below) |
+
+2. **Custom range** — a `{min,max}` object in 萬 → `price_segment[min_val]` /
+   `price_segment[max_val]`. This is the form the example profiles use, e.g.
+   `"price_segment": { "max": 3000 }` → `price_segment[max_val]=3000`.
+
+Use one or the other, not both. The buckets are coarse; the custom range is the
+flexible choice for a profile.
+
+## Range filters
+
+These are **free numeric ranges** (no preset buckets) entered as a `{min,max}`
+object and emitted as `key[min_val]` / `key[max_val]` (omit a bound to leave that
+side unbounded). Units are the UI's:
+
+| `fetch` key | UI label | Unit | Notes |
+|---|---|---|---|
+| `pattern_code` | 格局 | 房 (rooms) | room-count range (despite the `pattern_code` name) |
+| `bathroom` | 衛浴 | 衛 (baths) | bathroom-count range |
+| `floor_segment` | 樓層 | 樓 | the listing's own floor |
+| `ping_number` | 總坪數 | 坪 | total ping (建物總坪數) |
+| `main_ping_number` | 主建坪 | 坪 | 主建物 ping; server-side only (see encoding) |
+| `house_age_segment` | 屋齡 | 年 | range in years; scalar `-1` = 預售屋 (presale) |
+| `price_ave` | 單價 | 萬 | unit price per 坪 |
+| `total_floor` | 總樓層 | 樓 | the building's total floors |
+| `land_ping` | 土地坪 | 坪 | land area |
+
+Example: `"house_age_segment": { "max": 25 }` → `house_age_segment[min_val]=` &
+`house_age_segment[max_val]=25`. For presale-only, set the scalar
+`"house_age_segment": "-1"` → `house_age_segment=-1`.
+
 ## `parking`
 
-`parking` is sent as a literal Chinese value (not an id), e.g. `parking=平面`.
-Other UI values include 機械、塔式、其他 (re-confirm from the UI if needed).
+`parking` is a scalar sent as a literal Chinese value (not an id), e.g.
+`parking=平面`. The 車位 control (under 進階條件) is a radio group; complete value
+set (excluding 不限, which means "no filter" — omit the key entirely):
+
+| value | meaning |
+|---|---|
+| `有車位` | has any parking |
+| `無車位` | no parking |
+| `機械` | 機械車位 (mechanical) |
+| `平面` | 平面車位 (flat / self-park) |
+
+(The current UI exposes only these four; earlier notes mentioning 塔式 / 其他 no
+longer match the live control.)
 
 ## `/api/search/list` request-body encoding
 
@@ -172,12 +258,21 @@ The web URL param names differ from the POST body. Canonical body builder:
 `scripts/lib/api.ts` (`buildSearchBody`). Encoding patterns:
 
 - Range filters use `name[min_val]` / `name[max_val]` (empty string = unbounded):
-  `price_segment`, `floor_segment`, `total_floor`, `house_age_segment`,
-  `main_ping_number`.
+  `price_segment`, `pattern_code`, `bathroom`, `floor_segment`, `ping_number`,
+  `main_ping_number`, `house_age_segment`, `price_ave`, `total_floor`,
+  `land_ping`.
 - Multi-value filters repeat `name[]`: `town[]`, `house_type[]`, `source[]`,
   `source_web[]`.
-- Scalars: `city`, `parking`, `method=all_case`, `on_market=1`, `expand=0`,
-  `exclude_land=1`, `add_date` / `add_date_max` (target range).
+- Scalars: `city`, `parking`, `price_segment` (bucket-id form),
+  `method=all_case`, `on_market=1`, `expand=0`, `exclude_land=1`, `add_date` /
+  `add_date_max` (target range).
+
+**Envelope, not `fetch`-tunable:** `page`, `method`, `on_market`, `expand`,
+`exclude_land`, `add_date`/`add_date_max`, and the `source[]` / `source_web[]`
+allow-lists are the API contract, hard-coded in `buildSearchBody` and emitted on
+every request regardless of the profile's `fetch` map — so they are deliberately
+absent from the Filter catalog above. (The live web form also sends an empty
+`connection=`; `buildSearchBody` omits it and the API tolerates the omission.)
 
 Server-side-only (cannot be re-verified from the response): `main_ping_number`
 (API returns `total_ping`, not 主建物 ping) and `house_type` (API returns

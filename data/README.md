@@ -4,9 +4,11 @@ Static reference data used by the iBigFun monitoring workflow lives here.
 
 ## `ibigfun-filter-mappings.md`
 
-Coded id → name key for iBigFun's search filters (`city`, `house_type`, `town`,
-`parking`) and the `/api/search/list` request-body encoding. Captured from the
-filter UI on 2026-06-27. Profiles store the ids; this file is the human key.
+Complete catalog of every `/api/search/list` body param a profile's `fetch` map
+can set — value/id tables for `city`, `town`, `house_type`, `parking`,
+`price_segment`, and the free-range filters (floor / 坪數 / 屋齡 / 單價 / …) —
+plus the request-body encoding. Captured from the authenticated filter UI on
+2026-06-29. Profiles store the ids; this file is the human key.
 
 ## `taipei_mrt_exits.csv`
 
