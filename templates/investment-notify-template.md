@@ -6,7 +6,7 @@
 
 - 新刊登物件：{{new_listing_count}} 筆
 - iBigFun 查詢：[開啟目標日篩選](https://www.ibigfun.com/lists/latest?page=1&expand=0&method=all_case&on_market=1&city=1&price_segment=%2C2500&floor_segment=2%2C4&total_floor=%2C5&add_date={{date}}&add_date_max={{date}})
-- 前置排除：{{hard_excluded_count}} 筆
+- 區域閘門｜目標捷運站外：{{out_of_region_count}} 筆・站內走路過遠：{{in_region_too_far_count}} 筆・待人工確認：{{manual_review_count}} 筆
 - 推薦物件：{{recommended_count}} 筆
 - 接近門檻：{{near_threshold_count}} 筆
 - 目標日排除：{{excluded_count}} 筆
@@ -16,28 +16,8 @@
 - 推薦門檻：`開價溢價 ≤ 該市 p*/2`（`p*` 由議價率換算，見 `data/negotiation-rate.md`）
 - 接近門檻：`p*/2 < 開價溢價 ≤ p*`
 - 排除：`開價溢價 > p*`；可疑/待查：`開價溢價 ≤ −10%`（異常低）或法拍/資訊過少等軟標記
-- 前置排除：可靠步行路線超過 10 分鐘（投資 profile 硬排除）
+- 區域閘門：最近捷運站不在目標白名單（目標捷運站外）或白名單站但可靠步行 >10 分（站內走路過遠）即排除，只計數不逐列（見 `data/region-allowlist.md`）
 - 可疑/待查：法拍／資訊過少／無室內圖等由 agent 軟標記,降權但不自動移除
-
-### 前置排除
-
-{{#if hard_excluded}}
-
-{{#each hard_excluded}}
-
-#### {{rank}}. [{{title}}]({{url}})
-
-- {{walk_line}}
-- {{tenure_line}}
-- 前置排除：{{hard_exclusion_reason}}（{{hard_exclusion_evidence}}）
-
-{{/each}}
-
-{{else}}
-
-- 無明確符合前置排除條件的物件。捷運距離看不出來者不以前置排除處理。
-
-{{/if}}
 
 ### 推薦物件
 
