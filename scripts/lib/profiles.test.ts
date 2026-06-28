@@ -38,3 +38,35 @@ test('resolveProfileFromArgs requires --profile and accepts both forms', () => {
 test('profileFlags reproduces the selected profile flag', () => {
   assert.equal(profileFlags({ id: 'investment-taipei' } as Profile), '--profile investment-taipei');
 });
+
+import { applyFetchOverrides } from './profiles.ts';
+
+test('applyFetchOverrides sets a scalar key', () => {
+  const f = applyFetchOverrides({ city: '1' }, ['--set', 'fetch.city=2']);
+  assert.equal(f.city, '2');
+});
+
+test('applyFetchOverrides sets a nested min/max key without dropping siblings', () => {
+  const f = applyFetchOverrides({ price_segment: { max: 2500 } }, ['--set', 'fetch.price_segment.max=3000']);
+  assert.deepEqual(f.price_segment, { max: '3000' });
+});
+
+test('applyFetchOverrides splits a comma value into an array', () => {
+  const f = applyFetchOverrides({}, ['--set', 'fetch.town=16,17']);
+  assert.deepEqual(f.town, ['16', '17']);
+});
+
+test('applyFetchOverrides removes a key with --unset', () => {
+  const f = applyFetchOverrides({ total_floor: { max: 5 }, city: '1' }, ['--unset', 'fetch.total_floor']);
+  assert.deepEqual(f, { city: '1' });
+});
+
+test('applyFetchOverrides does not mutate the input', () => {
+  const orig: any = { city: '1' };
+  applyFetchOverrides(orig, ['--set', 'fetch.city=2']);
+  assert.equal(orig.city, '1');
+});
+
+test('applyFetchOverrides rejects a path that is not under fetch.', () => {
+  assert.throws(() => applyFetchOverrides({}, ['--set', 'eval.x=1']), /--set\/--unset paths must start with "fetch\."/);
+});
