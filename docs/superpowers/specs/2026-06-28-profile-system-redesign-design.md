@@ -81,7 +81,6 @@ data-quality, common to all profiles) stay shared and are *referenced* from each
 ```json
 {
   "displayName": "iBigFun 投資房源監測",
-  "notifyTask": "每日 iBigFun 投資房源監測",
   "fetch": {
     "city": "1",
     "price_segment": { "max": 2500 },
@@ -98,15 +97,21 @@ This removes a field to keep in sync when copying a folder, and removes a whole
 
 Fields:
 
-- `displayName`, `notifyTask` (string) — required on a runnable profile; may be
-  inherited (see Inheritance).
+- `displayName` (string) — the single human-readable label. Required on a
+  runnable profile; may be inherited. Used both for the console run hint **and**
+  as the notification `ai-notify --task` label.
 - `fetch` (object) — generic filter map → `/api/search/list` body. May be
   inherited and deep-merged.
-- `eval` (object, optional, default `{}`) — free-form criteria the agent reads
-  as its pass/fail gate. May be inherited and deep-merged. **Kept separate from
-  `fetch`** (an override names which side it targets). For `investment` it is
-  `{}` — its real gates (開價溢價, 行情, region allowlist) are doc-driven in
-  `rules.md`.
+- `eval` (object, optional, default `{}`) — machine-readable criteria the agent
+  applies as its **per-listing include/exclude gate** when evaluating fetched
+  results. Distinct from `fetch`, which only narrows what the API *returns*:
+  `eval` is what the agent *enforces*, and it can re-check things the API can't
+  filter reliably (e.g. `house_type` / `main_ping`, which the API treats as
+  server-side-only). May be inherited and deep-merged; overridable via
+  `--set eval.*`. For `owner-occupied` it carries the real numeric gates
+  (`priceMaxWan`, `floorMin`, `mainPingMin`, `ageMax`, …, i.e. the old
+  `hardCriteria`). For `investment` it is `{}` — its gates (開價溢價, 行情,
+  region allowlist) are doc-driven in `rules.md`.
 - `extends` (string, optional) — parent profile id (see Inheritance).
 - `abstract` (boolean, optional, default `false`) — if `true`, not runnable
   (base only).
@@ -114,6 +119,9 @@ Fields:
 Dropped from the old schema:
 
 - `id` — now the folder name (above).
+- `notifyTask` — `displayName` now serves as the `ai-notify --task` label.
+  (Side effect: the task label loses the "每日" prefix, which is more accurate
+  anyway since runs may cover a multi-day range.)
 - `requiresFilterVerification`, `fetchFilters.enabled`, the
   `fetchFilters.description` prose.
 - `ruleDocPath` / `templatePath` — paths are now implicit (the folder's
@@ -171,9 +179,9 @@ A profile may declare `"extends": "<parent-id>"`.
 
 **Resolution (`resolveProfile(id)` → effective profile):**
 
-- **Data (`fetch`, `eval`, and inheritable metadata `displayName`,
-  `notifyTask`)** — deep-merge per key: start from the parent's value, apply the
-  child's keys on top. So a child that sets only `fetch.city` keeps all the
+- **Data (`fetch`, `eval`, and the inheritable metadata `displayName`)** —
+  deep-merge per key: start from the parent's value, apply the child's keys on
+  top. So a child that sets only `fetch.city` keeps all the
   parent's other `fetch` keys.
 - **Files (`rules.md`, `template.md`)** — whole-file fallback: if the child's
   folder has the file, use it; otherwise use the parent's. (Prose/templates
@@ -283,8 +291,9 @@ Code:
 Docs:
 
 - `AGENTS.md` — run sequence and source-of-truth map: profiles are folders;
-  rules = `profiles/<id>/rules.md`, template = `profiles/<id>/template.md`;
-  document `extends` / `abstract` / `--set`.
+  rules = `profiles/<id>/rules.md`, template = `profiles/<id>/template.md`; the
+  notification `--task` uses `displayName`; document `extends` / `abstract` /
+  `--set`.
 - `docs/fetching.md` — fetch filters now come from `profile.json`'s `fetch` map;
   drop the `fetchFilters.enabled` framing.
 - `data/ibigfun-filter-mappings.md` — absorb the investment `description` prose;
