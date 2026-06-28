@@ -12,8 +12,11 @@ Use this profile for rental-yield-oriented investment screening.
 - 接近門檻：`p*/2 < 溢價 ≤ p*`，或溢價達推薦級但只差在行情待確認／走路待確認。
 - 排除：`溢價 > p*`。
 - 異常低（`溢價 ≤ −10%`）先進可疑/待查驗證，**不直接推薦**；驗證乾淨且行情可靠後依溢價歸桶。
-- 硬排除（走路）：僅當 `withinWalk === false`（可靠且 >10 分），或 triage `likely-far` 且
-  確定性路線 >10 分。`withinWalk === null` 不硬排除，送 triage／人工。
+- 區域閘門（硬排除）：`regionGate` 為 `out-of-region`（最近站不在目標白名單）或
+  `in-region-too-far`（白名單站但可靠步行 >10 分）的物件一律排除，且**不逐筆列出**，
+  只進「快速摘要」的稽核計數行（見 `docs/reporting-rules.md` Region Gate 與
+  `data/region-allowlist.md`）。`regionGate === 'review'`（`withinWalk === null`）不排除，
+  送 triage／人工。
 - 租金覆蓋率與現金流僅供參考顯示，不參與分桶或排序。
 
 ## Estimation
@@ -29,7 +32,8 @@ Use this profile for rental-yield-oriented investment screening.
 
 - `推薦物件`: `−10% < 溢價 ≤ p*/2`，走路可靠在內、乾淨、行情可靠。
 - `接近門檻候選`: `p*/2 < 溢價 ≤ p*`，或溢價達推薦級但資料/走路待人工確認。
-- `前置排除`: 可靠步行路線超過 10 分鐘。
+- `區域閘門（計數）`: `out-of-region` 與 `in-region-too-far` 物件不分桶逐列，只在
+  快速摘要稽核計數行分別計數（目標捷運站外／站內走路過遠）。
 - `可疑/待查`: 可疑或疑似法拍（含異常低溢價 `≤ −10%`）應降權。
 - `目標日排除物件`: 其餘（含 `溢價 > p*`）值得摘要的物件。
 
@@ -49,6 +53,6 @@ investment-specific and should not be applied to owner-occupied reports:
   `行情・房貸・月租(參考)・現金流(參考)`, then reason/risk or manual-check.
 - 月租與現金流為參考欄位，標 `（參考）`；不再輸出覆蓋率。
 - Pre-excluded, suspicious, and excluded listings use the shorter layouts shown in the template.
-- Emit the 🚶 walk line in 前置排除, 推薦, and 接近門檻 only; do not emit it in 可疑/待查 or 目標日排除.
+- Emit the 🚶 walk line in 推薦 and 接近門檻 only; do not emit it in 可疑/待查 or 目標日排除. 區域閘門物件只計數、不逐列，故無 walk line。
 - If the target-date new-listing count is 10 or lower, list all excluded properties. If it is above 10, list only the 5 excluded properties closest to the threshold.
 - 推薦、接近門檻、排除三桶一律按開價溢價**由低到高**排序（溢價越低越前），次鍵總價低者優先。

@@ -78,9 +78,12 @@ export async function enrichStep(ctx: RunContext, logger: Logger): Promise<StepO
   const withinWalkCount = enriched.filter((l) => l.withinWalk === true).length;
   const manualReviewCount = enriched.filter((l) => l.withinWalk === null).length;
   const hardExcludedCount = enriched.filter((l) => l.hardExclusion.excluded).length;
+  const outOfRegionCount = enriched.filter((l) => l.regionGate === 'out-of-region').length;
+  const inRegionTooFarCount = enriched.filter((l) => l.regionGate === 'in-region-too-far').length;
   const result: EnrichResult = {
     from: range.from, to: range.to, enrichedAt: new Date().toISOString(), count: enriched.length,
-    withinWalkCount, manualReviewCount, hardExcludedCount, listings: enriched,
+    withinWalkCount, manualReviewCount, hardExcludedCount,
+    outOfRegionCount, inRegionTooFarCount, listings: enriched,
   };
 
   fs.mkdirSync(runDir(profile.id, range.label), { recursive: true });
@@ -89,9 +92,11 @@ export async function enrichStep(ctx: RunContext, logger: Logger): Promise<StepO
   fs.writeFileSync(outPath, JSON.stringify(result, null, 2));
   logger.event('info', 'enrich.summary',
     `enriched ${enriched.length}: ${withinWalkCount} within-walk, ${manualReviewCount} manual-review, ` +
-      `${hardExcludedCount} hard-excluded (ORS ${apiCalls}, cache ${cacheHits}, errors ${routeErrors})`,
+      `${hardExcludedCount} hard-excluded, ${outOfRegionCount} out-of-region, ${inRegionTooFarCount} too-far ` +
+      `(ORS ${apiCalls}, cache ${cacheHits}, errors ${routeErrors})`,
     { count: enriched.length, withinWalk: withinWalkCount, manualReview: manualReviewCount,
-      hardExcluded: hardExcludedCount, orsCalls: apiCalls, cacheHits, routeErrors });
+      hardExcluded: hardExcludedCount, outOfRegion: outOfRegionCount, inRegionTooFar: inRegionTooFarCount,
+      orsCalls: apiCalls, cacheHits, routeErrors });
   return {
     summary: { withinWalk: withinWalkCount, manualReview: manualReviewCount,
       hardExcluded: hardExcludedCount, orsCalls: apiCalls, cacheHits, routeErrors },

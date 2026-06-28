@@ -34,6 +34,23 @@ exclusion.
 - Retired or canceled stations must not be used for walk signals or
   future-upside notes.
 
+## Region Gate（目標捷運範圍，投資 profile）
+
+投資 profile 將範圍限縮在 `data/region-allowlist.md` 的 35 站核心區。enrich 以
+走路最近站 (`walk.stationZh`) 比對白名單，於每筆 listing 產出 `regionGate`
+（`scripts/lib/region.ts`），口徑互斥、先判範圍再判遠近：
+
+- `in`：最近站在白名單且 `withinWalk === true` → 進入評估。
+- `out-of-region`：最近站不在白名單（不論遠近）→ 排除，僅計數。
+- `in-region-too-far`：最近站在白名單但 `withinWalk === false` → 排除，僅計數。
+- `review`：`withinWalk === null`（座標/路線不可靠）→ 不排除，送既有人工 triage。
+
+`enriched.json` 彙總 `outOfRegionCount` 與 `inRegionTooFarCount`。投資報告「快速摘要」
+須輸出一行稽核計數，兩個排除原因分開列，例如：
+`本日新案 {count} 筆｜目標捷運站外 {outOfRegionCount} 筆｜站內走路過遠 {inRegionTooFarCount} 筆｜進入評估 {in 計} 筆（待人工確認 {manualReviewCount} 筆）`。
+`out-of-region` 與 `in-region-too-far` 的物件不逐筆列出，只進此計數行；若 `進入評估`
+異常為 0，視為白名單/資料異常的警訊。
+
 ## Calculations
 
 - 開價溢價（asking premium）須用：`(物件開價單價 − 成交行情單價) / 成交行情單價 * 100`。
