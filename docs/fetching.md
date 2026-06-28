@@ -45,7 +45,8 @@ POST https://www.ibigfun.com/api/search/list
 
 Headers: `x-requested-with: XMLHttpRequest`, `content-type: application/x-www-form-urlencoded`, `accept: application/json, text/javascript, */*; q=0.01`, plus the session cookie.
 
-Body (filter + source allow-list, captured 2026-06-27):
+Body (filter + source allow-list, captured 2026-06-27; envelope + encoding
+re-confirmed unchanged 2026-06-29 — see `data/ibigfun-filter-mappings.md`):
 
 ```
 page=<n>
