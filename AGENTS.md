@@ -177,9 +177,14 @@ ai-notify --tool <codex|claude> --status <ok|warn|fail> \
   schema, the `fetch` encoding, the add-a-search recipe, `--set fetch.*`
   overrides).
 - `docs/automation-state.md`: durable state and deduplication conventions.
-- `data/README.md`: MRT reference dataset and distance rules.
+- `data/`: static reference data — `data/README.md` indexes the datasets
+  (Taipei MRT exits, filter id→name mappings, per-city 議價率, investment region
+  allowlist).
 - `prompts/daily-run.md`: the committed headless worker prompt for the daily
   automated run (profile/range-agnostic; the trigger injects the profile and
   date range).
+- `prompts/schedule-triggers.md`: copy-paste trigger template that injects
+  profile / tool / date range into the `prompts/daily-run.md` SOP for scheduled
+  runs.
 - Automation memory: recent run summaries and short-lived notes only. When a
   decision becomes durable, promote it into the relevant doc above.
