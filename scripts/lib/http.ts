@@ -4,7 +4,7 @@
  * cookie jar, and calls the iBigFun JSON APIs with those cookies. Reuses the
  * pure relogin loop (relogin.ts) to recover from a mid-run session kick.
  */
-import { SIGNIN_URL, LOGIN_URL, SEARCH_LIST_URL, buildSearchBody, historyUrl, OFF_MARKET_URL, buildOffMarketBody, type SearchFilters } from './api.ts';
+import { SIGNIN_URL, LOGIN_URL, SEARCH_LIST_URL, buildSearchBody, historyUrl, OFF_MARKET_URL, buildOffMarketBody, type FetchMap } from './api.ts';
 import type { SearchListResponse, HistoryResponse, OffMarketResponse, HistoryEntry, OffMarketEntry } from './api.ts';
 import { applySetCookies, cookieHeader, loadJar, saveJar, type Jar } from './cookies.ts';
 import { SIGNIN_PATH_FRAGMENT, BLOCKING_SIGNALS, COOKIE_JAR_PATH, HISTORY_RETRIES, HISTORY_RETRY_BASE_MS } from './config.ts';
@@ -162,7 +162,7 @@ export async function withRetry<T>(
   throw lastErr;
 }
 
-async function fetchPage(from: string, to: string, page: number, filters?: SearchFilters): Promise<SearchListResponse> {
+async function fetchPage(from: string, to: string, page: number, filters?: FetchMap): Promise<SearchListResponse> {
   return withRelogin(async () => {
     const r = await rawPostForm(SEARCH_LIST_URL, buildSearchBody(from, to, page, filters), 'https://www.ibigfun.com/lists/latest');
     applySetCookies(getJar(), r.setCookies);
@@ -210,7 +210,7 @@ async function ensureSession(): Promise<void> {
 
 /** Real dependencies for collectListings (network-backed).
  *  `filters` (when given) are applied to every /api/search/list page. */
-export function defaultDeps(filters?: SearchFilters): CollectDeps {
+export function defaultDeps(filters?: FetchMap): CollectDeps {
   return {
     ensureSession,
     fetchPage: (from, to, page) => fetchPage(from, to, page, filters),

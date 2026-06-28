@@ -97,54 +97,36 @@ const SOURCE = [
   '376', '377', '378', '379', '463', '464', '478', '579', '590',
 ];
 
-/** Variable filter params for /api/search/list. Omit for the captured default. */
-export interface SearchFilters {
-  city?: string;
-  town?: string[];
-  houseType?: string[];
-  priceMaxWan?: number;
-  floorMin?: number;
-  mainPingMin?: number;
-  ageMax?: number;
-  parking?: string;
-}
+/** A profile's fetch map. Keys are /api/search/list param names. */
+export type FetchValue =
+  | string
+  | number
+  | string[]
+  | { min?: string | number; max?: string | number };
+export type FetchMap = Record<string, FetchValue>;
 
 /** Build the URL-encoded /api/search/list POST body for a date range + page.
- *  With no `filters`, emits the captured investment shape verbatim. */
-export function buildSearchBody(from: string, to: string, page = 1, filters?: SearchFilters): string {
+ *  Fixed envelope (method/on_market/expand/exclude_land/source allow-lists/
+ *  dates) is the API contract; `fetchMap` supplies the variable filters:
+ *   - scalar            → key=value
+ *   - { min, max }      → key[min_val]=<min|""> & key[max_val]=<max|"">
+ *   - array             → key[]=v (repeated)
+ */
+export function buildSearchBody(from: string, to: string, page = 1, fetchMap: FetchMap = {}): string {
   const p = new URLSearchParams();
   p.set('page', String(page));
   p.set('expand', '0');
   p.set('method', 'all_case');
   p.set('on_market', '1');
-  if (!filters) {
-    // Captured investment shape (default; locked by api.test.ts).
-    p.set('city', '1');
-    p.set('price_segment[min_val]', '');
-    p.set('price_segment[max_val]', '2500');
-    p.set('floor_segment[min_val]', '2');
-    p.set('floor_segment[max_val]', '4');
-    p.set('total_floor[min_val]', '');
-    p.set('total_floor[max_val]', '5');
-  } else {
-    p.set('city', filters.city ?? '1');
-    if (filters.town) for (const t of filters.town) p.append('town[]', t);
-    if (filters.houseType) for (const h of filters.houseType) p.append('house_type[]', h);
-    p.set('price_segment[min_val]', '');
-    p.set('price_segment[max_val]', filters.priceMaxWan != null ? String(filters.priceMaxWan) : '');
-    if (filters.floorMin != null) {
-      p.set('floor_segment[min_val]', String(filters.floorMin));
-      p.set('floor_segment[max_val]', '');
+  for (const [key, val] of Object.entries(fetchMap)) {
+    if (Array.isArray(val)) {
+      for (const item of val) p.append(`${key}[]`, String(item));
+    } else if (val !== null && typeof val === 'object') {
+      p.set(`${key}[min_val]`, val.min == null ? '' : String(val.min));
+      p.set(`${key}[max_val]`, val.max == null ? '' : String(val.max));
+    } else {
+      p.set(key, String(val));
     }
-    if (filters.mainPingMin != null) {
-      p.set('main_ping_number[min_val]', String(filters.mainPingMin));
-      p.set('main_ping_number[max_val]', '');
-    }
-    if (filters.ageMax != null) {
-      p.set('house_age_segment[min_val]', '');
-      p.set('house_age_segment[max_val]', String(filters.ageMax));
-    }
-    if (filters.parking) p.set('parking', filters.parking);
   }
   p.set('add_date', from);
   p.set('add_date_max', to);

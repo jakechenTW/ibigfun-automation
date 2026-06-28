@@ -1,8 +1,9 @@
 # iBigFun Filter & Field Mappings
 
 Reference for the coded ids iBigFun uses in its `lists/latest` search filters and
-`/api/search/list` request body. Profiles (`profiles/*.json`) store these ids;
-this file is the human-readable key.
+`/api/search/list` request body. Profiles store these ids in the `fetch` map of
+`profiles/<id>/profile.json` (see `profiles/README.md`); this file is the
+human-readable key.
 
 - Source: the authenticated `https://www.ibigfun.com/lists/latest` filter UI,
   read from `<span id="<filter>_caption_<id>">name</span>` markup.
@@ -12,18 +13,18 @@ this file is the human-readable key.
 
 ## Profile filter usage
 
-Which of these filters each committed profile actually sends:
+Which of these filters each committed profile's `fetch` map (in
+`profiles/<id>/profile.json`) actually sends:
 
-- **owner-occupied** (`fetchFilters.enabled: true`): `city=1`, `town[]`
-  (1/4/6/8/9), `house_type[]=17` (電梯大樓), plus price/floor/main_ping/age/parking
-  ranges. All ids verified 2026-06-27.
-- **investment** (`fetchFilters.enabled: false` → captured shape in
-  `scripts/lib/api.ts`): `city=1`, `price_segment` max 2500萬, `floor_segment`
+- **investment-taipei**: `city=1`, `price_segment` max 2500萬, `floor_segment`
   2–4, `total_floor` max 5. It sends **no `town[]` and no `house_type[]`**, so it
   returns all 12 台北市 districts and every house type in that floor/price window
   (the low-rise 公寓 bias is a side effect of the floor/total_floor limits, not a
   house_type filter). Verified against the 2026-06-26 fetch (78 listings across
   all 12 districts) — so there are no town/house_type ids to record for it.
+- **owner-occupied-taipei**: `city=1`, `town[]` (1/4/6/8/9),
+  `house_type[]=17` (電梯大樓), plus price/floor/main_ping/age/parking ranges.
+  All ids verified 2026-06-27.
 
 ## `city` (city id → name)
 
@@ -65,8 +66,9 @@ Captured 2026-06-27 (22 cities, 366 districts). Ids are **not sequential** and
 are unique across cities (e.g. 文山區=376), so always map by id, never by
 position.
 
-owner-occupied uses 台北市 1/4/6/8/9 (中正/中山/大安/信義/士林), independently
-confirmed via single-town live fetches on 2026-06-27 and matching this table.
+owner-occupied-taipei uses 台北市 1/4/6/8/9 (中正/中山/大安/信義/士林),
+independently confirmed via single-town live fetches on 2026-06-27 and matching
+this table.
 
 Format: `id 區名` separated by `・`, one block per city (`city_id 縣市名 (count)`).
 
@@ -184,6 +186,8 @@ Server-side-only (cannot be re-verified from the response): `main_ping_number`
 
 - API field → normalized `Listing` field table: `docs/fetching.md`.
 - `source[]` / `source_web[]` allow-lists: `scripts/lib/api.ts`.
-- How filters flow from a profile into the request: `scripts/lib/profiles.ts`
-  (`searchFiltersFromProfile`) and `scripts/lib/api.ts` (`buildSearchBody`).
+- How filters flow from a profile into the request: a profile's `fetch` map
+  (`profiles/<id>/profile.json`, loaded by `scripts/lib/profiles.ts`) is walked
+  by `scripts/lib/api.ts` (`buildSearchBody`).
+- How to author a profile's `fetch` map: `profiles/README.md`.
 </content>

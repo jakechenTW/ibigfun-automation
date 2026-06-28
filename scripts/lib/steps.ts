@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import { collectListings } from './extract.ts';
 import { loadEnv, defaultDeps } from './http.ts';
 import type { Logger } from './journal.ts';
-import { searchFiltersFromProfile, type RunContext } from './profiles.ts';
+import { type RunContext } from './profiles.ts';
 import type { StepOutput } from './run.ts';
 import { loadExits } from './mrt.ts';
 import { enrichOffline } from './enrich-offline.ts';
@@ -10,7 +10,7 @@ import { finalizeWalk } from './walk.ts';
 import { routeWalkDistances } from './routing.ts';
 import { loadCache, saveCache, cacheKey } from './route-cache.ts';
 import type { EnrichResult, EnrichedListing, FetchResult } from './types.ts';
-import { runDir, listingsPath, enrichedPath } from './runpaths.ts';
+import { runDir, listingsPath, enrichedPath, effectiveProfilePath } from './runpaths.ts';
 
 const MRT_CSV = 'data/taipei_mrt_exits.csv';
 const ORS_DELAY_MS = 1600;        // ORS free tier ~40 req/min
@@ -107,7 +107,7 @@ export async function enrichStep(ctx: RunContext, logger: Logger): Promise<StepO
 export async function fetchStep(ctx: RunContext, logger: Logger): Promise<StepOutput> {
   const { profile, range } = ctx;
   loadEnv();
-  const filters = searchFiltersFromProfile(profile);
+  const filters = profile.fetch;
   const { listings, dropped, duplicates } = await collectListings(range, defaultDeps(filters), logger);
   const result: FetchResult = {
     from: range.from,
@@ -117,6 +117,10 @@ export async function fetchStep(ctx: RunContext, logger: Logger): Promise<StepOu
     listings,
   };
   fs.mkdirSync(runDir(profile.id, range.label), { recursive: true });
+  fs.writeFileSync(
+    effectiveProfilePath(profile.id, range.label),
+    JSON.stringify({ displayName: profile.displayName, fetch: profile.fetch }, null, 2),
+  );
   const outPath = listingsPath(profile.id, range.label);
   fs.writeFileSync(outPath, JSON.stringify(result, null, 2));
   return { summary: { listings: listings.length, historyDropped: dropped, duplicates }, artifacts: [outPath] };

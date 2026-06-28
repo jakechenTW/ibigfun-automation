@@ -93,8 +93,8 @@ async function cmdRun(argv: string[]): Promise<void> {
         `\n■ report is an agent step — it cannot be auto-run.\n` +
         `  Profile: ${profile.id} (${profile.displayName})\n` +
         `  Read: AGENTS.md, docs/reporting-rules.md, docs/credentials.md, docs/automation-state.md, ` +
-        `profiles/${profile.id}.json, ${profile.ruleDocPath}\n` +
-        `  Template: ${profile.templatePath}\n` +
+        `profiles/${profile.id}/evaluation.md\n` +
+        `  Template: profiles/${profile.id}/notify-template.md\n` +
         `  Do the agent work, write ${reportPath(profile.id, range.label)}, then run:\n` +
         `    npm run pipeline -- mark report ${profileFlags(profile)} ${rangeFlags(range)} --status ok --artifact ${reportPath(profile.id, range.label)} \\\n` +
         `      --status-notify <ok|warn|fail> --title "<short>" --tool <codex|claude>\n` +
@@ -104,11 +104,11 @@ async function cmdRun(argv: string[]): Promise<void> {
     if (item.step === 'notify') {
       if (!m.notify) fail('notify requires report to be marked first (--status-notify + --title set m.notify).');
       if (dryRun) {
-        console.error(`[dry-run] would send:\n  ${composeNotifyCommand(m.notify, profile.notifyTask, reportPath(profile.id, range.label))}`);
+        console.error(`[dry-run] would send:\n  ${composeNotifyCommand(m.notify, profile.displayName, reportPath(profile.id, range.label))}`);
         continue;
       }
       const status = await runStep(m, 'notify', async (logger) => {
-        const { exitCode, stderr } = runNotify(m.notify as NotifyParams, profile.notifyTask, reportPath(profile.id, range.label));
+        const { exitCode, stderr } = runNotify(m.notify as NotifyParams, profile.displayName, reportPath(profile.id, range.label));
         logger.event(exitCode === 0 ? 'info' : 'error', 'notify.sent',
           `ai-notify exited ${exitCode}`, { exitCode, stderr });
         if (exitCode !== 0) throw new Error(`ai-notify exited ${exitCode}: ${stderr.trim()}`);
@@ -205,12 +205,12 @@ async function cmdFail(argv: string[]): Promise<void> {
 
   const params: NotifyParams = { tool, status: 'fail', title };
   if (dryRun) {
-    console.error(`[dry-run] wrote ${detailsFile}; would send:\n  ${composeNotifyCommand(params, profile.notifyTask, detailsFile)}`);
+    console.error(`[dry-run] wrote ${detailsFile}; would send:\n  ${composeNotifyCommand(params, profile.displayName, detailsFile)}`);
     process.exit(0);
   }
   m.failure = { reason, where: 'pipeline fail' };
   journalLogger(profile.id, range.label, 'notify', now).event('error', 'run.fail', `run failed: ${reason}`, { reason });
-  const { exitCode, stderr } = runNotify(params, profile.notifyTask, detailsFile);
+  const { exitCode, stderr } = runNotify(params, profile.displayName, detailsFile);
   journalLogger(profile.id, range.label, 'notify', now).event(exitCode === 0 ? 'info' : 'error', 'notify.sent',
     `fail notification ai-notify exited ${exitCode}`, { exitCode, stderr });
   if (exitCode !== 0) {

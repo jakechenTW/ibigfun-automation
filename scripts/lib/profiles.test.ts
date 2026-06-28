@@ -1,93 +1,72 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  availableProfileIds,
-  loadProfile,
-  resolveProfileFromArgs,
-  profileFlags,
-  searchFiltersFromProfile,
-  type Profile,
-} from './profiles.ts';
+import { availableProfileIds, loadProfile, resolveProfileFromArgs, profileFlags, type Profile } from './profiles.ts';
 
-test('availableProfileIds lists committed profiles in stable order', () => {
-  assert.deepEqual(availableProfileIds(), ['investment', 'owner-occupied']);
+test('availableProfileIds discovers on-disk profile folders, sorted', () => {
+  const ids = availableProfileIds();
+  assert.ok(ids.includes('investment-taipei'));
+  assert.ok(ids.includes('owner-occupied-taipei'));
+  assert.deepEqual(ids, [...ids].sort());
 });
 
-test('loadProfile validates and returns investment metadata', () => {
-  const p = loadProfile('investment');
-  assert.equal(p.id, 'investment');
-  assert.equal(p.displayName, 'iBigFun 投資房源監測');
-  assert.equal(p.notifyTask, '每日 iBigFun 投資房源監測');
-  assert.equal(p.ruleDocPath, 'docs/profiles/investment.md');
-  assert.equal(p.templatePath, 'templates/investment-notify-template.md');
-  assert.equal(p.fetchFilters.enabled, false);
+test('loadProfile returns id (=folder), displayName, and fetch map', () => {
+  const p = loadProfile('investment-taipei');
+  assert.equal(p.id, 'investment-taipei');
+  assert.equal(p.displayName, 'iBigFun 台北投資房源監測');
+  assert.deepEqual(p.fetch.price_segment, { max: 2500 });
+  assert.equal(p.fetch.city, '1');
 });
 
-test('loadProfile returns fully verified owner-occupied filter mappings', () => {
-  const p = loadProfile('owner-occupied');
-  assert.equal(p.id, 'owner-occupied');
-  assert.equal(p.requiresFilterVerification, false);
-  assert.equal(p.fetchFilters.enabled, true);
-  assert.equal(p.fetchFilters.city?.nameZh, '台北市');
-  assert.deepEqual(p.fetchFilters.towns?.map((t) => t.id), ['1', '4', '6', '8', '9']);
-  assert.deepEqual(p.fetchFilters.towns?.map((t) => t.nameZh), ['中正區', '中山區', '大安區', '信義區', '士林區']);
-  assert.equal(p.fetchFilters.houseType?.id, '17');
-  assert.equal(p.fetchFilters.houseType?.nameZh, '電梯大樓');
-  assert.deepEqual(p.hardCriteria.houseType, { id: '17', nameZh: '電梯大樓' });
-  assert.equal(p.fetchFilters.priceMaxWan, 7000);
-  assert.equal(p.fetchFilters.floorMin, 7);
-  assert.equal(p.fetchFilters.mainPingMin, 30);
-  assert.equal(p.fetchFilters.ageMax, 25);
-  assert.equal(p.fetchFilters.parking, '平面');
+test('loadProfile reads owner-occupied fetch arrays + ranges', () => {
+  const p = loadProfile('owner-occupied-taipei');
+  assert.deepEqual(p.fetch.town, ['1', '4', '6', '8', '9']);
+  assert.deepEqual(p.fetch.house_type, ['17']);
+  assert.deepEqual(p.fetch.house_age_segment, { max: 25 });
+  assert.equal(p.fetch.parking, '平面');
 });
 
 test('loadProfile rejects an unknown id with available ids', () => {
-  assert.throws(
-    () => loadProfile('missing'),
-    /unknown profile "missing"; available profiles: investment, owner-occupied/,
-  );
+  assert.throws(() => loadProfile('missing'), /unknown profile "missing"; available profiles: /);
 });
 
-test('resolveProfileFromArgs requires --profile', () => {
-  assert.throws(
-    () => resolveProfileFromArgs(['--date', '2026-06-26']),
-    /--profile is required; available profiles: investment, owner-occupied/,
-  );
-});
-
-test('resolveProfileFromArgs accepts --profile value and --profile=value', () => {
-  assert.equal(resolveProfileFromArgs(['--profile', 'investment']).id, 'investment');
-  assert.equal(resolveProfileFromArgs(['--profile=owner-occupied']).id, 'owner-occupied');
-});
-
-test('resolveProfileFromArgs rejects a missing flag value', () => {
-  assert.throws(
-    () => resolveProfileFromArgs(['--profile', '--date', '2026-06-26']),
-    /--profile is required; available profiles: investment, owner-occupied/,
-  );
+test('resolveProfileFromArgs requires --profile and accepts both forms', () => {
+  assert.throws(() => resolveProfileFromArgs(['--date', '2026-06-26']), /--profile is required/);
+  assert.equal(resolveProfileFromArgs(['--profile', 'investment-taipei']).id, 'investment-taipei');
+  assert.equal(resolveProfileFromArgs(['--profile=owner-occupied-taipei']).id, 'owner-occupied-taipei');
 });
 
 test('profileFlags reproduces the selected profile flag', () => {
-  const p = { id: 'owner-occupied' } as Profile;
-  assert.equal(profileFlags(p), '--profile owner-occupied');
+  assert.equal(profileFlags({ id: 'investment-taipei' } as Profile), '--profile investment-taipei');
 });
 
-test('searchFiltersFromProfile returns undefined when fetchFilters disabled', () => {
-  const p = loadProfile('investment');
-  assert.equal(searchFiltersFromProfile(p), undefined);
+import { applyFetchOverrides } from './profiles.ts';
+
+test('applyFetchOverrides sets a scalar key', () => {
+  const f = applyFetchOverrides({ city: '1' }, ['--set', 'fetch.city=2']);
+  assert.equal(f.city, '2');
 });
 
-test('searchFiltersFromProfile maps owner-occupied filters when enabled', () => {
-  const base = loadProfile('owner-occupied');
-  const p = { ...base, fetchFilters: { ...base.fetchFilters, enabled: true } } as typeof base;
-  const f = searchFiltersFromProfile(p);
-  assert.ok(f);
-  assert.equal(f!.city, '1');
-  assert.deepEqual(f!.town, ['1', '4', '6', '8', '9']);
-  assert.deepEqual(f!.houseType, ['17']);
-  assert.equal(f!.priceMaxWan, 7000);
-  assert.equal(f!.floorMin, 7);
-  assert.equal(f!.mainPingMin, 30);
-  assert.equal(f!.ageMax, 25);
-  assert.equal(f!.parking, '平面');
+test('applyFetchOverrides sets a nested min/max key without dropping siblings', () => {
+  const f = applyFetchOverrides({ price_segment: { max: 2500 } }, ['--set', 'fetch.price_segment.max=3000']);
+  assert.deepEqual(f.price_segment, { max: '3000' });
+});
+
+test('applyFetchOverrides splits a comma value into an array', () => {
+  const f = applyFetchOverrides({}, ['--set', 'fetch.town=16,17']);
+  assert.deepEqual(f.town, ['16', '17']);
+});
+
+test('applyFetchOverrides removes a key with --unset', () => {
+  const f = applyFetchOverrides({ total_floor: { max: 5 }, city: '1' }, ['--unset', 'fetch.total_floor']);
+  assert.deepEqual(f, { city: '1' });
+});
+
+test('applyFetchOverrides does not mutate the input', () => {
+  const orig: any = { city: '1' };
+  applyFetchOverrides(orig, ['--set', 'fetch.city=2']);
+  assert.equal(orig.city, '1');
+});
+
+test('applyFetchOverrides rejects a path that is not under fetch.', () => {
+  assert.throws(() => applyFetchOverrides({}, ['--set', 'eval.x=1']), /--set\/--unset paths must start with "fetch\."/);
 });

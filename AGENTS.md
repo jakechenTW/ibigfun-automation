@@ -11,11 +11,11 @@ iBigFun aggregates sale listings that originate on other sites (591, 樂居,
 rakuya, etc.). A listing's canonical URL therefore often points to the
 originating source rather than `ibigfun.com` — that is expected, not a bug. The
 daily job reads iBigFun's latest-sale view for the selected profile and target
-date using the currently implemented fetch filters. Some profile filter sets may
-be documented but not yet wired; owner-occupied applies its own fetch filters
-(verified and enabled 2026-06-27). The job evaluates each fetched
-listing against `docs/reporting-rules.md` plus the profile rule doc, writes a
-report, and notifies.
+date using the profile's `fetch` filter map (`profiles/<id>/profile.json`,
+walked generically by `buildSearchBody`). The job evaluates each fetched listing
+against `docs/reporting-rules.md` plus the profile's `evaluation.md`, writes a
+report, and notifies. A profile is a self-contained folder; see
+`profiles/README.md` to add or change one.
 
 ## First Run — Prerequisites
 
@@ -31,8 +31,11 @@ Do these once before the first run; stop and ask the user if any fails:
 
 1. Read this file, `docs/reporting-rules.md`, `docs/credentials.md`, and
    `docs/automation-state.md` before generating a report or changing behavior.
-2. Identify the target profile explicitly (`investment` or `owner-occupied`).
-   Do not infer a profile. Compute the target date: the previous calendar day
+2. Identify the target profile explicitly (`investment-taipei` or
+   `owner-occupied-taipei`). Do not infer a profile. Ad-hoc one-off conditions
+   can be layered on with `--set fetch.<key>=<val>` / `--unset fetch.<path>`
+   (see `profiles/README.md`); natural-language tweaks map to the same flags.
+   Compute the target date: the previous calendar day
    in `Asia/Taipei` unless the user supplied a range/date. A default run on
    `2026-06-27` targets `2026-06-26`.
 3. Fetch the target date's listings → `docs/fetching.md`
@@ -54,12 +57,12 @@ Do these once before the first run; stop and ask the user if any fails:
 6. Deduplicate by stable listing ID → `docs/automation-state.md`.
 7. Estimate profile-specific judgment fields (for investment: market price and
    rent; for self-use: fit, risks, and missing confirmations) →
-   `docs/reporting-rules.md` and `docs/profiles/<profile>.md`.
+   `docs/reporting-rules.md` and `profiles/<profile>/evaluation.md`.
 8. Evaluate against the selected profile criteria, shared data-quality rules,
    and sorting/notification rules, using the enriched fields plus your estimates →
-   `docs/reporting-rules.md` and `docs/profiles/<profile>.md`.
+   `docs/reporting-rules.md` and `profiles/<profile>/evaluation.md`.
 9. Write `state/runs/<profile>/<label>/report.md` using the profile's
-   configured template path from `profiles/<profile>.json` as the structure.
+   `profiles/<profile>/notify-template.md` as the structure.
 10. Notify with the canonical command below.
 
 ### Tooling
@@ -128,16 +131,15 @@ Send the finished report only after it is written. Use this exact command shape:
 
 ```bash
 ai-notify --tool <codex|claude> --status <ok|warn|fail> \
-  --task "<profile notifyTask>" --title "<short title>" \
+  --task "<profile displayName>" --title "<short title>" \
   --details-file state/runs/<profile>/<label>/report.md
 ```
 
 - `--tool`: the agent actually running (`codex` or `claude`).
-- `--task`: use the selected profile's `notifyTask` from
-  `profiles/<profile>.json`.
+- `--task`: use the selected profile's `displayName` from
+  `profiles/<profile>/profile.json`.
 - `--status warn`: recommendations/matches, near-threshold candidates, stale or
-  weak data, login fallback, unverified profile filters, or anything needing
-  review.
+  weak data, login fallback, or anything needing review.
 - `--status ok`: a clean no-recommendation/no-match run with fresh data.
 - `--status fail`: only when the monitor cannot complete.
 
@@ -166,11 +168,15 @@ ai-notify --tool <codex|claude> --status <ok|warn|fail> \
 - `docs/credentials.md`: credential storage and login secrets handling.
 - `docs/reporting-rules.md`: shared calculations, data quality, sorting, and
   notification conventions.
-- `docs/profiles/*.md`: profile-specific criteria, thresholds, and report
-  buckets.
+- `profiles/<id>/`: one self-contained folder per runnable profile —
+  `profile.json` (`displayName` + `fetch` filter map), `evaluation.md`
+  (profile-specific criteria, thresholds, report buckets), and
+  `notify-template.md` (report/notification structure). Runnable ids are the
+  folder names: `investment-taipei`, `owner-occupied-taipei`.
+- `profiles/README.md`: how to author a profile (folder layout, `profile.json`
+  schema, the `fetch` encoding, the add-a-search recipe, `--set fetch.*`
+  overrides).
 - `docs/automation-state.md`: durable state and deduplication conventions.
-- `templates/*-notify-template.md`: profile-specific report/notification
-  structures.
 - `data/README.md`: MRT reference dataset and distance rules.
 - `prompts/daily-run.md`: the committed headless worker prompt for the daily
   automated run (profile/range-agnostic; the trigger injects the profile and

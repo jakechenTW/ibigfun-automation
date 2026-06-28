@@ -39,7 +39,7 @@ Use this profile for rental-yield-oriented investment screening.
 
 ## Notification Format
 
-Use `templates/investment-notify-template.md` for structure. These details are
+Use `notify-template.md` for structure. These details are
 investment-specific and should not be applied to owner-occupied reports:
 
 - Each listing section header is `#### {rank}. [title](url)`; do not emit a `- 狀態：...` line because the section heading already names the bucket.

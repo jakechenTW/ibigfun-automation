@@ -10,28 +10,28 @@ name、日期範圍**。排程 agent 不用重寫 SOP，把對應段落整段貼
 
 ## 變數說明
 
-- `profile`：`investment` 或 `owner-occupied`。**不得讓 agent 自行猜測**。
+- `profile`：`investment-taipei` 或 `owner-occupied-taipei`。**不得讓 agent 自行猜測**。
 - `tool`：`codex` 或 `claude`，**填你這次排程實際在跑的 agent**。
 - 範圍：通常**不指定**，由 pipeline 自動取「前一個台北日」（夜跑最常見，
   agent 不自行計算日期）。需要回補特定日才填 `--date` 或 `--from/--to`。
 
 ---
 
-## Trigger A — investment
+## Trigger A — investment-taipei
 
 ```
 請依 prompts/daily-run.md 執行每日 iBigFun 監測。
-profile: investment
+profile: investment-taipei
 tool: <codex 或 claude，填你實際執行的 agent>
 範圍: 不指定（用前一個台北日）
 全程 headless、不得停下來問人；判斷規則以 AGENTS.md、docs/reporting-rules.md 與 profile 規則檔為準。
 ```
 
-## Trigger B — owner-occupied
+## Trigger B — owner-occupied-taipei
 
 ```
 請依 prompts/daily-run.md 執行每日 iBigFun 監測。
-profile: owner-occupied
+profile: owner-occupied-taipei
 tool: <codex 或 claude，填你實際執行的 agent>
 範圍: 不指定（用前一個台北日）
 全程 headless、不得停下來問人；判斷規則以 AGENTS.md、docs/reporting-rules.md 與 profile 規則檔為準。
@@ -45,16 +45,16 @@ iBigFun 是**單一共享登入**——同一帳號同時 fetch 會互踢登入 
 （見 `docs/automation-state.md`、`AGENTS.md`）。所以兩個 profile **絕不能同時
 跑**。二擇一：
 
-- **建議：同一個 job 內依序跑**——`investment` 完整跑完（report 已寫、notify
-  已送）再啟動 `owner-occupied`。最安全，不會踢到自己。
+- **建議：同一個 job 內依序跑**——`investment-taipei` 完整跑完（report 已寫、notify
+  已送）再啟動 `owner-occupied-taipei`。最安全，不會踢到自己。
 - **或：兩個 job 錯開排程**——間隔抓 ≥ 30 分鐘（單一 profile 的
   fetch+enrich+report+notify 通常數分鐘內完成；30 分鐘留足緩衝給
   ORS 路由重試與報告撰寫）。例：
 
   | 時間（Asia/Taipei） | Job |
   | --- | --- |
-  | 03:00 | Trigger A（investment） |
-  | 03:30 | Trigger B（owner-occupied） |
+  | 03:00 | Trigger A（investment-taipei） |
+  | 03:30 | Trigger B（owner-occupied-taipei） |
 
 排程時段建議放凌晨：夜跑會把你瀏覽器當下的 iBigFun 登入踢掉（設計如此），
 凌晨跑對日常使用干擾最小。

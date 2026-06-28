@@ -19,3 +19,6 @@ export function enrichedPath(profileId: string, label: string): string {
 export function reportPath(profileId: string, label: string): string {
   return path.join(runDir(profileId, label), 'report.md');
 }
+export function effectiveProfilePath(profileId: string, label: string): string {
+  return path.join(runDir(profileId, label), 'effective-profile.json');
+}

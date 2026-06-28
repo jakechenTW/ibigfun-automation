@@ -1,36 +1,12 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { RunRange } from './range.ts';
-import type { SearchFilters } from './api.ts';
-
-export interface NamedFilterValue {
-  id: string;
-  nameZh: string;
-}
-
-export interface ProfileFetchFilters {
-  enabled: boolean;
-  description?: string;
-  sourceUrl?: string;
-  city?: NamedFilterValue;
-  towns?: NamedFilterValue[];
-  houseType?: NamedFilterValue;
-  priceMaxWan?: number;
-  floorMin?: number;
-  mainPingMin?: number;
-  ageMax?: number;
-  parking?: string;
-}
+import type { FetchMap, FetchValue } from './api.ts';
 
 export interface Profile {
   id: string;
   displayName: string;
-  notifyTask: string;
-  ruleDocPath: string;
-  templatePath: string;
-  requiresFilterVerification: boolean;
-  fetchFilters: ProfileFetchFilters;
-  hardCriteria: Record<string, unknown>;
+  fetch: FetchMap;
 }
 
 export interface RunContext {
@@ -39,10 +15,15 @@ export interface RunContext {
 }
 
 const PROFILE_DIR = 'profiles';
-const PROFILE_IDS = ['investment', 'owner-occupied'] as const;
 
+/** Folder names under profiles/ that contain a profile.json, sorted. */
 export function availableProfileIds(): string[] {
-  return [...PROFILE_IDS];
+  if (!fs.existsSync(PROFILE_DIR)) return [];
+  return fs
+    .readdirSync(PROFILE_DIR, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && fs.existsSync(path.join(PROFILE_DIR, d.name, 'profile.json')))
+    .map((d) => d.name)
+    .sort();
 }
 
 function availableList(): string {
@@ -55,6 +36,54 @@ function flagValue(argv: string[], name: string): string | undefined {
   return argv[i].includes('=') ? argv[i].split('=').slice(1).join('=') : argv[i + 1];
 }
 
+/** Collect repeated `--set k=v` / `--unset k` flags in argv order. */
+function collectFlags(argv: string[], name: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === name && argv[i + 1] != null) out.push(argv[i + 1]);
+    else if (argv[i].startsWith(`${name}=`)) out.push(argv[i].slice(name.length + 1));
+  }
+  return out;
+}
+
+function fetchPath(raw: string): string[] {
+  if (!raw.startsWith('fetch.')) {
+    throw new Error('--set/--unset paths must start with "fetch." (e.g. --set fetch.price_segment.max=3000)');
+  }
+  return raw.slice('fetch.'.length).split('.');
+}
+
+function parseValue(v: string): string | string[] {
+  return v.includes(',') ? v.split(',') : v;
+}
+
+/** Apply ad-hoc --set fetch.* / --unset fetch.* overrides to a fetch map.
+ *  Pure: returns a deep-cloned, modified copy. */
+export function applyFetchOverrides(fetch: FetchMap, argv: string[]): FetchMap {
+  const out: FetchMap = JSON.parse(JSON.stringify(fetch));
+  for (const raw of collectFlags(argv, '--unset')) {
+    const [head, sub] = fetchPath(raw);
+    if (sub == null) delete out[head];
+    else if (out[head] && typeof out[head] === 'object' && !Array.isArray(out[head])) {
+      delete (out[head] as Record<string, unknown>)[sub];
+    }
+  }
+  for (const raw of collectFlags(argv, '--set')) {
+    const eq = raw.indexOf('=');
+    if (eq === -1) throw new Error(`--set needs key=value, got "${raw}"`);
+    const [head, sub] = fetchPath(raw.slice(0, eq));
+    const value = parseValue(raw.slice(eq + 1));
+    if (sub == null) {
+      out[head] = value;
+    } else {
+      const cur = out[head];
+      const base = cur && typeof cur === 'object' && !Array.isArray(cur) ? (cur as Record<string, unknown>) : {};
+      out[head] = { ...base, [sub]: value } as FetchValue;
+    }
+  }
+  return out;
+}
+
 function assertString(value: unknown, field: string): string {
   if (typeof value !== 'string' || value.trim() === '') {
     throw new Error(`invalid profile: ${field} must be a non-empty string`);
@@ -62,57 +91,34 @@ function assertString(value: unknown, field: string): string {
   return value;
 }
 
-function assertBoolean(value: unknown, field: string): boolean {
-  if (typeof value !== 'boolean') {
-    throw new Error(`invalid profile: ${field} must be a boolean`);
-  }
-  return value;
-}
-
-function assertObject(value: unknown, field: string): Record<string, unknown> {
+function assertFetch(value: unknown): FetchMap {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`invalid profile: ${field} must be an object`);
+    throw new Error('invalid profile: fetch must be an object');
   }
-  return value as Record<string, unknown>;
-}
-
-function parseProfile(raw: unknown): Profile {
-  const o = assertObject(raw, 'root');
-  const fetchFilters = assertObject(o.fetchFilters, 'fetchFilters') as unknown as ProfileFetchFilters;
-  const profile: Profile = {
-    id: assertString(o.id, 'id'),
-    displayName: assertString(o.displayName, 'displayName'),
-    notifyTask: assertString(o.notifyTask, 'notifyTask'),
-    ruleDocPath: assertString(o.ruleDocPath, 'ruleDocPath'),
-    templatePath: assertString(o.templatePath, 'templatePath'),
-    requiresFilterVerification: assertBoolean(o.requiresFilterVerification, 'requiresFilterVerification'),
-    fetchFilters,
-    hardCriteria: assertObject(o.hardCriteria, 'hardCriteria'),
-  };
-  if (typeof profile.fetchFilters.enabled !== 'boolean') {
-    throw new Error('invalid profile: fetchFilters.enabled must be a boolean');
-  }
-  return profile;
+  return value as FetchMap;
 }
 
 export function loadProfile(id: string): Profile {
-  if (!PROFILE_IDS.includes(id as any)) {
+  const dir = path.join(PROFILE_DIR, id);
+  const file = path.join(dir, 'profile.json');
+  if (!fs.existsSync(file)) {
     throw new Error(`unknown profile "${id}"; available profiles: ${availableList()}`);
   }
-  const file = path.join(PROFILE_DIR, `${id}.json`);
   let parsed: unknown;
   try {
     parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch (e) {
     throw new Error(`failed to read profile "${id}": ${(e as Error).message}`);
   }
-  const profile = parseProfile(parsed);
-  if (profile.id !== id) {
-    throw new Error(`invalid profile: file ${file} has id "${profile.id}"`);
-  }
-  for (const ref of [profile.ruleDocPath, profile.templatePath]) {
-    if (!fs.existsSync(ref)) {
-      throw new Error(`invalid profile "${id}": referenced file not found: ${ref}`);
+  const o = parsed as Record<string, unknown>;
+  const profile: Profile = {
+    id,
+    displayName: assertString(o.displayName, 'displayName'),
+    fetch: assertFetch(o.fetch),
+  };
+  for (const f of ['evaluation.md', 'notify-template.md']) {
+    if (!fs.existsSync(path.join(dir, f))) {
+      throw new Error(`invalid profile "${id}": missing ${f}`);
     }
   }
   return profile;
@@ -123,26 +129,10 @@ export function resolveProfileFromArgs(argv: string[]): Profile {
   if (!id || id.startsWith('--')) {
     throw new Error(`--profile is required; available profiles: ${availableList()}`);
   }
-  return loadProfile(id);
+  const profile = loadProfile(id);
+  return { ...profile, fetch: applyFetchOverrides(profile.fetch, argv) };
 }
 
 export function profileFlags(profile: Pick<Profile, 'id'>): string {
   return `--profile ${profile.id}`;
-}
-
-/** Convert a profile into /api/search/list filters, or undefined when its
- *  fetch filters are not enabled (caller then uses the captured default shape). */
-export function searchFiltersFromProfile(profile: Profile): SearchFilters | undefined {
-  const f = profile.fetchFilters;
-  if (!f.enabled) return undefined;
-  return {
-    city: f.city?.id,
-    town: f.towns?.map((t) => t.id),
-    houseType: f.houseType ? [f.houseType.id] : undefined,
-    priceMaxWan: f.priceMaxWan,
-    floorMin: f.floorMin,
-    mainPingMin: f.mainPingMin,
-    ageMax: f.ageMax,
-    parking: f.parking,
-  };
 }
