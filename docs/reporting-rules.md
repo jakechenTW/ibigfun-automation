@@ -4,13 +4,13 @@
 
 Shared rules live in this file. Profile-specific decision thresholds live in:
 
-- `docs/profiles/investment.md`
-- `docs/profiles/owner-occupied.md`
+- `profiles/investment-taipei/evaluation.md`
+- `profiles/owner-occupied-taipei/evaluation.md`
 
 ## Investment Criteria
 
 Investment-specific thresholds and estimation rules are owned by
-`docs/profiles/investment.md`.
+`profiles/investment-taipei/evaluation.md`.
 
 ## Walking-Distance Signals
 
@@ -58,7 +58,7 @@ exclusion.
 - 典型開價溢價 `p*` 由各市成交議價率 `r` 換算：`p* = r / (1 − r)`，`r` 取自
   `data/negotiation-rate.md`。
 - 投資 profile 的分桶門檻（推薦 `溢價 ≤ p*/2`、接近 `p*/2 < 溢價 ≤ p*`、排除 `溢價 > p*`、
-  可疑含 `溢價 ≤ −10%`）見 `docs/profiles/investment.md`。
+  可疑含 `溢價 ≤ −10%`）見 `profiles/investment-taipei/evaluation.md`。
 - Monthly mortgage payment must use total price, 80% loan-to-value, 2.6% annual interest, and 30-year principal and interest repayment.
 - 租金覆蓋率 `估計月租 / 月房貸` 與現金流 `月租 − 房貸` 僅供參考顯示，不參與分桶或排序
   （見下方 Rent 段）。
@@ -245,6 +245,6 @@ listing lacking solid data cannot be labeled recommended.
 ## Rule Ownership
 
 Keep durable shared notification and data-quality rules in this file.
-Keep profile-specific thresholds and report buckets in `docs/profiles/*.md`.
+Keep profile-specific thresholds and report buckets in `profiles/<id>/evaluation.md`.
 Keep the daily execution sequence in `AGENTS.md`. Keep recent run history and
 one-off operational observations in automation memory.

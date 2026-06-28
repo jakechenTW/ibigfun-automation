@@ -65,6 +65,6 @@
 
 ### 規則來源
 
-- Profile config：`profiles/owner-occupied.json`
-- Profile rules：`docs/profiles/owner-occupied.md`
+- Profile config：`profile.json`
+- Profile rules：`evaluation.md`
 - 共通規則：`docs/reporting-rules.md`

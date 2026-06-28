@@ -114,4 +114,4 @@
 
 ### 規則來源
 
-- 共用通知規則見 `docs/reporting-rules.md`；投資門檻、排序與模板細節見 `docs/profiles/investment.md`。
+- 共用通知規則見 `docs/reporting-rules.md`；投資門檻、排序與模板細節見 `profiles/investment-taipei/evaluation.md`。

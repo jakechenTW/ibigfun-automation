@@ -1,7 +1,7 @@
 /**
  * Target-MRT region gate for the investment profile. The 35-station allowlist
  * is the human-described core of Taipei (see data/region-allowlist.md and
- * docs/profiles/investment.md). Membership is tested against the nearest
+ * profiles/investment-taipei/evaluation.md). Membership is tested against the nearest
  * walking station the enrich step already picked.
  *
  * Precedence (mutually exclusive): unreliable walk -> review; else a station

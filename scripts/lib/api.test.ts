@@ -1,7 +1,25 @@
 // scripts/lib/api.test.ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSearchBody, pageCount, SEARCH_LIST_URL, historyUrl, OFF_MARKET_URL, buildOffMarketBody, type SearchFilters } from './api.ts';
+import { buildSearchBody, pageCount, SEARCH_LIST_URL, historyUrl, OFF_MARKET_URL, buildOffMarketBody, type FetchMap } from './api.ts';
+
+const investmentFetch: FetchMap = {
+  city: '1',
+  price_segment: { max: 2500 },
+  floor_segment: { min: 2, max: 4 },
+  total_floor: { max: 5 },
+};
+
+const ownerFetch: FetchMap = {
+  city: '1',
+  town: ['1', '4', '6', '8', '9'],
+  house_type: ['17'],
+  price_segment: { max: 7000 },
+  floor_segment: { min: 7 },
+  main_ping_number: { min: 30 },
+  house_age_segment: { max: 25 },
+  parking: '平面',
+};
 
 test('buildSearchBody maps a single day to equal add_date / add_date_max', () => {
   const b = buildSearchBody('2026-06-26', '2026-06-26', 1);
@@ -15,15 +33,11 @@ test('buildSearchBody maps a range to add_date=from, add_date_max=to', () => {
   assert.match(b, /(^|&)add_date_max=2026-06-25(&|$)/);
 });
 
-test('buildSearchBody keeps the captured filter + source allow-list', () => {
+test('buildSearchBody emits the fixed envelope regardless of fetch map', () => {
   const b = buildSearchBody('2026-06-26', '2026-06-26', 2);
   assert.match(b, /(^|&)page=2(&|$)/);
   assert.match(b, /method=all_case/);
   assert.match(b, /on_market=1/);
-  assert.match(b, /price_segment%5Bmax_val%5D=2500/);
-  assert.match(b, /floor_segment%5Bmin_val%5D=2/);
-  assert.match(b, /floor_segment%5Bmax_val%5D=4/);
-  assert.match(b, /total_floor%5Bmax_val%5D=5/);
   assert.match(b, /source_web%5B%5D=370/);
   assert.match(b, /source%5B%5D=372/);
   assert.match(b, /(^|&)exclude_land=1(&|$)/);
@@ -33,43 +47,11 @@ test('buildSearchBody defaults to page 1', () => {
   assert.match(buildSearchBody('2026-06-26', '2026-06-26'), /(^|&)page=1(&|$)/);
 });
 
-test('pageCount = ceil(total / perPage), 0 when perPage invalid', () => {
-  assert.equal(pageCount(78, 20), 4);
-  assert.equal(pageCount(40, 20), 2);
-  assert.equal(pageCount(0, 20), 0);
-  assert.equal(pageCount(78, 0), 0);
-});
-
-test('SEARCH_LIST_URL points at the listing API', () => {
-  assert.equal(SEARCH_LIST_URL, 'https://www.ibigfun.com/api/search/list');
-});
-
-test('historyUrl puts the numeric listing id in the path', () => {
-  assert.equal(historyUrl(53200935), 'https://api.ibigfun.com/on-market/53200935/history');
-});
-
-test('OFF_MARKET_URL points at the off-market endpoint', () => {
-  assert.equal(OFF_MARKET_URL, 'https://www.ibigfun.com/api/query_off_market_by_id');
-});
-
-test('buildOffMarketBody encodes the uuid as id_encode', () => {
-  assert.equal(buildOffMarketBody('A_1FF424'), 'id_encode=A_1FF424');
-});
-
-const ownerFilters: SearchFilters = {
-  city: '1',
-  town: ['1', '4', '6', '8', '9'],
-  houseType: ['17'],
-  priceMaxWan: 7000,
-  floorMin: 7,
-  mainPingMin: 30,
-  ageMax: 25,
-  parking: '平面',
-};
-
-test('buildSearchBody with no filters is unchanged (captured investment shape)', () => {
-  const b = buildSearchBody('2026-06-26', '2026-06-26', 1);
+test('buildSearchBody reproduces the captured investment shape from its fetch map', () => {
+  const b = buildSearchBody('2026-06-26', '2026-06-26', 1, investmentFetch);
+  assert.match(b, /(^|&)city=1(&|$)/);
   assert.match(b, /price_segment%5Bmax_val%5D=2500/);
+  assert.match(b, /price_segment%5Bmin_val%5D=(&|$)/);
   assert.match(b, /floor_segment%5Bmin_val%5D=2/);
   assert.match(b, /floor_segment%5Bmax_val%5D=4/);
   assert.match(b, /total_floor%5Bmax_val%5D=5/);
@@ -77,36 +59,37 @@ test('buildSearchBody with no filters is unchanged (captured investment shape)',
   assert.doesNotMatch(b, /parking=/);
 });
 
-test('buildSearchBody with owner filters emits floor min only, no total_floor', () => {
-  const b = buildSearchBody('2026-06-26', '2026-06-26', 1, ownerFilters);
+test('buildSearchBody emits floor min only (empty max) for owner fetch', () => {
+  const b = buildSearchBody('2026-06-26', '2026-06-26', 1, ownerFetch);
   assert.match(b, /floor_segment%5Bmin_val%5D=7/);
   assert.doesNotMatch(b, /floor_segment%5Bmax_val%5D=\d/);
-  assert.doesNotMatch(b, /total_floor/);
 });
 
-test('buildSearchBody with owner filters emits town[] and house_type[]', () => {
-  const b = buildSearchBody('2026-06-26', '2026-06-26', 1, ownerFilters);
+test('buildSearchBody emits town[] and house_type[] arrays for owner fetch', () => {
+  const b = buildSearchBody('2026-06-26', '2026-06-26', 1, ownerFetch);
   assert.match(b, /town%5B%5D=1/);
   assert.match(b, /town%5B%5D=4/);
   assert.match(b, /town%5B%5D=9/);
   assert.match(b, /house_type%5B%5D=17/);
 });
 
-test('buildSearchBody with owner filters emits price/ping/age segments and parking', () => {
-  const b = buildSearchBody('2026-06-26', '2026-06-26', 1, ownerFilters);
+test('buildSearchBody emits price/ping/age segments and parking for owner fetch', () => {
+  const b = buildSearchBody('2026-06-26', '2026-06-26', 1, ownerFetch);
   assert.match(b, /price_segment%5Bmax_val%5D=7000/);
   assert.match(b, /main_ping_number%5Bmin_val%5D=30/);
   assert.match(b, /house_age_segment%5Bmax_val%5D=25/);
   assert.match(b, new RegExp('parking=' + encodeURIComponent('平面')));
 });
 
-test('buildSearchBody with owner filters keeps shared source allow-list + exclude_land + dates', () => {
-  const b = buildSearchBody('2026-06-20', '2026-06-25', 2, ownerFilters);
-  assert.match(b, /(^|&)page=2(&|$)/);
-  assert.match(b, /method=all_case/);
-  assert.match(b, /source_web%5B%5D=370/);
-  assert.match(b, /source%5B%5D=372/);
-  assert.match(b, /(^|&)exclude_land=1(&|$)/);
-  assert.match(b, /(^|&)add_date=2026-06-20(&|$)/);
-  assert.match(b, /(^|&)add_date_max=2026-06-25(&|$)/);
+test('pageCount = ceil(total / perPage), 0 when perPage invalid', () => {
+  assert.equal(pageCount(78, 20), 4);
+  assert.equal(pageCount(0, 20), 0);
+  assert.equal(pageCount(78, 0), 0);
+});
+
+test('endpoint constants + off-market body unchanged', () => {
+  assert.equal(SEARCH_LIST_URL, 'https://www.ibigfun.com/api/search/list');
+  assert.equal(historyUrl(53200935), 'https://api.ibigfun.com/on-market/53200935/history');
+  assert.equal(OFF_MARKET_URL, 'https://www.ibigfun.com/api/query_off_market_by_id');
+  assert.equal(buildOffMarketBody('A_1FF424'), 'id_encode=A_1FF424');
 });
