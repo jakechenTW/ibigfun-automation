@@ -137,6 +137,8 @@ export interface MarketDataManifest {
     checkedAt: string;
     sha256: string;
     recordCount: number;
+    etag?: string | null;
+    lastModified?: string | null;
   };
   transactions: {
     sourceUrls: string[];
@@ -146,6 +148,15 @@ export interface MarketDataManifest {
     recordCount: number;
   };
   lastFailure: { at: string; reason: string } | null;
+  /** Checksums cover every raw and derived file in a published build. */
+  artifacts: Record<string, { sha256: string; bytes: number }>;
+  /** Per-quarter validators permit immutable historic source reuse. */
+  transactionSources?: Record<string, {
+    url: string;
+    sha256: string;
+    etag: string | null;
+    lastModified: string | null;
+  }>;
 }
 
 export interface MarketDataBundle {

@@ -7,6 +7,7 @@ import {
   buildDoorplateIndex,
   locateAddress,
   nearestDoorplate,
+  validateDoorplateHeaders,
 } from './doorplates.ts';
 import { gridKey } from './grid.ts';
 import type { DoorplateIndex, DoorplatePoint } from './types.ts';
@@ -134,4 +135,11 @@ test('masked ranges never cross city, district, section, lane, or alley boundari
   ]) {
     assert.equal(locateAddress(index, input).method, 'unresolved', input);
   }
+});
+
+test('rejects a doorplate source with missing required structural headers', () => {
+  assert.throws(
+    () => validateDoorplateHeaders(['完整地址', '坐標X']),
+    /required doorplate headers/i,
+  );
 });

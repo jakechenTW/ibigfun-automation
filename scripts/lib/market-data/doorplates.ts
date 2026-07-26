@@ -51,6 +51,22 @@ function field(row: DoorplateCsvRow, names: string[]): string | null {
   return null;
 }
 
+function hasHeader(headers: Set<string>, names: readonly string[]): boolean {
+  return names.some((name) => headers.has(name));
+}
+
+/** Rejects source schema drift before silently dropping every unusable doorplate row. */
+export function validateDoorplateHeaders(headers: Iterable<string>): void {
+  const available = new Set([...headers].map((header) => header.normalize('NFKC').trim()));
+  const hasAddress = hasHeader(available, ADDRESS_FIELDS);
+  const hasStructuredAddress = [CITY_FIELDS, DISTRICT_FIELDS, ROAD_FIELDS, NUMBER_FIELDS]
+    .every((names) => hasHeader(available, names));
+  const hasCoordinates = hasHeader(available, X_FIELDS) && hasHeader(available, Y_FIELDS);
+  if ((!hasAddress && !hasStructuredAddress) || !hasCoordinates) {
+    throw new Error('Missing required doorplate headers');
+  }
+}
+
 function withSuffix(value: string | null, suffix: string): string {
   if (!value) return '';
   return value.endsWith(suffix) ? value : `${value}${suffix}`;
@@ -120,7 +136,15 @@ export async function buildDoorplateIndex(
   const byCanonicalAddress: Record<string, DoorplatePoint[]> = {};
   const byRoad: Record<string, DoorplatePoint[]> = {};
   const cells: Record<string, DoorplatePoint[]> = {};
-  const parser = source.pipe(parse({ bom: true, columns: true, skip_empty_lines: true, trim: true }));
+  const parser = source.pipe(parse({
+    bom: true,
+    columns: (headers: string[]) => {
+      validateDoorplateHeaders(headers);
+      return headers;
+    },
+    skip_empty_lines: true,
+    trim: true,
+  }));
 
   for await (const record of parser as AsyncIterable<DoorplateCsvRow>) {
     const point = mapDoorplateRow(record);
