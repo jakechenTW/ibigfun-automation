@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
+import { isValidDateString } from '../date.ts';
 import {
   BACKTEST_ACCEPTANCE_THRESHOLDS,
   DOORPLATE_STALE_DAYS,
@@ -94,9 +95,9 @@ function validBacktestAcceptance(value: BacktestAcceptance): boolean {
   if (value.schemaVersion !== 1 || value.estimatorPolicyVersion !== ESTIMATOR_POLICY_VERSION
     || !value.transactionArtifactSha256
     || !Number.isFinite(Date.parse(value.approvedAt))
-    || !/^\d{4}-\d{2}-\d{2}$/.test(value.asOf)
-    || !/^\d{4}-\d{2}-\d{2}$/.test(value.evaluatedThrough)
-    || !/^\d{4}-\d{2}-\d{2}$/.test(value.latestEligibleTransactionDate)
+    || !isValidDateString(value.asOf)
+    || !isValidDateString(value.evaluatedThrough)
+    || !isValidDateString(value.latestEligibleTransactionDate)
     || value.asOf !== value.evaluatedThrough
     || value.evaluatedThrough < value.latestEligibleTransactionDate
     || !thresholds || !metrics) return false;
@@ -144,15 +145,34 @@ export async function writeBacktestAcceptance(root: string, acceptance: Backtest
   await fsp.rename(temporary, target);
 }
 
-export function marketDataBacktestAccepted(bundle: MarketDataBundle): boolean {
+export type MarketAcceptanceDecision =
+  | { accepted: true; reason: null }
+  | { accepted: false; reason: 'market-backtest-not-approved' };
+
+export interface MarketAcceptanceDiagnostics {
+  eligibleTransactionScans: number;
+}
+
+export function marketDataBacktestAcceptanceDecision(
+  bundle: MarketDataBundle,
+  diagnostics?: MarketAcceptanceDiagnostics,
+): MarketAcceptanceDecision {
   const acceptance = bundle.backtestAcceptance;
+  if (diagnostics) diagnostics.eligibleTransactionScans += 1;
   const latest = latestEligibleTransactionDate(bundle.transactions);
-  return acceptance !== undefined
+  const accepted = acceptance !== undefined
     && validBacktestAcceptance(acceptance)
     && acceptance.transactionArtifactSha256 === transactionArtifactChecksum(bundle.manifest)
     && latest !== null
     && acceptance.latestEligibleTransactionDate === latest
     && acceptance.evaluatedThrough >= latest;
+  return accepted
+    ? { accepted: true, reason: null }
+    : { accepted: false, reason: 'market-backtest-not-approved' };
+}
+
+export function marketDataBacktestAccepted(bundle: MarketDataBundle): boolean {
+  return marketDataBacktestAcceptanceDecision(bundle).accepted;
 }
 
 function attachMatchingBacktestAcceptance(root: string, bundle: MarketDataBundle): MarketDataBundle {

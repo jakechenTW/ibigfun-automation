@@ -15,7 +15,12 @@ import { estimateMarket } from './market-data/estimator.ts';
 import { locateAddress, nearestDoorplate } from './market-data/doorplates.ts';
 import { normalizeTaiwanAddress } from './market-data/address.ts';
 import { floorGroup } from './market-data/property.ts';
-import { marketDataBacktestAccepted, marketDataFreshness } from './market-data/store.ts';
+import {
+  marketDataBacktestAcceptanceDecision,
+  marketDataFreshness,
+  type MarketAcceptanceDecision,
+  type MarketAcceptanceDiagnostics,
+} from './market-data/store.ts';
 import { ensureTaipeiMarketData } from './market-data/update.ts';
 import type {
   MarketDataBundle,
@@ -164,12 +169,15 @@ function listingOwnership(title: string): { ownership: 'freehold' | 'non-freehol
   return { ownership: 'freehold', evidence: 'profile-default-freehold' };
 }
 
-function enforceBacktestAcceptance(estimate: MarketEstimate, bundle: MarketDataBundle): MarketEstimate {
-  if (estimate.status === 'unavailable' || marketDataBacktestAccepted(bundle)) return estimate;
+function enforceBacktestAcceptance(
+  estimate: MarketEstimate,
+  decision: MarketAcceptanceDecision,
+): MarketEstimate {
+  if (estimate.status === 'unavailable' || decision.accepted) return estimate;
   return {
     ...estimate,
     status: 'review',
-    unavailableReasons: [...new Set([...estimate.unavailableReasons, 'market-backtest-not-approved'])],
+    unavailableReasons: [...new Set([...estimate.unavailableReasons, decision.reason])],
   };
 }
 
@@ -187,8 +195,12 @@ export function attachMarketEstimates(
   listings: PreMarketEnrichedListing[],
   bundle: MarketDataBundle | null,
   asOf: string,
+  acceptanceDiagnostics?: MarketAcceptanceDiagnostics,
 ): EnrichedListing[] {
   const freshness = bundle ? marketDataFreshness(bundle.manifest, asOf) : NO_ACTIVE_MARKET_FRESHNESS;
+  const acceptanceDecision = bundle
+    ? marketDataBacktestAcceptanceDecision(bundle, acceptanceDiagnostics)
+    : null;
   return listings.map((listing) => {
     const ownership = listingOwnership(listing.title);
     if (!bundle) {
@@ -248,7 +260,7 @@ export function attachMarketEstimates(
         floorGroup: subjectFloorGroup,
         ageYears: listing.ageNum,
         parkingSeparable: true,
-      }, bundle.transactions, freshness, asOf), bundle), locationEvidence),
+      }, bundle.transactions, freshness, asOf), acceptanceDecision!), locationEvidence),
     };
   });
 }

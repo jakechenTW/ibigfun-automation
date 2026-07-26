@@ -5,9 +5,11 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { ESTIMATOR_POLICY_VERSION, MARKET_SCHEMA_VERSION } from './config.ts';
 import {
+  backtestAcceptancePath,
   loadMarketData,
   marketDataFreshness,
   publishStagedBuild,
+  readBacktestAcceptance,
   readManifest,
   sha256File,
   stableJson,
@@ -251,6 +253,21 @@ test('backtest acceptance loads only for the active transaction artifact checksu
     }),
     /complete active transaction index/,
   );
+  await assert.rejects(
+    () => writeBacktestAcceptance(root, {
+      ...acceptance,
+      asOf: '2026-02-30',
+      evaluatedThrough: '2026-02-30',
+    }),
+    /non-passing backtest acceptance/,
+  );
+  for (const invalid of [
+    { ...acceptance, asOf: '2026-02-30', evaluatedThrough: '2026-02-30' },
+    { ...acceptance, latestEligibleTransactionDate: '2026-02-30' },
+  ]) {
+    await writeFile(backtestAcceptancePath(root), JSON.stringify(invalid));
+    assert.equal(readBacktestAcceptance(root), null);
+  }
   await writeBacktestAcceptance(root, { ...acceptance, transactionArtifactSha256: 'different-dataset' });
   assert.equal(
     (await loadMarketData(root, { minDoorplates: 1, minTransactions: 0 }))?.backtestAcceptance,

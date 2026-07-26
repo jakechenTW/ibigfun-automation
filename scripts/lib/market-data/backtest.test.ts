@@ -6,6 +6,7 @@ import {
   backtestSubjectFromTransaction,
   backtestTransactions,
   evaluateBacktestGate,
+  heldOutTransactionEligible,
   type BacktestReport,
 } from './backtest.ts';
 import {
@@ -57,6 +58,17 @@ test('held-out estimate uses only transactions before subject date', () => {
   assert.ok(report.cases.every((backtestCase) =>
     backtestCase.comparableDates.every((date) => date < backtestCase.subjectDate),
   ));
+});
+
+test('subject-date eligibility excludes completion inconsistencies from coverage and cases', () => {
+  const completedAfterSale = transaction('future-completion', '2025-12-01', 100, 'midrise');
+  completedAfterSale.completionDate = '2026-01-01';
+
+  const report = backtestTransactions(indexOf([completedAfterSale]), { asOf: '2026-07-25' });
+
+  assert.equal(heldOutTransactionEligible(completedAfterSale), false);
+  assert.equal(report.latestEligibleTransactionDate, null);
+  assert.equal(report.cases.length, 0);
 });
 
 test('held-out price is not passed into the evaluator subject or comparable estimate', () => {

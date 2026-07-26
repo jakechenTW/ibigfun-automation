@@ -121,6 +121,16 @@ test('production estimate stays review before approval and becomes reliable only
   assert.ok((evidence?.addressDistanceMeters ?? Infinity) < 1);
 });
 
+test('one listing batch scans acceptance coverage exactly once', () => {
+  const diagnostics = { eligibleTransactionScans: 0 };
+  const listings = Array.from({ length: 5 }, (_, index) => listing({ id: index + 1 }));
+
+  const results = attachMarketEstimates(listings, bundleWithAcceptance(), AS_OF, diagnostics);
+
+  assert.ok(results.every((result) => result.marketEstimate.status === 'reliable'));
+  assert.equal(diagnostics.eligibleTransactionScans, 1);
+});
+
 test('same-district wrong-neighborhood GPS pin cannot receive an automatic estimate', () => {
   const [result] = attachMarketEstimates([
     listing({

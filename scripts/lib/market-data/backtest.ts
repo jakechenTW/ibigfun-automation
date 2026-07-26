@@ -93,14 +93,16 @@ function ageYearsAt(completionDate: string | null, asOf: Date): number | null {
   return completeMonthsBetween(completion, asOf) / 12;
 }
 
-function isEligibleSubject(transaction: MarketTransaction, asOf: Date): boolean {
-  const date = transactionDate(transaction);
+/** Intrinsic held-out eligibility, evaluated at the subject transaction date. */
+export function heldOutTransactionEligible(transaction: MarketTransaction): boolean {
+  const subjectDate = transactionDate(transaction);
   const coordinate = transaction.location.coordinate;
-  if (!date || date > asOf || !coordinate || !Number.isFinite(coordinate.lat) || !Number.isFinite(coordinate.lng)) return false;
+  if (!subjectDate || !coordinate || !Number.isFinite(coordinate.lat) || !Number.isFinite(coordinate.lng)) return false;
   if (!transaction.district || transaction.ownership !== 'freehold') return false;
   if (!finitePositive(transaction.buildingAreaPing) || !finitePositive(transaction.buildingUnitPriceWan)) return false;
   if (!Number.isFinite(transaction.floor) || !Number.isFinite(transaction.totalFloors) || transaction.totalFloors <= 0) return false;
-  return transaction.buildingType === 'apartment' || ageYearsAt(transaction.completionDate, date) !== null;
+  return transaction.buildingType === 'apartment'
+    || ageYearsAt(transaction.completionDate, subjectDate) !== null;
 }
 
 /** Builds an evaluation subject without exposing the held-out sale price to the estimator. */
@@ -140,8 +142,7 @@ function allTransactions(index: TransactionIndex): IndexedTransaction[] {
 function latestEligibleDate(entries: readonly IndexedTransaction[]): string | null {
   let latest: string | null = null;
   for (const { transaction } of entries) {
-    const date = transactionDate(transaction);
-    if (date && isEligibleSubject(transaction, date)) latest = transaction.transactionDate;
+    if (heldOutTransactionEligible(transaction)) latest = transaction.transactionDate;
   }
   return latest;
 }
@@ -266,7 +267,7 @@ export function backtestTransactions(index: TransactionIndex, options: BacktestO
     while (end < entries.length && entries[end]!.transaction.transactionDate === subjectDate) end += 1;
 
     for (const { transaction } of entries.slice(start, end)) {
-      if (!isEligibleSubject(transaction, asOf)) continue;
+      if (!heldOutTransactionEligible(transaction)) continue;
       const estimate = estimateMarket(
         backtestSubjectFromTransaction(transaction),
         historicalIndex,

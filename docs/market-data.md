@@ -155,6 +155,13 @@ confidence. Interpret them as follows:
 - `latestEligibleTransactionDate` is computed from the complete deduplicated active index before `--as-of` filtering.
 - `cases` is local audit evidence, including the strictly earlier comparable dates used for each held-out sale.
 
+Held-out eligibility is intrinsic to each sale and is evaluated at that
+subject's transaction date, including building completion consistency.
+`--as-of` only limits which eligible subjects become cases. The same
+subject-date predicate determines both case population and
+`latestEligibleTransactionDate`, so coverage cannot count a transaction that
+the backtest would exclude.
+
 The quality gate targets median APE at or below 12% and P75 APE at or below
 20%. It also requires at least 20 scored high-confidence cases and 20 scored
 medium-confidence cases. With those sufficient slices, high-confidence median
@@ -182,6 +189,12 @@ contract. Any change to comparable selection stages, weights, outlier handling,
 confidence, estimate status, or backtest semantics must bump it and obtain a
 new passing acceptance. The market-data schema version is not a substitute for
 this policy bump.
+
+The acceptance artifact's `asOf`, `evaluatedThrough`, and
+`latestEligibleTransactionDate` values must be real, zero-padded calendar dates;
+format-shaped impossible dates such as `2026-02-30` are rejected. During
+enrichment, acceptance and complete-index coverage are evaluated once for the
+loaded bundle before listings are mapped, not once per listing.
 
 `--no-gate` is for recording or diagnosing a baseline; it returns diagnostic
 metrics without writing or updating acceptance and does not make failed or
