@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -130,6 +130,24 @@ test('freshness marks independently stale source checks without changing the act
 
 test('stable JSON uses code-unit key order for Han keys on every runtime locale', () => {
   assert.equal(stableJson({ 中: 2, 一: 1 }), '{"一":1,"中":2}');
+});
+
+test('reader retries the bounded active-directory rename window and still validates the build', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-'));
+  const active = join(parent, 'taipei');
+  const backup = join(parent, '.taipei-backup-reader-window');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(active, 'reader-build');
+  await rename(active, backup);
+  const restore = new Promise<void>((resolve, reject) => {
+    setTimeout(() => { void rename(backup, active).then(resolve, reject); }, 15);
+  });
+  const bundle = await loadMarketData(active, {
+    minDoorplates: 1, minTransactions: 0,
+    readerRetries: 5, readerRetryDelayMs: 10,
+  });
+  await restore;
+  assert.equal(bundle?.manifest.buildId, 'reader-build');
 });
 
 test('backtest acceptance loads only for the active transaction artifact checksum', async (t) => {

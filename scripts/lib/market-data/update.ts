@@ -20,6 +20,15 @@ export interface EnsureTaipeiMarketDataOptions {
   minDoorplates?: number;
   minTransactions?: number;
   openZip?: (file: string) => Promise<ZipEntry[]>;
+  lockTimeoutMs?: number;
+  lockStaleMs?: number;
+  lockPollMs?: number;
+}
+
+export interface MarketDataLockOptions {
+  timeoutMs?: number;
+  staleMs?: number;
+  pollMs?: number;
 }
 
 function nowIso(clock: () => Date): string { return clock().toISOString(); }
@@ -28,6 +37,59 @@ function currentSeason(asOf: string): string { return quartersForLookback(asOf, 
 function priorSeason(asOf: string): string { return quartersForLookback(asOf, 3)[0]!; }
 function log(logger: EnsureTaipeiMarketDataOptions['logger'], level: 'info' | 'warn' | 'error', event: string, msg: string, data?: unknown): void {
   logger?.event(level, event, msg, data);
+}
+
+/** Serializes refresh/publication while safely recovering abandoned lock directories. */
+export async function withMarketDataLock<T>(
+  root: string,
+  operation: () => Promise<T>,
+  options: MarketDataLockOptions = {},
+): Promise<T> {
+  const lockPath = path.join(path.dirname(root), `.${path.basename(root)}-refresh.lock`);
+  const ownerPath = path.join(lockPath, 'owner');
+  const owner = `${process.pid}-${randomUUID()}`;
+  const timeoutMs = options.timeoutMs ?? 60_000;
+  const staleMs = options.staleMs ?? 30 * 60_000;
+  const pollMs = options.pollMs ?? 50;
+  const startedAt = Date.now();
+  await fs.mkdir(path.dirname(root), { recursive: true });
+  for (;;) {
+    try {
+      await fs.mkdir(lockPath);
+      await fs.writeFile(ownerPath, owner, { flag: 'wx' });
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      try {
+        const stat = await fs.stat(lockPath);
+        if (Date.now() - stat.mtimeMs > staleMs) {
+          await fs.rm(lockPath, { recursive: true, force: true });
+          continue;
+        }
+      } catch (statError) {
+        if ((statError as NodeJS.ErrnoException).code !== 'ENOENT') throw statError;
+        continue;
+      }
+      if (Date.now() - startedAt >= timeoutMs) throw new Error(`Timed out waiting for market-data refresh lock: ${lockPath}`);
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+  }
+
+  const heartbeat = setInterval(() => {
+    const now = new Date();
+    void fs.utimes(lockPath, now, now).catch(() => undefined);
+  }, Math.max(100, Math.floor(staleMs / 3)));
+  heartbeat.unref();
+  try {
+    return await operation();
+  } finally {
+    clearInterval(heartbeat);
+    try {
+      if (await fs.readFile(ownerPath, 'utf8') === owner) {
+        await fs.rm(lockPath, { recursive: true, force: true });
+      }
+    } catch { /* a stale-lock successor owns cleanup */ }
+  }
 }
 
 async function artifactManifest(root: string): Promise<Record<string, { sha256: string; bytes: number }>> {
@@ -80,7 +142,7 @@ function finishTransactionIndex(
  * Refreshes official sources into a sibling staging directory. Any source or
  * validation failure leaves the active build untouched and returns it instead.
  */
-export async function ensureTaipeiMarketData(options: EnsureTaipeiMarketDataOptions): Promise<MarketDataBundle | null> {
+async function ensureTaipeiMarketDataUnlocked(options: EnsureTaipeiMarketDataOptions): Promise<MarketDataBundle | null> {
   const root = options.rootPath ?? MARKET_DATA_ROOT;
   const fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
   const clock = options.clock ?? (() => new Date());
@@ -151,17 +213,26 @@ export async function ensureTaipeiMarketData(options: EnsureTaipeiMarketDataOpti
 
     const builtAt = nowIso(clock);
     if (existing && !sourcesChanged) {
+      const current = await loadMarketData(root, {
+        minDoorplates: options.minDoorplates,
+        minTransactions: options.minTransactions,
+      });
+      if (!current ||
+          current.manifest.buildId !== existing.manifest.buildId ||
+          JSON.stringify(current.manifest.artifacts) !== JSON.stringify(existing.manifest.artifacts)) {
+        throw new Error('Active market-data build changed during the locked refresh');
+      }
       const refreshedManifest: MarketDataManifest = {
-        ...existing.manifest,
+        ...current.manifest,
         doorplates: {
-          ...existing.manifest.doorplates,
+          ...current.manifest.doorplates,
           sourceUrl: doorplateSource.url,
           publishedAt: doorplateSource.publishedAt,
           checkedAt: builtAt,
           etag: doorplate.etag ?? oldDoorplate?.etag ?? null,
           lastModified: doorplate.lastModified ?? oldDoorplate?.lastModified ?? null,
         },
-        transactions: { ...existing.manifest.transactions, checkedAt: builtAt },
+        transactions: { ...current.manifest.transactions, checkedAt: builtAt },
         transactionSources: sourceVersions,
         lastFailure: null,
       };
@@ -170,10 +241,10 @@ export async function ensureTaipeiMarketData(options: EnsureTaipeiMarketDataOpti
       await fs.rename(stagedManifest, path.join(root, 'manifest.json'));
       await fs.rm(stage, { recursive: true, force: true });
       stage = null;
-      existing.manifest = refreshedManifest;
-      existing.refresh = { status: 'not-modified' };
-      log(options.logger, 'info', 'market-data.not-modified', 'official source checksums are unchanged', { buildId: existing.manifest.buildId });
-      return existing;
+      current.manifest = refreshedManifest;
+      current.refresh = { status: 'not-modified' };
+      log(options.logger, 'info', 'market-data.not-modified', 'official source checksums are unchanged', { buildId: current.manifest.buildId });
+      return current;
     }
 
     const doorplates = await buildDoorplateIndex(createReadStream(doorplatePath), doorplateSha);
@@ -216,6 +287,26 @@ export async function ensureTaipeiMarketData(options: EnsureTaipeiMarketDataOpti
     const schemaDrift = /schema drift|Missing required|headers/i.test(reason);
     log(options.logger, 'warn', schemaDrift ? 'market-data.schema-drift' : existing ? 'market-data.last-known-good' : 'market-data.unavailable',
       existing ? 'market-data refresh failed; retaining last-known-good build' : 'market-data is unavailable', { reason });
+    if (existing) existing.refresh = { status: 'last-known-good', failure: reason };
+    return existing;
+  }
+}
+
+export async function ensureTaipeiMarketData(options: EnsureTaipeiMarketDataOptions): Promise<MarketDataBundle | null> {
+  try {
+    return await withMarketDataLock(
+      options.rootPath ?? MARKET_DATA_ROOT,
+      () => ensureTaipeiMarketDataUnlocked(options),
+      { timeoutMs: options.lockTimeoutMs, staleMs: options.lockStaleMs, pollMs: options.lockPollMs },
+    );
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    const existing = await loadMarketData(options.rootPath ?? MARKET_DATA_ROOT, {
+      minDoorplates: options.minDoorplates,
+      minTransactions: options.minTransactions,
+    });
+    log(options.logger, 'warn', existing ? 'market-data.last-known-good' : 'market-data.unavailable',
+      existing ? 'market-data refresh lock failed; retaining last-known-good build' : 'market-data is unavailable', { reason });
     if (existing) existing.refresh = { status: 'last-known-good', failure: reason };
     return existing;
   }

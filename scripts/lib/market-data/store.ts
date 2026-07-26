@@ -23,6 +23,8 @@ const TAIPEI_BOUNDS = { minLat: 24.7, maxLat: 25.4, minLng: 121.2, maxLng: 121.9
 export interface PublishOptions {
   minDoorplates?: number;
   minTransactions?: number;
+  readerRetries?: number;
+  readerRetryDelayMs?: number;
 }
 
 /** Byte/code-unit ordering is locale-independent and therefore checksum-safe. */
@@ -259,7 +261,17 @@ async function validateBuild(root: string, options: PublishOptions): Promise<Mar
 
 /** Loads only a fully validated active build; malformed partial data is never exposed. */
 export async function loadMarketData(root: string, options: PublishOptions = {}): Promise<MarketDataBundle | null> {
-  try { return attachMatchingBacktestAcceptance(root, await validateBuild(root, options)); } catch { return null; }
+  const retries = options.readerRetries ?? 4;
+  const retryDelayMs = options.readerRetryDelayMs ?? 10;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return attachMatchingBacktestAcceptance(root, await validateBuild(root, options));
+    } catch {
+      if (attempt === retries) return null;
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+    }
+  }
+  return null;
 }
 
 /** Replaces the complete active directory only after independently validating a sibling staging build. */

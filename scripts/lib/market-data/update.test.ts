@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { ensureTaipeiMarketData } from './update.ts';
+import { ensureTaipeiMarketData, withMarketDataLock } from './update.ts';
 import { sha256File } from './store.ts';
 import type { MarketDataManifest } from './types.ts';
 
@@ -63,13 +63,20 @@ test('unchanged conditional refresh keeps build and index checksums while advanc
   const transactionCsv = await readFile(fileURLToPath(new URL('./fixtures/transactions.csv', import.meta.url)));
   const detail = '<a href="https://example.test/resource.download?rid=one&amp;fileName=doorplates.csv">doorplates.csv</a><time datetime="2026-07-02T09:47:33+08:00"></time>';
   let repeat = false;
+  let concurrentChange = false;
+  let changedOnce = false;
   const conditionalSeasons: string[] = [];
   const fakeFetch = async (input: string | URL, init?: RequestInit): Promise<Response> => {
     const url = String(input);
     if (url.includes('dataset/detail')) return new Response(detail);
     if (url.includes('resource.download')) {
       if (repeat) {
-        assert.equal(new Headers(init?.headers).get('if-none-match'), '"doorplates-v1"');
+        const expected = changedOnce ? '"doorplates-v2"' : '"doorplates-v1"';
+        assert.equal(new Headers(init?.headers).get('if-none-match'), expected);
+        if (concurrentChange && !changedOnce) {
+          changedOnce = true;
+          return new Response(Buffer.concat([doorplateCsv, Buffer.from('\n')]), { headers: { etag: '"doorplates-v2"' } });
+        }
         return new Response(null, { status: 304 });
       }
       return new Response(doorplateCsv, { headers: { etag: '"doorplates-v1"' } });
@@ -114,4 +121,42 @@ test('unchanged conditional refresh keeps build and index checksums while advanc
   assert.equal(second?.manifest.transactions.checkedAt, '2026-07-26T01:00:00.000Z');
   assert.deepEqual(conditionalSeasons.sort(), ['115S2', '115S3']);
   assert.equal(events.at(-1), 'market-data.not-modified');
+
+  concurrentChange = true;
+  const concurrentOptions = {
+    asOf: '2026-07-25', rootPath, minDoorplates: 1, minTransactions: 1,
+    fetch: fakeFetch, clock: () => new Date('2026-07-27T01:00:00.000Z'),
+    openZip: async () => { throw new Error('conditionally unchanged ZIP must not be opened'); },
+  };
+  const concurrent = await Promise.all([
+    ensureTaipeiMarketData(concurrentOptions),
+    ensureTaipeiMarketData(concurrentOptions),
+  ]);
+  const publisher = concurrent.find((bundle) => bundle?.refresh?.status === 'updated');
+  const follower = concurrent.find((bundle) => bundle?.refresh?.status === 'not-modified');
+  assert.equal(publisher?.refresh?.status, 'updated');
+  assert.equal(follower?.refresh?.status, 'not-modified');
+  assert.equal(follower?.manifest.buildId, publisher?.manifest.buildId);
+  assert.equal((await readFile(join(rootPath, 'manifest.json'), 'utf8')).includes(publisher!.manifest.buildId), true);
+});
+
+test('filesystem refresh lock serializes overlapping jobs and cleans up after errors', async (t) => {
+  const rootPath = join(await mkdtemp(join(tmpdir(), 'market-lock-')), 'taipei');
+  t.after(() => rm(join(rootPath, '..'), { recursive: true, force: true }));
+  let active = 0;
+  let maxActive = 0;
+  const operation = async () => withMarketDataLock(rootPath, async () => {
+    active += 1;
+    maxActive = Math.max(maxActive, active);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    active -= 1;
+  }, { timeoutMs: 500, staleMs: 5_000, pollMs: 5 });
+  await Promise.all([operation(), operation()]);
+  assert.equal(maxActive, 1);
+
+  await assert.rejects(
+    () => withMarketDataLock(rootPath, async () => { throw new Error('inside lock'); }),
+    /inside lock/,
+  );
+  await withMarketDataLock(rootPath, async () => undefined, { timeoutMs: 100, pollMs: 5 });
 });
