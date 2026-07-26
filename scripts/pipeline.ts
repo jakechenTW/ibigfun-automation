@@ -29,8 +29,9 @@ import { runStep } from './lib/run.ts';
 import { composeNotifyCommand, runNotify, renderFailDetails } from './lib/notify.ts';
 import { fetchStep, enrichStep } from './lib/steps.ts';
 import { resolveRange, rangeFlags, type RunRange } from './lib/range.ts';
-import { runDir, reportPath } from './lib/runpaths.ts';
+import { runDir, reportPath, valuationReviewPath } from './lib/runpaths.ts';
 import { resolveProfileFromArgs, profileFlags, type Profile } from './lib/profiles.ts';
+import { validateValuationReview } from './lib/valuation-review.ts';
 
 const now = () => new Date().toISOString();
 
@@ -170,12 +171,23 @@ function cmdMark(argv: string[]): void {
       fail('marking report ok requires --status-notify <ok|warn|fail>.');
     }
     if (!title) fail('marking report ok requires --title "<short>".');
+    const reviewPath = valuationReviewPath(profile.id, range.label);
+    if (fs.existsSync(reviewPath)) {
+      try {
+        validateValuationReview(JSON.parse(fs.readFileSync(reviewPath, 'utf8')));
+      } catch (error) {
+        fail(`cannot mark report ok: malformed ${reviewPath}: ${(error as Error).message}`);
+      }
+    }
     m.notify = { tool, status: sNotify, title } as NotifyParams;
   }
 
   setStep(m, step, {
     status, endedAt: now(),
-    artifacts: artifact ? [artifact] : m.steps[step].artifacts,
+    artifacts: artifact
+      ? [artifact, ...(step === 'report' && fs.existsSync(valuationReviewPath(profile.id, range.label))
+        ? [valuationReviewPath(profile.id, range.label)] : [])]
+      : m.steps[step].artifacts,
   });
   writeManifest(m, now());
   journalLogger(profile.id, range.label, step, now).event('info', 'step.mark', `marked ${step} ${status}`,

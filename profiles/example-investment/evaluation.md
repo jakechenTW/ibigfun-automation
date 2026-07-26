@@ -7,8 +7,10 @@ Use this profile for rental-yield-oriented investment screening.
 - Mortgage assumption: 80% loan-to-value, 2.6% annual interest, 30-year principal and interest repayment.
 - 篩選主指標為**開價溢價**：`溢價 = (開價單價 − 成交行情單價) / 成交行情單價 * 100`，
   門檻錨定各市議價率換算的 `p*`（見 `data/negotiation-rate.md`，`p* = r/(1−r)`）。
-- 推薦：`−10% < 溢價 ≤ p*/2` 且 走路可靠在內（`withinWalk === true` 或 triage likely-within）
-  且 乾淨（非 suspicious/likely-auction）且 行情資料可靠不過期。
+- 推薦：以官方 `marketEstimate.marketUnitPriceP25` 計算的保守開價溢價為
+  `−10% < 溢價 ≤ p*/2`，且走路可靠在內（`withinWalk === true` 或 triage likely-within）、
+  乾淨（非 suspicious/likely-auction）、行情 `reliable`、信心非 low、兩個官方來源均未過期，且車位
+  可與建物價格/面積分離。中位數單獨達標不可推薦。
 - 接近門檻：`p*/2 < 溢價 ≤ p*`，或溢價達推薦級但只差在行情待確認／走路待確認。
 - 排除：`溢價 > p*`。
 - 異常低（`溢價 ≤ −10%`）先進可疑/待查驗證，**不直接推薦**；驗證乾淨且行情可靠後依溢價歸桶。
@@ -21,9 +23,12 @@ Use this profile for rental-yield-oriented investment screening.
 
 ## Estimation
 
-- 行情：優先用好時價 AVM 逐址估值（限邊界物件），否則用實價登錄／可比成交。詳見
+- 行情：使用 enriched `marketEstimate` 的官方中位數及 P25–P75；推薦和門檻覆核以 P25 保守值為準。
+  完整可比證據留在本地 `enriched.json`，通知只呈現筆數、階段、信心和資料日期。詳見
   `docs/reporting-rules.md`（Market Price & Premium）。
-- 行情資料若僅有過期／弱／逾時／跨站來源，物件不可標推薦。
+- 僅能對低信心、review/unavailable 或中位數才達標的邊界物件做有界外部覆核；外部值不覆寫官方值。
+  若外部覆核影響分桶，必須寫同 run 的 `valuation-review.json`，否則不可改桶。
+- 行情資料若過期、弱、review/unavailable，或車位不可分離，物件不可標推薦。
 - 租金：agent 粗估同區同類型可比租金，僅供參考、不影響分桶；一律標低信心與人工確認。
 - 地上權／使用權等非自由持分物件：開價不可直接比自由持分行情，依 `docs/reporting-rules.md`
   的「非自由持分（地上權／使用權）校正」處理（標可疑/待查或排除，不得標推薦）。
@@ -49,8 +54,9 @@ investment-specific and should not be applied to owner-occupied reports:
   template.
 - Recommended and near-threshold use the full compact layout: walk line, one
   tenure line `{{tenure_line}}`, one basics line
-  `總價／坪數／單價・樓層・屋齡・地址`, one financial line
-  `行情・房貸・月租(參考)・現金流(參考)`, then reason/risk or manual-check.
+  `總價／坪數／單價・樓層・屋齡・地址`, one financial/evidence line
+  `官方中位/P25–P75・狀態・信心・可比筆數・階段・資料日期・房貸・月租(參考)・現金流(參考)`,
+  then compact external-review/reason/risk or manual-check lines.
 - 月租與現金流為參考欄位，標 `（參考）`；不再輸出覆蓋率。
 - Pre-excluded, suspicious, and excluded listings use the shorter layouts shown in the template.
 - Emit the 🚶 walk line in 推薦 and 接近門檻 only; do not emit it in 可疑/待查 or 目標日排除. 區域閘門物件只計數、不逐列，故無 walk line。

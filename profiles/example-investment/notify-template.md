@@ -11,6 +11,7 @@
 - 接近門檻：{{near_threshold_count}} 筆
 - 目標日排除：{{excluded_count}} 筆
 - 可疑/待查：{{suspicious_count}} 筆
+- 官方行情｜可靠：{{market_reliable_count}} 筆・待覆核：{{market_review_count}} 筆・不可用：{{market_unavailable_count}} 筆・資料偏舊：{{market_stale_count}} 筆
 - 主要排除原因：{{main_exclusion_reasons}}
 - 房貸假設：8 成貸、年利率 2.6%、30 年本息平均攤還
 - 推薦門檻：`開價溢價 ≤ 該市 p*/2`（`p*` 由議價率換算，見 `data/negotiation-rate.md`）
@@ -30,7 +31,9 @@
 - {{walk_line}}
 - {{tenure_line}}
 - {{price}} 萬／{{ping}} 坪／{{unit_price}} 萬/坪・{{floor}}/{{total_floor}} 樓・屋齡 {{age}}・{{address_or_area}}
-- 行情 {{market_unit_price}} 萬/坪・房貸 {{monthly_mortgage}}・月租 ~{{estimated_rent}}（參考）・現金流 ~{{monthly_cash_flow}}/月（參考）
+- 行情狀態 {{market_status}}｜官方中位 {{market_median_wan}} 萬/坪（P25–P75 {{market_p25_wan}}–{{market_p75_wan}}）・信心 {{market_confidence}}・可比 {{comparable_count}} 筆・階段 {{selected_stage}}・官方資料 {{official_source_date}}（{{market_freshness}}）
+- 房貸 {{monthly_mortgage}}・月租 ~{{estimated_rent}}（參考）・現金流 ~{{monthly_cash_flow}}/月（參考）
+- 覆核：{{valuation_review_line}}
 - 推薦理由：{{recommendation_reason}}
 - 風險：{{risks_or_manual_checks}}
 
@@ -53,7 +56,9 @@
 - {{walk_line}}
 - {{tenure_line}}
 - {{price}} 萬／{{ping}} 坪／{{unit_price}} 萬/坪・{{floor}}/{{total_floor}} 樓・屋齡 {{age}}・{{address_or_area}}
-- 行情 {{market_unit_price}} 萬/坪・房貸 {{monthly_mortgage}}・月租 ~{{estimated_rent}}（參考）・現金流 ~{{monthly_cash_flow}}/月（參考）
+- 行情狀態 {{market_status}}｜官方中位 {{market_median_wan}} 萬/坪（P25–P75 {{market_p25_wan}}–{{market_p75_wan}}）・信心 {{market_confidence}}・可比 {{comparable_count}} 筆・階段 {{selected_stage}}・官方資料 {{official_source_date}}（{{market_freshness}}）
+- 房貸 {{monthly_mortgage}}・月租 ~{{estimated_rent}}（參考）・現金流 ~{{monthly_cash_flow}}/月（參考）
+- 覆核：{{valuation_review_line}}
 - 需人工確認：{{manual_checks}}
 
 {{/each}}
@@ -94,6 +99,7 @@
 
 - {{price}} 萬／{{ping}} 坪／{{unit_price}} 萬/坪・開價溢價 {{premium_percent}}%
 - {{tenure_line}}
+- 行情狀態 {{market_status}}｜官方資料 {{official_source_date}}（{{market_freshness}}）・覆核：{{valuation_review_line}}
 - 排除：{{exclusion_reason}}
 
 {{/each}}

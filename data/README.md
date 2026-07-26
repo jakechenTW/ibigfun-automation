@@ -2,6 +2,23 @@
 
 Static reference data used by the iBigFun monitoring workflow lives here.
 
+## Local official market-data state (git-ignored)
+
+The deterministic Taipei estimate does not add a credential requirement. Run
+`npm run market-data -- update --city taipei` to stage and atomically publish
+`state/market-data/taipei/`; run `npm run market-data -- backtest --city taipei
+[--as-of YYYY-MM-DD]` to evaluate its active build without a refresh. This local
+state holds raw downloads, indexes, and a checksum manifest and must not be
+committed.
+
+Sources are the [Taipei City doorplate dataset](https://data.taipei/dataset/detail?id=b7c8e724-1e98-45ee-a0bd-f3840623ed97)
+and [Ministry of the Interior real-price registration downloads](https://plvr.land.moi.gov.tw/DownloadSeason).
+Doorplates refresh from the dataset's current CSV resource; transactions cover
+the recent 36-month seasonal window. A transaction source check is stale after
+30 days and a doorplate source check after 60 days. A failed refresh keeps the
+last-known-good build; stale data remains visible to enrich/reporting and forces
+notification `warn` rather than a silent recommendation.
+
 ## `ibigfun-filter-mappings.md`
 
 Complete catalog of every `/api/search/list` body param a profile's `fetch` map

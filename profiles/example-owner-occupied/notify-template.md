@@ -9,6 +9,7 @@
 - 符合條件：{{matched_count}} 筆
 - 候選/需確認：{{candidate_count}} 筆
 - 排除：{{excluded_count}} 筆
+- 官方行情｜可靠：{{market_reliable_count}} 筆・待覆核：{{market_review_count}} 筆・不可用：{{market_unavailable_count}} 筆・資料偏舊：{{market_stale_count}} 筆
 - 主要排除原因：{{main_exclusion_reasons}}
 - Filter 對照狀態：{{filter_verification_status}}
 - 自住條件：總價 <= 8000 萬、類型 電梯大樓（house_type=17）、7 樓以上、主建物 >= 30 坪、屋齡 <= 25 年、平面車位
@@ -25,6 +26,8 @@
 - {{tenure_line}}
 - {{price}} 萬／{{ping}} 坪／{{unit_price}} 萬/坪・{{floor}}/{{total_floor}} 樓・屋齡 {{age}}・{{address_or_area}}
 - 格局 {{room}}房{{living_room}}廳{{bathroom}}衛・車位 {{parking}}・類型 {{type_layout}}
+- 行情狀態 {{market_status}}｜官方中位 {{market_median_wan}} 萬/坪（P25–P75 {{market_p25_wan}}–{{market_p75_wan}}）・信心 {{market_confidence}}・可比 {{comparable_count}} 筆・階段 {{selected_stage}}・官方資料 {{official_source_date}}（{{market_freshness}}）
+- 覆核：{{valuation_review_line}}
 - 亮點：{{strengths}}
 - 需確認：{{manual_checks}}
 
@@ -48,6 +51,8 @@
 - {{tenure_line}}
 - {{price}} 萬／{{ping}} 坪／{{unit_price}} 萬/坪・{{floor}}/{{total_floor}} 樓・屋齡 {{age}}・{{address_or_area}}
 - 格局 {{room}}房{{living_room}}廳{{bathroom}}衛・車位 {{parking}}・類型 {{type_layout}}
+- 行情狀態 {{market_status}}｜官方中位 {{market_median_wan}} 萬/坪（P25–P75 {{market_p25_wan}}–{{market_p75_wan}}）・信心 {{market_confidence}}・可比 {{comparable_count}} 筆・階段 {{selected_stage}}・官方資料 {{official_source_date}}（{{market_freshness}}）
+- 覆核：{{valuation_review_line}}
 - 需確認：{{manual_checks}}
 
 {{/each}}

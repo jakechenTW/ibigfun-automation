@@ -19,6 +19,10 @@ export function enrichedPath(profileId: string, label: string): string {
 export function reportPath(profileId: string, label: string): string {
   return path.join(runDir(profileId, label), 'report.md');
 }
+/** Optional, agent-authored evidence for bounded external valuation review. */
+export function valuationReviewPath(profileId: string, label: string): string {
+  return path.join(runDir(profileId, label), 'valuation-review.json');
+}
 export function effectiveProfilePath(profileId: string, label: string): string {
   return path.join(runDir(profileId, label), 'effective-profile.json');
 }

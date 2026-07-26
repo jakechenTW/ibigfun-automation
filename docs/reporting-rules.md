@@ -69,19 +69,29 @@ exclusion.
 因此幾乎每筆物件的溢價為正；以成交行情為錨點、用各市議價率換算的 `p*` 畫門檻，
 正是為了吸收這個結構性落差。
 
-### 行情來源優先序
+### 預設來源與保守分桶
 
-1. **好時價 AVM（邊界物件優先）**：對接近門檻／數字夠強值得驗證的物件，agent 以好時價
-   逐址估值（單價 萬/坪 + 總價 萬）當成交行情錨點。涵蓋 19 縣市，免費，公布 MAPE ≈ 8–10%
-   作為行情信心帶。只對邊界物件查，比照下方 Quality / Suspicious-Listing 開詳情頁的
-   bounded 模式；不對全量物件查、不逆向其內部 endpoint、不做無頭全量自動化。
-2. iBigFun 自身的實價登錄連結，或 agent 蒐集的可比成交（依面積、屋齡、樓層、型態比對）。
-3. 僅有過期／弱／逾時／跨站資料時，物件**不可標 recommended**，降到接近門檻或排除並標人工確認。
+`enriched.json` 的 `marketEstimate` 是成交行情的預設且權威的工作來源：它以本地、版本化的
+內政部實價登錄與台北市門牌資料選出可比成交。報告必須顯示 `reliable`、`review` 或
+`unavailable`，以及中位數、P25–P75、信心、可比筆數、選用階段與官方資料日期/新鮮度。
+通知只顯示這個摘要；完整可比成交及其排除理由留在 git-ignored 的 `enriched.json`，不可整份貼進通知。
 
-### Source Visibility
+- 投資分桶的開價溢價以 **P25 保守行情** 計算/覆核；中位數溢價只能用於說明，不能單獨使物件進入推薦。
+- `status: reliable` 且兩個官方來源均未過期，才可能進入推薦；`low` 信心、`review`、`unavailable`，或只靠中位數才符合門檻者，最多是待人工覆核的候選。
+- 車位價格/面積無法與建物分離（含 `listing-parking-not-separable`）時，不得自動推薦。
+- 任一官方來源過期時，受影響物件不得推薦，快速摘要必須寫明資料偏舊，整則通知一律使用 `warn`。
 
-每筆物件的行情估計都要在備註標明來源（好時價／實價登錄／樂居）與信心。好時價查不到的
-縣市／地址退回第 2 項並註記。
+### 有界外部覆核（非靜默覆寫）
+
+僅對低信心、`review`/`unavailable`，或以中位數才看似跨過門檻的少數邊界物件，可人工查閱外部估值
+（例如好時價 AVM）。不得全量查詢、逆向 endpoint 或把外部值寫回 `marketEstimate`。外部結果不會取代
+官方值；若它改變物件分桶，必須在同一 run 寫入 `valuation-review.json`，並保留 listing ID、來源及 HTTPS
+URL、查核時間、外部單價/總價、官方 P25/中位/P75、差異、是否採納、理由與結果分桶。pipeline 在
+`mark report --status ok` 時會驗證此檔；沒有可驗證證據不得藉外部值改桶。官方行情不可用時，外部查核
+只能讓物件留在人工候選，不能直接升為推薦。
+
+通知的逐筆「覆核」欄只能是一行精簡結論（是否查核、來源、結果和待確認事項），不得包含完整可比清單、
+原始地址、交易列或外部頁面抓取內容。
 
 ### 非自由持分（地上權／使用權）校正
 
@@ -110,10 +120,10 @@ exclusion.
 
 ## Data Quality Rules
 
-- Prefer fresh iBigFun listing and real-price data from the target report date.
-- If market data is stale, cached, timed out, or sourced from another site, say so in the quick summary and the affected listing notes.
-- Do not label a listing as recommended when its market comparison depends only on stale, timed-out, or weak comparable data. Put it in near-threshold or excluded status and mark it for manual confirmation.
-- Keep the source used for each market estimate visible in the listing notes.
+- Prefer fresh iBigFun listing and official market data for the target report date.
+- If market data is stale, cached, timed out, or externally reviewed, say so in the quick summary and the affected listing's compact evidence line.
+- Do not label a listing as recommended when its market comparison is stale, low-confidence, `review`, `unavailable`, or weak. Put it in near-threshold or excluded status and mark it for manual confirmation.
+- Keep the official source date/freshness and compact evidence summary visible in the listing notes; preserve the full local evidence in `enriched.json` and (when used) `valuation-review.json`.
 - Track seen listing IDs using `docs/automation-state.md` so reposts, edited listings, and cross-day duplicates can be handled consistently.
 
 ## Walking-Distance Triage (Agent)
@@ -235,6 +245,8 @@ listing lacking solid data cannot be labeled recommended.
     - `priceTrend === 'unknown'` → drop the `・{price_part}` segment entirely: `🕒 已刊登 {daysOnMarket} 天（最早 {firstListedDate}・{sourceCount} 來源）`
   - This line is information-only: it never changes the recommend / exclusion / suspicious decision.
 - When any field (月租, 現金流, 行情, 屋齡, 地址 等) is null, render it as `—` rather than dropping the line.
+- For every evaluated listing, render one compact market-evidence line: status (`reliable` / `review` / `unavailable`), official median and P25–P75 when available, confidence, comparable count, selected stage, official source date, and freshness. A `review` or `unavailable` result must say `需人工確認`; do not imply it is a reliable valuation.
+- If an external valuation was consulted, render one compact review line. Do not embed raw comparables or the external response in the notification.
 - Render each listed property with a 1-based `rank` value inside its section.
 - Use the selected profile template for bucket names, inline metrics, omitted
   sections, exclusion-detail limits, and sorting.

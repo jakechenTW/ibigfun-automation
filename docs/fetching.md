@@ -118,6 +118,11 @@ derived `buildingType`: `16` is `apartment`; `17` is `midrise` through 10 total
 floors and `highrise` from 11 floors. Invalid or absent floors stay untyped.
 `buildingType` is never inferred from the listing title or `pattern`.
 
+The split house-type requests are also valuation provenance: `queryHouseType`
+is the server-side source for `buildingType`, which determines which official
+transactions are eligible as comparables. Do not replace it with a title-based
+guess in a report.
+
 Response JSON shape: `{ data: ListItem[], total_records: number, per_page: number, current_page: number }`.
 
 ### Listing history (刊登紀錄)
@@ -231,3 +236,28 @@ gate, CAPTCHA, 2FA, or bad input; needs a human).
 
 The `.gitignore` covers the cookie jar and output artifacts (`.cookies.json`,
 `state/`, `*.har`, `node_modules/`).
+
+## Official Market-Data Inputs (enrich)
+
+`enrich` attaches a local `marketEstimate` when a validated Taipei build is
+available. This needs **no additional credential** and is independent of the
+iBigFun login: it reads the Taipei City doorplate dataset detail page
+(`https://data.taipei/dataset/detail?id=b7c8e724-1e98-45ee-a0bd-f3840623ed97`)
+to resolve the current CSV resource, and the Ministry of the Interior real-price
+season download endpoint (`https://plvr.land.moi.gov.tw/DownloadSeason?...`).
+The updater retains `queryHouseType` provenance and uses it to select
+like-for-like comparables.
+
+Build/update and offline evaluation commands:
+
+```bash
+npm run market-data -- update --city taipei
+npm run market-data -- backtest --city taipei --as-of 2026-07-26
+```
+
+The build is local, git-ignored `state/market-data/taipei/` (raw source files,
+validated indexes, manifest and checksums). A refresh is staged atomically; a
+source/schema failure keeps the last-known-good build. Transaction source checks
+older than 30 days or doorplate checks older than 60 days are stale. Enrich still
+emits the estimate and flags freshness, but reports with stale official data must
+use `warn` and cannot automatically recommend affected listings.

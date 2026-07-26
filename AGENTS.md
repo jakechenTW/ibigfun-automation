@@ -44,8 +44,8 @@ Do these once before the first run; stop and ask the user if any fails:
 4. Enrich deterministically (`npm run enrich -- --profile <profile> --date
    <target>` writes `state/runs/<profile>/<label>/enriched.json`): nearest MRT
    exit by **walking distance** (OpenRouteService foot routing over OSM),
-   monthly mortgage, parsed numbers, reusable walk signals (`withinWalk`) and
-   reliability flags, and an advisory `signals.auctionKeyword` flag
+   monthly mortgage, parsed numbers, reusable walk signals (`withinWalk`),
+   reliability flags, official `marketEstimate` evidence, and an advisory `signals.auctionKeyword` flag
    the agent weighs (no longer an auto-exclusion — see Quality /
    Suspicious-Listing Judgment in docs/reporting-rules.md). Listings with an
    unreliable coordinate/route are marked `withinWalk: null` for manual review,
@@ -55,15 +55,23 @@ Do these once before the first run; stop and ask the user if any fails:
    deterministic walk, and give a labelled verdict (likely-within / likely-far /
    unknown→human) → `docs/reporting-rules.md` (Walking-Distance Triage).
 6. Deduplicate by stable listing ID → `docs/automation-state.md`.
-7. Estimate profile-specific judgment fields (for investment: market price and
-   rent; for self-use: fit, risks, and missing confirmations) →
+7. Read each listing's deterministic `marketEstimate`: use the official median,
+   P25–P75, confidence, comparable count, selected stage, and source freshness.
+   P25 is the conservative investment gate; `review`, `unavailable`, low
+   confidence, stale sources, and inseparable parking are never auto-recommended.
+   A bounded external valuation may review a boundary case but never silently
+   overwrites official values; write `valuation-review.json` when it affects a
+   bucket → `docs/reporting-rules.md` and `profiles/<profile>/evaluation.md`.
+8. Estimate the remaining profile-specific fields (for investment: rent; for
+   self-use: fit, risks, and missing confirmations) →
    `docs/reporting-rules.md` and `profiles/<profile>/evaluation.md`.
-8. Evaluate against the selected profile criteria, shared data-quality rules,
+9. Evaluate against the selected profile criteria, shared data-quality rules,
    and sorting/notification rules, using the enriched fields plus your estimates →
    `docs/reporting-rules.md` and `profiles/<profile>/evaluation.md`.
-9. Write `state/runs/<profile>/<label>/report.md` using the profile's
+10. Write `state/runs/<profile>/<label>/report.md` using the profile's
    `profiles/<profile>/notify-template.md` as the structure.
-10. Notify with the canonical command below.
+11. Notify with the canonical command below. Any stale official market source
+   requires notification status `warn`.
 
 ### Tooling
 
@@ -83,6 +91,15 @@ evaluation, and writing the report.
   estimation and final include/exclude judgment stay with the agent. The walk
   decision is `withinWalk` (true ≤10-min walk / false too far / null
   unreliable→manual).
+- `npm run market-data -- update --city taipei` — refreshes the local, validated
+  Taipei official-data build without credentials. It obtains the Taipei City
+  doorplate dataset and Ministry of the Interior real-price transaction ZIPs,
+  stages and validates them, then atomically publishes
+  `state/market-data/taipei/`. A failed refresh retains the last-known-good
+  build; this git-ignored local state is never committed.
+- `npm run market-data -- backtest --city taipei [--as-of YYYY-MM-DD] [--no-gate]`
+  — evaluates the active local build without refreshing it. It prints aggregate,
+  non-identifying accuracy and interval metrics; it needs no credentials.
 - `npm run route -- --lat <> --lng <>` — deterministic nearest-walk exit for one
   coordinate (shared ORS cache). Used during triage (step 5) to get a trustworthy
   walking distance after re-locating a listing from its address.
@@ -92,7 +109,8 @@ evaluation, and writing the report.
   day) and uses the bare date as its label. A multi-day range uses the label
   `<from>_<to>`. One run per profile and label is recorded under
   `state/runs/<profile>/<label>/`; artifacts are
-  `state/runs/<profile>/<label>/{listings.json, enriched.json, report.md}`. A whole range is fetched in **one** query
+  `state/runs/<profile>/<label>/{listings.json, enriched.json, report.md, valuation-review.json?}`.
+  `valuation-review.json` is optional and exists only if a bounded external review affects a report bucket; `mark report --status ok` validates it. A whole range is fetched in **one** query
   (`add_date`/`add_date_max`), deduped by listing id, and emitted as **one**
   merged report + **one** notification. Already-ok steps are skipped, so
   re-running resumes.
@@ -139,7 +157,7 @@ ai-notify --tool <codex|claude> --status <ok|warn|fail> \
 - `--task`: use the selected profile's `displayName` from
   `profiles/<profile>/profile.json`.
 - `--status warn`: recommendations/matches, near-threshold candidates, stale or
-  weak data, login fallback, or anything needing review.
+  weak data (including stale official market data), login fallback, or anything needing review.
 - `--status ok`: a clean no-recommendation/no-match run with fresh data.
 - `--status fail`: only when the monitor cannot complete.
 
@@ -181,6 +199,9 @@ ai-notify --tool <codex|claude> --status <ok|warn|fail> \
 - `data/`: static reference data — `data/README.md` indexes the datasets
   (Taipei MRT exits, filter id→name mappings, per-city 議價率, investment region
   allowlist).
+- `state/market-data/taipei/`: git-ignored, versioned local official doorplate
+  and transaction build used for deterministic market estimates; contains raw
+  source files, indexes, manifest/checksums, and no credentials.
 - `prompts/daily-run.md`: the committed headless worker prompt for the daily
   automated run (profile/range-agnostic; the trigger injects the profile and
   date range).

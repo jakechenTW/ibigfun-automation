@@ -36,6 +36,7 @@ Room, living-room, and bathroom counts are displayed but are not hard criteria i
 - Summarize exclusions by count and main reason instead of listing every excluded property.
 - Treat suspicious, likely-auction, low-information, or blocked-detail listings as risk notes or exclusion reasons.
 - Walking distance is a preference and sorting signal, not a disqualifier, unless this profile later adds an explicit walking threshold.
+- A `marketEstimate` with `review`/`unavailable`, stale source data, low confidence, or inseparable parking cannot support an automatic `符合條件` judgment; keep it in `候選/需確認` with the compact evidence reason.
 
 ## Notification Status
 
