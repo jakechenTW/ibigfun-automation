@@ -35,6 +35,14 @@ function comparePoints(left: DoorplatePoint, right: DoorplatePoint): number {
     (left.subNumber ?? -1) - (right.subNumber ?? -1);
 }
 
+function sortedIndexView(view: Record<string, DoorplatePoint[]>): Record<string, DoorplatePoint[]> {
+  return Object.fromEntries(
+    Object.entries(view)
+      .sort(([left], [right]) => compareText(left, right))
+      .map(([key, points]) => [key, points.sort(comparePoints)]),
+  );
+}
+
 function field(row: DoorplateCsvRow, names: string[]): string | null {
   for (const name of names) {
     const value = row[name]?.trim();
@@ -123,16 +131,12 @@ export async function buildDoorplateIndex(
     (cells[gridKey(point.coordinate)] ??= []).push(point);
   }
 
-  for (const points of [...Object.values(byCanonicalAddress), ...Object.values(byRoad), ...Object.values(cells)]) {
-    points.sort(comparePoints);
-  }
-
   return {
     schemaVersion: MARKET_SCHEMA_VERSION,
     datasetVersion,
-    byCanonicalAddress,
-    byRoad,
-    cells,
+    byCanonicalAddress: sortedIndexView(byCanonicalAddress),
+    byRoad: sortedIndexView(byRoad),
+    cells: sortedIndexView(cells),
   };
 }
 
