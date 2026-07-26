@@ -53,6 +53,8 @@ Remove `--dry-run` (and fill `.env`) for a real run.
 - `docs/` — cross-profile reference: fetching, credentials, shared reporting
   rules, automation state, notifications.
 - `docs/notifications.md` — `NOTIFY_CMD` contract and no-notifier fallback.
+- `docs/market-data.md` — Taipei official market-data build, valuation evidence,
+  freshness, rollback, and offline backtesting operations.
 - `data/` — static reference data (MRT exits, filter mappings, 議價率, region
   allowlist); indexed by `data/README.md`.
 - `prompts/` — committed prompts for headless / scheduled runs.
