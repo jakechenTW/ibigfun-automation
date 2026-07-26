@@ -97,6 +97,10 @@ function isNoParkingType(value: string): boolean {
   return normalized === '' || normalized === '無車位';
 }
 
+function isExplicitNoParkingType(value: string): boolean {
+  return value.normalize('NFKC').replace(/\s+/g, '') === '無車位';
+}
+
 function chineseInteger(value: string): number | null {
   const digits: Record<string, number> = {
     零: 0, 〇: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 兩: 2,
@@ -209,6 +213,9 @@ export function normalizeSaleTransaction(
   const parkingPriceRaw = aliasValue(values, 'parkingPrice');
   const parkingAreaSqM = finitePositive(parkingAreaRaw);
   const parkingPriceNtd = finitePositive(parkingPriceRaw);
+  if (isExplicitNoParkingType(parkingType) && (parkingAreaSqM || parkingPriceNtd)) {
+    return excluded(id, 'parking-not-separable');
+  }
   const parkingExists = !(
     isNoParkingType(parkingType) &&
     isZeroOrEmpty(parkingAreaRaw) &&

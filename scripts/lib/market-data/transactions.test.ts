@@ -110,6 +110,18 @@ test('rejects partial parking fields even when the other field is zero', () => {
   }
 });
 
+test('rejects positive parking numerics that contradict an explicit no-parking type', () => {
+  const tx = normalizeSaleTransaction(row({
+    '車位類別': '無車位',
+    '車位移轉總面積平方公尺': '20',
+    '車位總價元': '3000000',
+  }), context);
+
+  assert.equal(tx.kind, 'excluded');
+  if (tx.kind !== 'excluded') return;
+  assert.deepEqual(tx.reasons, ['parking-not-separable']);
+});
+
 test('explicit special relationship is excluded but ambiguous prose is reviewed', () => {
   assert.ok(specialTransactionFlags('親友、員工、共有人或其他特殊關係間之交易').includes('related-party'));
   assert.deepEqual(specialTransactionFlags('屋主誠意出售'), []);
