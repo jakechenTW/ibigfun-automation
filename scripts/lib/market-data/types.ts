@@ -20,6 +20,17 @@ export interface LocationEvidence {
   datasetVersion: string;
 }
 
+export interface SubjectLocationEvidence {
+  verdict: 'matched' | 'uncertain' | 'conflict';
+  address: LocationEvidence;
+  nearestDoorplate: LocationEvidence;
+  addressDistanceMeters: number | null;
+  /** Distance outside the forward address's uncertainty radius. */
+  distanceBeyondUncertaintyMeters: number | null;
+  thresholdMeters: number;
+  reasons: string[];
+}
+
 export interface WeightBreakdown {
   distance: number;
   time: number;
@@ -93,6 +104,8 @@ export interface MarketEstimate {
   confidence: EstimateConfidence;
   /** Retains the listing-side ownership classification and any profile assumption. */
   subjectOwnershipEvidence: SubjectOwnershipEvidence;
+  /** Auditable local doorplate check of listing GPS against listing address text. */
+  subjectLocationEvidence: SubjectLocationEvidence | null;
   marketUnitPriceMedian: number | null;
   marketUnitPriceP25: number | null;
   marketUnitPriceP75: number | null;

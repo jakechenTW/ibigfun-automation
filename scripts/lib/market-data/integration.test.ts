@@ -54,13 +54,60 @@ function listing(overrides: Partial<PreMarketEnrichedListing> = {}): PreMarketEn
   };
 }
 
-test('enrich attaches an auditable market estimate once per typed listing', () => {
+test('matching listing GPS and exact address retain a reliable market estimate', () => {
   const [result] = attachMarketEstimates([listing()], bundle, AS_OF);
 
   assert.equal(result.marketEstimate.status, 'reliable');
   assert.equal(result.marketEstimate.comparables.length, 5);
   assert.equal(result.marketEstimate.selectedStage, 1);
   assert.equal(result.marketEstimate.subjectOwnershipEvidence, 'profile-default-freehold');
+  const evidence = result.marketEstimate.subjectLocationEvidence;
+  assert.equal(evidence?.verdict, 'matched');
+  assert.equal(evidence?.address.method, 'exact-doorplate');
+  assert.ok((evidence?.addressDistanceMeters ?? Infinity) < 1);
+});
+
+test('same-district wrong-neighborhood GPS pin cannot receive an automatic estimate', () => {
+  const [result] = attachMarketEstimates([
+    listing({
+      coordinate: { lat: 25.033964, lng: 121.574468 },
+      reliability: { coordPresent: true, coordConsistent: true, routeOk: true, ratio: 1.2, reason: null },
+    }),
+  ], bundle, AS_OF);
+
+  assert.equal(result.marketEstimate.status, 'unavailable');
+  assert.deepEqual(result.marketEstimate.unavailableReasons, ['listing-coordinate-address-conflict']);
+  const evidence = result.marketEstimate.subjectLocationEvidence;
+  assert.equal(evidence?.verdict, 'conflict');
+  assert.ok((evidence?.distanceBeyondUncertaintyMeters ?? 0) > 300);
+  assert.equal(evidence?.nearestDoorplate.matchedAddress, '台北市中正區另一街99號');
+});
+
+test('masked listing address preserves range uncertainty and stays review-only without a false conflict', () => {
+  const [result] = attachMarketEstimates([
+    listing({ addressOrArea: '台北市中正區測試路1~30號' }),
+  ], bundle, AS_OF);
+
+  assert.equal(result.marketEstimate.status, 'review');
+  assert.ok(result.marketEstimate.unavailableReasons.includes('listing-address-range-uncertain'));
+  const evidence = result.marketEstimate.subjectLocationEvidence;
+  assert.equal(evidence?.verdict, 'uncertain');
+  assert.equal(evidence?.address.method, 'address-range');
+  assert.ok((evidence?.address.uncertaintyMeters ?? 0) > 0);
+  assert.ok((evidence?.distanceBeyondUncertaintyMeters ?? Infinity) <= 300);
+});
+
+test('incomplete unresolved listing address stays review-only when the reverse road still matches', () => {
+  const [result] = attachMarketEstimates([
+    listing({ addressOrArea: '台北市中正區測試路' }),
+  ], bundle, AS_OF);
+
+  assert.equal(result.marketEstimate.status, 'review');
+  assert.ok(result.marketEstimate.unavailableReasons.includes('listing-address-location-unresolved'));
+  const evidence = result.marketEstimate.subjectLocationEvidence;
+  assert.equal(evidence?.verdict, 'uncertain');
+  assert.equal(evidence?.address.method, 'unresolved');
+  assert.equal(evidence?.nearestDoorplate.matchedAddress, '台北市中正區測試路1號');
 });
 
 test('untyped, unreliable GPS, and inseparable listing parking stay unavailable or review', () => {

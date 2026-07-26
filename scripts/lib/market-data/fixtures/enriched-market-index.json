@@ -8,7 +8,7 @@
       "publishedAt": null,
       "checkedAt": "2026-07-25T00:00:00.000Z",
       "sha256": "fixture-doorplates",
-      "recordCount": 1
+      "recordCount": 3
     },
     "transactions": {
       "sourceUrls": ["https://example.test/transactions.csv"],
@@ -23,9 +23,35 @@
   "doorplates": {
     "schemaVersion": 1,
     "datasetVersion": "fixture-doorplates",
-    "byCanonicalAddress": {},
-    "byRoad": {},
-    "cells": {}
+    "byCanonicalAddress": {
+      "台北市中正區另一街99號": [
+        { "canonicalAddress": "台北市中正區另一街99號", "coordinate": { "lat": 25.033964, "lng": 121.574468 }, "district": "中正區", "roadKey": "台北市中正區另一街", "mainNumber": 99, "subNumber": null }
+      ],
+      "台北市中正區測試路1號": [
+        { "canonicalAddress": "台北市中正區測試路1號", "coordinate": { "lat": 25.033964, "lng": 121.564468 }, "district": "中正區", "roadKey": "台北市中正區測試路", "mainNumber": 1, "subNumber": null }
+      ],
+      "台北市中正區測試路21號": [
+        { "canonicalAddress": "台北市中正區測試路21號", "coordinate": { "lat": 25.0345, "lng": 121.564468 }, "district": "中正區", "roadKey": "台北市中正區測試路", "mainNumber": 21, "subNumber": null }
+      ]
+    },
+    "byRoad": {
+      "台北市中正區另一街": [
+        { "canonicalAddress": "台北市中正區另一街99號", "coordinate": { "lat": 25.033964, "lng": 121.574468 }, "district": "中正區", "roadKey": "台北市中正區另一街", "mainNumber": 99, "subNumber": null }
+      ],
+      "台北市中正區測試路": [
+        { "canonicalAddress": "台北市中正區測試路1號", "coordinate": { "lat": 25.033964, "lng": 121.564468 }, "district": "中正區", "roadKey": "台北市中正區測試路", "mainNumber": 1, "subNumber": null },
+        { "canonicalAddress": "台北市中正區測試路21號", "coordinate": { "lat": 25.0345, "lng": 121.564468 }, "district": "中正區", "roadKey": "台北市中正區測試路", "mainNumber": 21, "subNumber": null }
+      ]
+    },
+    "cells": {
+      "5006:24312": [
+        { "canonicalAddress": "台北市中正區測試路1號", "coordinate": { "lat": 25.033964, "lng": 121.564468 }, "district": "中正區", "roadKey": "台北市中正區測試路", "mainNumber": 1, "subNumber": null },
+        { "canonicalAddress": "台北市中正區測試路21號", "coordinate": { "lat": 25.0345, "lng": 121.564468 }, "district": "中正區", "roadKey": "台北市中正區測試路", "mainNumber": 21, "subNumber": null }
+      ],
+      "5006:24314": [
+        { "canonicalAddress": "台北市中正區另一街99號", "coordinate": { "lat": 25.033964, "lng": 121.574468 }, "district": "中正區", "roadKey": "台北市中正區另一街", "mainNumber": 99, "subNumber": null }
+      ]
+    }
   },
   "transactions": {
     "schemaVersion": 1,

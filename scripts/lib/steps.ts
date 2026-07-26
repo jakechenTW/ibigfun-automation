@@ -12,14 +12,24 @@ import { loadCache, saveCache, cacheKey } from './route-cache.ts';
 import type { EnrichResult, EnrichedListing, PreMarketEnrichedListing, FetchResult } from './types.ts';
 import { runDir, listingsPath, enrichedPath, effectiveProfilePath } from './runpaths.ts';
 import { estimateMarket } from './market-data/estimator.ts';
+import { locateAddress, nearestDoorplate } from './market-data/doorplates.ts';
+import { normalizeTaiwanAddress } from './market-data/address.ts';
 import { floorGroup } from './market-data/property.ts';
 import { marketDataFreshness } from './market-data/store.ts';
 import { ensureTaipeiMarketData } from './market-data/update.ts';
-import type { MarketDataBundle, MarketEstimate, SourceFreshness, SubjectOwnershipEvidence } from './market-data/types.ts';
+import type {
+  MarketDataBundle,
+  MarketEstimate,
+  SourceFreshness,
+  SubjectLocationEvidence,
+  SubjectOwnershipEvidence,
+} from './market-data/types.ts';
+import { haversineMeters } from './geo.ts';
 
 const MRT_CSV = 'data/taipei_mrt_exits.csv';
 const ORS_DELAY_MS = 1600;        // ORS free tier ~40 req/min
 const ORS_RETRY_WAIT_MS = 65_000; // wait out the per-minute window once
+const LISTING_LOCATION_TOLERANCE_M = 300;
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const NO_ACTIVE_MARKET_FRESHNESS: SourceFreshness = {
@@ -34,11 +44,13 @@ function unavailableMarketEstimate(
   unavailableReasons: string[],
   status: 'review' | 'unavailable' = 'unavailable',
   subjectOwnershipEvidence: SubjectOwnershipEvidence = 'unspecified',
+  subjectLocationEvidence: SubjectLocationEvidence | null = null,
 ): MarketEstimate {
   return {
     status,
     confidence: 'low',
     subjectOwnershipEvidence,
+    subjectLocationEvidence,
     marketUnitPriceMedian: null,
     marketUnitPriceP25: null,
     marketUnitPriceP75: null,
@@ -49,6 +61,99 @@ function unavailableMarketEstimate(
     unavailableReasons,
     comparables: [],
     excludedCandidates: [],
+  };
+}
+
+function reverseAddressConflicts(input: string, matchedAddress: string | null): boolean {
+  if (!matchedAddress) return false;
+  const expected = normalizeTaiwanAddress(input);
+  const actual = normalizeTaiwanAddress(matchedAddress);
+  const fields = ['city', 'district', 'road', 'section', 'lane', 'alley'] as const;
+  return fields.some((field) => expected[field] !== null && actual[field] !== null && expected[field] !== actual[field]);
+}
+
+function validateListingLocation(
+  listing: PreMarketEnrichedListing & { coordinate: NonNullable<PreMarketEnrichedListing['coordinate']> },
+  bundle: MarketDataBundle,
+): SubjectLocationEvidence {
+  const input = listing.addressOrArea ?? '';
+  const address = locateAddress(bundle.doorplates, input);
+  const reverse = nearestDoorplate(bundle.doorplates, listing.coordinate);
+  const distance = address.coordinate ? haversineMeters(listing.coordinate, address.coordinate) : null;
+  const beyondUncertainty = distance === null
+    ? null
+    : Math.max(0, distance - (address.uncertaintyMeters ?? 0));
+
+  if (beyondUncertainty !== null && beyondUncertainty > LISTING_LOCATION_TOLERANCE_M) {
+    return {
+      verdict: 'conflict',
+      address,
+      nearestDoorplate: reverse,
+      addressDistanceMeters: distance,
+      distanceBeyondUncertaintyMeters: beyondUncertainty,
+      thresholdMeters: LISTING_LOCATION_TOLERANCE_M,
+      reasons: ['listing-coordinate-address-conflict'],
+    };
+  }
+
+  if (address.method === 'exact-doorplate') {
+    return {
+      verdict: 'matched',
+      address,
+      nearestDoorplate: reverse,
+      addressDistanceMeters: distance,
+      distanceBeyondUncertaintyMeters: beyondUncertainty,
+      thresholdMeters: LISTING_LOCATION_TOLERANCE_M,
+      reasons: [],
+    };
+  }
+
+  if (address.method === 'address-range') {
+    return {
+      verdict: 'uncertain',
+      address,
+      nearestDoorplate: reverse,
+      addressDistanceMeters: distance,
+      distanceBeyondUncertaintyMeters: beyondUncertainty,
+      thresholdMeters: LISTING_LOCATION_TOLERANCE_M,
+      reasons: ['listing-address-range-uncertain'],
+    };
+  }
+
+  if (reverse.method !== 'unresolved' && reverseAddressConflicts(input, reverse.matchedAddress)) {
+    return {
+      verdict: 'conflict',
+      address,
+      nearestDoorplate: reverse,
+      addressDistanceMeters: null,
+      distanceBeyondUncertaintyMeters: null,
+      thresholdMeters: LISTING_LOCATION_TOLERANCE_M,
+      reasons: ['listing-coordinate-address-conflict'],
+    };
+  }
+
+  return {
+    verdict: 'uncertain',
+    address,
+    nearestDoorplate: reverse,
+    addressDistanceMeters: null,
+    distanceBeyondUncertaintyMeters: null,
+    thresholdMeters: LISTING_LOCATION_TOLERANCE_M,
+    reasons: ['listing-address-location-unresolved'],
+  };
+}
+
+function attachLocationEvidence(
+  estimate: MarketEstimate,
+  evidence: SubjectLocationEvidence,
+): MarketEstimate {
+  if (evidence.verdict !== 'uncertain') return { ...estimate, subjectLocationEvidence: evidence };
+  return {
+    ...estimate,
+    status: estimate.status === 'unavailable' ? 'unavailable' : 'review',
+    confidence: 'low',
+    subjectLocationEvidence: evidence,
+    unavailableReasons: [...new Set([...estimate.unavailableReasons, ...evidence.reasons])],
   };
 }
 
@@ -86,25 +191,41 @@ export function attachMarketEstimates(
     if (listing.reliability.coordConsistent === false) {
       return { ...listing, marketEstimate: unavailableMarketEstimate(freshness, ['listing-coordinate-unreliable'], 'unavailable', ownership.evidence) };
     }
+    const locationEvidence = validateListingLocation(
+      listing as PreMarketEnrichedListing & { coordinate: NonNullable<PreMarketEnrichedListing['coordinate']> },
+      bundle,
+    );
+    if (locationEvidence.verdict === 'conflict') {
+      return {
+        ...listing,
+        marketEstimate: unavailableMarketEstimate(
+          freshness,
+          locationEvidence.reasons,
+          'unavailable',
+          ownership.evidence,
+          locationEvidence,
+        ),
+      };
+    }
     if (!listing.buildingType) {
-      return { ...listing, marketEstimate: unavailableMarketEstimate(freshness, ['listing-building-type-unavailable'], 'unavailable', ownership.evidence) };
+      return { ...listing, marketEstimate: unavailableMarketEstimate(freshness, ['listing-building-type-unavailable'], 'unavailable', ownership.evidence, locationEvidence) };
     }
     if (listing.parking !== '無車位') {
-      return { ...listing, marketEstimate: unavailableMarketEstimate(freshness, ['listing-parking-not-separable'], 'review', ownership.evidence) };
+      return { ...listing, marketEstimate: unavailableMarketEstimate(freshness, ['listing-parking-not-separable'], 'review', ownership.evidence, locationEvidence) };
     }
     const floor = integerField(listing.floor);
     const totalFloors = integerField(listing.totalFloors);
     if (floor == null || totalFloors == null) {
-      return { ...listing, marketEstimate: unavailableMarketEstimate(freshness, ['listing-floor-group-unavailable'], 'unavailable', ownership.evidence) };
+      return { ...listing, marketEstimate: unavailableMarketEstimate(freshness, ['listing-floor-group-unavailable'], 'unavailable', ownership.evidence, locationEvidence) };
     }
     const subjectFloorGroup = floorGroup(listing.buildingType, floor, totalFloors);
     if (!subjectFloorGroup) {
-      return { ...listing, marketEstimate: unavailableMarketEstimate(freshness, ['listing-floor-group-unavailable'], 'unavailable', ownership.evidence) };
+      return { ...listing, marketEstimate: unavailableMarketEstimate(freshness, ['listing-floor-group-unavailable'], 'unavailable', ownership.evidence, locationEvidence) };
     }
 
     return {
       ...listing,
-      marketEstimate: estimateMarket({
+      marketEstimate: attachLocationEvidence(estimateMarket({
         listingId: listing.id,
         coordinate: listing.coordinate,
         district: listing.district ?? '',
@@ -118,7 +239,7 @@ export function attachMarketEstimates(
         floorGroup: subjectFloorGroup,
         ageYears: listing.ageNum,
         parkingSeparable: true,
-      }, bundle.transactions, freshness, asOf),
+      }, bundle.transactions, freshness, asOf), locationEvidence),
     };
   });
 }
