@@ -4,15 +4,22 @@
  */
 import { pathToFileURL } from 'node:url';
 import { isValidDateString, taipeiDateString } from './lib/date.ts';
-import { backtestTransactions, type BacktestReport } from './lib/market-data/backtest.ts';
+import {
+  backtestAcceptance,
+  backtestTransactions,
+  evaluateBacktestGate,
+  type BacktestReport,
+} from './lib/market-data/backtest.ts';
 import { MARKET_DATA_ROOT } from './lib/market-data/config.ts';
-import { loadMarketData, marketDataFreshness } from './lib/market-data/store.ts';
+import {
+  loadMarketData,
+  marketDataFreshness,
+  transactionArtifactChecksum,
+  writeBacktestAcceptance,
+} from './lib/market-data/store.ts';
 import { ensureTaipeiMarketData } from './lib/market-data/update.ts';
 
 const SUPPORTED_CITY = 'taipei';
-const MEDIAN_APE_TARGET = 0.12;
-const P75_APE_TARGET = 0.20;
-
 export class CliInputError extends Error {}
 
 export type MarketDataCommand =
@@ -73,14 +80,13 @@ function percent(value: number | null): string {
   return value === null ? 'n/a' : `${(value * 100).toFixed(1)}%`;
 }
 
-function completed(report: BacktestReport): boolean {
-  return report.overall.caseCount > 0 && report.overall.medianApe !== null && report.overall.p75Ape !== null;
-}
-
 /** Returns the post-report quality-gate exit status without changing local state. */
 export function backtestExitCode(report: BacktestReport, noGate: boolean): number {
-  if (noGate || !completed(report)) return 0;
-  return report.overall.medianApe! > MEDIAN_APE_TARGET || report.overall.p75Ape! > P75_APE_TARGET ? 1 : 0;
+  return noGate || evaluateBacktestGate(report).passed ? 0 : 1;
+}
+
+export function shouldPersistBacktestAcceptance(report: BacktestReport, noGate: boolean): boolean {
+  return !noGate && evaluateBacktestGate(report).passed;
 }
 
 export function marketUpdateExitCode(status: 'updated' | 'not-modified' | 'last-known-good' | undefined): number {
@@ -109,17 +115,23 @@ async function update(asOf: string): Promise<number> {
   return marketUpdateExitCode(bundle.refresh?.status);
 }
 
-async function backtest(command: Extract<MarketDataCommand, { command: 'backtest' }>): Promise<number> {
+async function backtest(command: Extract<MarketDataCommand, { command: 'backtest' }>, now: Date): Promise<number> {
   // Deliberately load-only: a backtest must not refresh, publish, or otherwise mutate the active build.
   const bundle = await loadMarketData(MARKET_DATA_ROOT);
   if (!bundle) throw new Error(`No validated Taipei market-data build at ${MARKET_DATA_ROOT}; run update first`);
   const report = backtestTransactions(bundle.transactions, { asOf: command.asOf });
+  const gate = evaluateBacktestGate(report);
   const exitCode = backtestExitCode(report, command.noGate);
-  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  if (shouldPersistBacktestAcceptance(report, command.noGate)) {
+    const checksum = transactionArtifactChecksum(bundle.manifest);
+    if (!checksum) throw new Error('Active build lacks transactions-index.json checksum');
+    await writeBacktestAcceptance(MARKET_DATA_ROOT, backtestAcceptance(report, checksum, now.toISOString()));
+  }
+  process.stdout.write(`${JSON.stringify({ ...report, acceptanceGate: gate }, null, 2)}\n`);
   process.stderr.write(
     `backtest cases=${report.overall.caseCount} coverage=${percent(report.overall.estimateCoverage)} ` +
     `medianAPE=${percent(report.overall.medianApe)} p75APE=${percent(report.overall.p75Ape)} ` +
-    `gate=${command.noGate ? 'disabled' : exitCode === 1 ? 'failed' : completed(report) ? 'passed' : 'not-evaluated'}\n`,
+    `gate=${command.noGate ? 'disabled' : gate.passed ? 'passed' : `failed(${gate.reasons.join(',')})`}\n`,
   );
   return exitCode;
 }
@@ -129,7 +141,7 @@ export async function runMarketDataCommand(args: readonly string[], now: Date = 
   if (command.command === 'update') {
     return update(command.asOf);
   }
-  return backtest(command);
+  return backtest(command, now);
 }
 
 async function main(): Promise<void> {

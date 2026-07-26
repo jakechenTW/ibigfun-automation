@@ -1,10 +1,22 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
-import { MARKET_SCHEMA_VERSION, MIN_PRODUCTION_DOORPLATES, MIN_PRODUCTION_TRANSACTIONS } from './config.ts';
+import {
+  BACKTEST_ACCEPTANCE_THRESHOLDS,
+  MARKET_SCHEMA_VERSION,
+  MIN_PRODUCTION_DOORPLATES,
+  MIN_PRODUCTION_TRANSACTIONS,
+} from './config.ts';
 import { DOORPLATE_STALE_DAYS, TRANSACTION_STALE_DAYS } from './config.ts';
-import type { DoorplateIndex, MarketDataBundle, MarketDataManifest, SourceFreshness, TransactionIndex } from './types.ts';
+import type {
+  BacktestAcceptance,
+  DoorplateIndex,
+  MarketDataBundle,
+  MarketDataManifest,
+  SourceFreshness,
+  TransactionIndex,
+} from './types.ts';
 
 const TAIPEI_BOUNDS = { minLat: 24.7, maxLat: 25.4, minLng: 121.2, maxLng: 121.9 };
 
@@ -49,6 +61,81 @@ function readJson<T>(file: string): T | null {
 
 export function readManifest(root: string): MarketDataManifest | null {
   return readJson<MarketDataManifest>(path.join(root, 'manifest.json'));
+}
+
+/** Acceptance is a sibling of the immutable active build, so it cannot alter build checksums. */
+export function backtestAcceptancePath(root: string): string {
+  return path.join(path.dirname(root), `${path.basename(root)}-backtest-acceptance.json`);
+}
+
+export function transactionArtifactChecksum(manifest: MarketDataManifest): string | null {
+  const checksum = manifest.artifacts?.['transactions-index.json']?.sha256;
+  return typeof checksum === 'string' && checksum.length > 0 ? checksum : null;
+}
+
+function finiteRatio(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+function approvedBacktestThresholds(thresholds: BacktestAcceptance['thresholds']): boolean {
+  return thresholds.medianApeMax === BACKTEST_ACCEPTANCE_THRESHOLDS.medianApeMax
+    && thresholds.p75ApeMax === BACKTEST_ACCEPTANCE_THRESHOLDS.p75ApeMax
+    && thresholds.minimumConfidenceSliceCases === BACKTEST_ACCEPTANCE_THRESHOLDS.minimumConfidenceSliceCases
+    && thresholds.minimumHighConfidenceImprovement === BACKTEST_ACCEPTANCE_THRESHOLDS.minimumHighConfidenceImprovement;
+}
+
+function validBacktestAcceptance(value: BacktestAcceptance): boolean {
+  const { thresholds, metrics } = value;
+  if (value.schemaVersion !== 1 || !value.transactionArtifactSha256
+    || !Number.isFinite(Date.parse(value.approvedAt)) || !/^\d{4}-\d{2}-\d{2}$/.test(value.asOf)
+    || !thresholds || !metrics) return false;
+  if (!finiteRatio(thresholds.medianApeMax) || !finiteRatio(thresholds.p75ApeMax)
+    || !Number.isInteger(thresholds.minimumConfidenceSliceCases) || thresholds.minimumConfidenceSliceCases <= 0
+    || !finiteRatio(thresholds.minimumHighConfidenceImprovement)
+    || !approvedBacktestThresholds(thresholds)) return false;
+  if (!finiteRatio(metrics.estimateCoverage) || metrics.estimateCoverage > 1
+    || !finiteRatio(metrics.medianApe) || !finiteRatio(metrics.p75Ape)
+    || !Number.isInteger(metrics.highConfidenceEstimatedCount)
+    || !Number.isInteger(metrics.mediumConfidenceEstimatedCount)
+    || !finiteRatio(metrics.highConfidenceMedianApe)
+    || !finiteRatio(metrics.mediumConfidenceMedianApe)) return false;
+  return metrics.medianApe <= thresholds.medianApeMax
+    && metrics.p75Ape <= thresholds.p75ApeMax
+    && metrics.highConfidenceEstimatedCount >= thresholds.minimumConfidenceSliceCases
+    && metrics.mediumConfidenceEstimatedCount >= thresholds.minimumConfidenceSliceCases
+    && metrics.highConfidenceMedianApe + thresholds.minimumHighConfidenceImprovement
+      <= metrics.mediumConfidenceMedianApe + Number.EPSILON;
+}
+
+export function readBacktestAcceptance(root: string): BacktestAcceptance | null {
+  const value = readJson<BacktestAcceptance>(backtestAcceptancePath(root));
+  return value && validBacktestAcceptance(value) ? value : null;
+}
+
+/** Atomically replaces the aggregate-only local acceptance artifact. */
+export async function writeBacktestAcceptance(root: string, acceptance: BacktestAcceptance): Promise<void> {
+  if (!approvedBacktestThresholds(acceptance.thresholds)) {
+    throw new Error('Backtest acceptance must use the approved quality thresholds');
+  }
+  if (!validBacktestAcceptance(acceptance)) throw new Error('Refusing to persist a non-passing backtest acceptance');
+  const target = backtestAcceptancePath(root);
+  const temporary = `${target}.tmp-${randomUUID()}`;
+  await writeStableJson(temporary, acceptance);
+  await fsp.rename(temporary, target);
+}
+
+export function marketDataBacktestAccepted(bundle: MarketDataBundle): boolean {
+  const acceptance = bundle.backtestAcceptance;
+  return acceptance !== undefined
+    && validBacktestAcceptance(acceptance)
+    && acceptance.transactionArtifactSha256 === transactionArtifactChecksum(bundle.manifest);
+}
+
+function attachMatchingBacktestAcceptance(root: string, bundle: MarketDataBundle): MarketDataBundle {
+  const acceptance = readBacktestAcceptance(root);
+  if (!acceptance) return bundle;
+  const candidate = { ...bundle, backtestAcceptance: acceptance };
+  return marketDataBacktestAccepted(candidate) ? candidate : bundle;
 }
 
 /** Computes source freshness from recorded successful checks, never from failed refresh attempts. */
@@ -172,7 +259,7 @@ async function validateBuild(root: string, options: PublishOptions): Promise<Mar
 
 /** Loads only a fully validated active build; malformed partial data is never exposed. */
 export async function loadMarketData(root: string, options: PublishOptions = {}): Promise<MarketDataBundle | null> {
-  try { return await validateBuild(root, options); } catch { return null; }
+  try { return attachMatchingBacktestAcceptance(root, await validateBuild(root, options)); } catch { return null; }
 }
 
 /** Replaces the complete active directory only after independently validating a sibling staging build. */
@@ -201,5 +288,5 @@ export async function publishStagedBuild(activeRoot: string, stageRoot: string, 
     // leave a recoverable backup, but must not make the new active build look failed.
     try { await fsp.rm(backup, { recursive: true, force: false }); } catch { /* recoverable backup retained */ }
   }
-  return bundle;
+  return attachMatchingBacktestAcceptance(activeRoot, bundle);
 }

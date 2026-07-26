@@ -4,8 +4,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { MARKET_SCHEMA_VERSION } from './config.ts';
-import { loadMarketData, marketDataFreshness, publishStagedBuild, readManifest, sha256File, stableJson } from './store.ts';
-import type { DoorplateIndex, MarketDataManifest, TransactionIndex } from './types.ts';
+import {
+  loadMarketData,
+  marketDataFreshness,
+  publishStagedBuild,
+  readManifest,
+  sha256File,
+  stableJson,
+  transactionArtifactChecksum,
+  writeBacktestAcceptance,
+} from './store.ts';
+import type { BacktestAcceptance, DoorplateIndex, MarketDataManifest, TransactionIndex } from './types.ts';
 
 function manifest(buildId: string, recordCount = 1): MarketDataManifest {
   return {
@@ -101,4 +110,53 @@ test('freshness marks independently stale source checks without changing the act
 
 test('stable JSON uses code-unit key order for Han keys on every runtime locale', () => {
   assert.equal(stableJson({ 中: 2, 一: 1 }), '{"一":1,"中":2}');
+});
+
+test('backtest acceptance loads only for the active transaction artifact checksum', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-'));
+  const root = join(parent, 'taipei');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(root, 'accepted-build');
+  const checksum = transactionArtifactChecksum(readManifest(root)!);
+  assert.ok(checksum);
+
+  const acceptance: BacktestAcceptance = {
+    schemaVersion: 1,
+    transactionArtifactSha256: checksum,
+    approvedAt: '2026-07-26T01:00:00.000Z',
+    asOf: '2026-07-25',
+    thresholds: {
+      medianApeMax: 0.12,
+      p75ApeMax: 0.20,
+      minimumConfidenceSliceCases: 20,
+      minimumHighConfidenceImprovement: 0.01,
+    },
+    metrics: {
+      estimateCoverage: 0.8,
+      medianApe: 0.08,
+      p75Ape: 0.16,
+      highConfidenceEstimatedCount: 20,
+      highConfidenceMedianApe: 0.07,
+      mediumConfidenceEstimatedCount: 20,
+      mediumConfidenceMedianApe: 0.09,
+    },
+  };
+  await writeBacktestAcceptance(root, acceptance);
+  assert.equal(
+    (await loadMarketData(root, { minDoorplates: 1, minTransactions: 0 }))?.backtestAcceptance?.transactionArtifactSha256,
+    checksum,
+  );
+
+  await assert.rejects(
+    () => writeBacktestAcceptance(root, {
+      ...acceptance,
+      thresholds: { ...acceptance.thresholds, medianApeMax: 0.50 },
+    }),
+    /approved quality thresholds/,
+  );
+  await writeBacktestAcceptance(root, { ...acceptance, transactionArtifactSha256: 'different-dataset' });
+  assert.equal(
+    (await loadMarketData(root, { minDoorplates: 1, minTransactions: 0 }))?.backtestAcceptance,
+    undefined,
+  );
 });

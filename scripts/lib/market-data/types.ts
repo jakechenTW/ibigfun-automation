@@ -181,10 +181,35 @@ export interface MarketDataManifest {
   }>;
 }
 
+/** Aggregate-only proof that one exact transaction index passed the quality gate. */
+export interface BacktestAcceptance {
+  schemaVersion: 1;
+  transactionArtifactSha256: string;
+  approvedAt: string;
+  asOf: string;
+  thresholds: {
+    medianApeMax: number;
+    p75ApeMax: number;
+    minimumConfidenceSliceCases: number;
+    minimumHighConfidenceImprovement: number;
+  };
+  metrics: {
+    estimateCoverage: number;
+    medianApe: number;
+    p75Ape: number;
+    highConfidenceEstimatedCount: number;
+    highConfidenceMedianApe: number;
+    mediumConfidenceEstimatedCount: number;
+    mediumConfidenceMedianApe: number;
+  };
+}
+
 export interface MarketDataBundle {
   manifest: MarketDataManifest;
   doorplates: DoorplateIndex;
   transactions: TransactionIndex;
+  /** Present only when a passing artifact matches transactions-index.json exactly. */
+  backtestAcceptance?: BacktestAcceptance;
   refresh?: {
     status: 'updated' | 'not-modified' | 'last-known-good';
     failure?: string;

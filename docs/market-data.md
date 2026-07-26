@@ -41,10 +41,11 @@ state/market-data/taipei/
     doorplates.csv
     transactions/<season>.zip
     transactions/<season>.csv
+state/market-data/taipei-backtest-acceptance.json
 ```
 
 `state/` must never be committed. It contains raw public source files,
-derived indexes, manifests, checksums, and any local backtest captures; it can
+derived indexes, manifests, checksums, aggregate backtest acceptance, and any local backtest captures; it can
 also contain listing evidence elsewhere under `state/runs/`. Do not paste raw
 transactions or a listing's full comparable set into notifications.
 
@@ -55,7 +56,7 @@ npm run market-data -- update --city taipei
 ```
 
 The command prints the published build ID, source check timestamps, publication
-metadata when available, record counts, and freshness. A production build is accepted only after index,
+metadata when available, record counts, and freshness. A production build is published only after index,
 coordinate, checksum, and minimum-count validation. The active directory is
 replaced atomically only after the staging directory validates.
 
@@ -120,7 +121,9 @@ node --input-type=module -e 'import { readFileSync } from "node:fs"; const [file
 ```
 
 Use `askingPremiumConservative` (the P25-based premium) for the investment
-gate. `review`, `unavailable`, low confidence, stale sources, unreliable
+gate. A transaction index without a matching passing backtest acceptance is
+forced to `review` even when its comparable evidence would otherwise be
+`reliable`. `review`, `unavailable`, low confidence, stale sources, unreliable
 coordinates, missing type provenance, and inseparable listing parking do not
 qualify for automatic recommendation. Limited external review is permitted
 only under the reporting rules; it must not overwrite `marketEstimate` and must
@@ -146,9 +149,26 @@ confidence. Interpret them as follows:
 - `cases` is local audit evidence, including the strictly earlier comparable dates used for each held-out sale.
 
 The quality gate targets median APE at or below 12% and P75 APE at or below
-20%. Without `--no-gate`, a complete report that exceeds either target exits
-non-zero. `--no-gate` is for recording or diagnosing a baseline; it disables
-that exit gate and does not make failed quality acceptable:
+20%. It also requires at least 20 scored high-confidence cases and 20 scored
+medium-confidence cases. With those sufficient slices, high-confidence median
+APE must be at least one absolute percentage point lower than medium-confidence
+median APE. This fixed margin prevents tiny floating-point differences from
+being treated as measurable confidence calibration.
+
+A gated run is incomplete—and exits non-zero—when overall APE metrics are
+missing or either confidence slice lacks its 20 scored cases. A completed run
+also exits non-zero when any accuracy/calibration target fails. Only a completed
+passing gated run atomically writes
+`state/market-data/taipei-backtest-acceptance.json`. That aggregate-only artifact
+records the exact `transactions-index.json` SHA-256, thresholds, slice counts,
+and summary metrics. Enrichment treats estimates as review-only until this
+artifact exists and matches the active transaction checksum. Publishing a
+different transaction index therefore invalidates prior acceptance
+automatically.
+
+`--no-gate` is for recording or diagnosing a baseline; it returns diagnostic
+metrics without writing or updating acceptance and does not make failed or
+incomplete quality acceptable:
 
 ```bash
 mkdir -p state/market-data/taipei/backtests
@@ -156,12 +176,13 @@ npm run market-data -- backtest --city taipei --as-of 2026-07-26 --no-gate \
   > state/market-data/taipei/backtests/2026-07-26.json
 ```
 
-The CLI prints the full report to standard output; it does not create a
-backtest file by itself, so redirect it as above when preserving a local
-baseline. Keep the capture under git-ignored `state/`, summarize only aggregate
-metrics in handoff, and never commit transaction rows. If targets are missed or
-high-confidence cases do not outperform weaker evidence, keep results in review
-and recalibrate selection/weight constants with tests and backtest evidence.
+The CLI prints the full report to standard output. Redirect it as above when
+preserving per-case diagnostic evidence; the automatically managed acceptance
+file remains aggregate-only and separate. Keep both under git-ignored `state/`,
+summarize only aggregate metrics in handoff, and never commit transaction rows.
+If targets are missed or high-confidence cases do not outperform weaker
+evidence, keep results in review and recalibrate selection/weight constants
+with tests and backtest evidence.
 
 ## Troubleshooting
 

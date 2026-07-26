@@ -1,6 +1,8 @@
 import { estimateMarket } from './estimator.ts';
+import { BACKTEST_ACCEPTANCE_THRESHOLDS } from './config.ts';
 import { weightedQuantile } from './statistics.ts';
 import type {
+  BacktestAcceptance,
   BuildingType,
   EstimateConfidence,
   EstimateStatus,
@@ -44,8 +46,20 @@ export interface BacktestReport {
   overall: BacktestMetrics;
   byBuildingType: Record<BuildingType, BacktestMetrics>;
   byConfidence: Record<EstimateConfidence, BacktestMetrics>;
+  work: {
+    historicalIndexBuilds: number;
+    historicalInsertions: number;
+  };
   cases: BacktestCase[];
 }
+
+export interface BacktestGateResult {
+  passed: boolean;
+  complete: boolean;
+  reasons: string[];
+}
+
+export const BACKTEST_GATE = BACKTEST_ACCEPTANCE_THRESHOLDS;
 
 function parseIsoDate(value: string): Date | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
@@ -106,20 +120,19 @@ export function backtestSubjectFromTransaction(transaction: MarketTransaction): 
   };
 }
 
-function allTransactions(index: TransactionIndex): MarketTransaction[] {
-  const byId = new Map<string, MarketTransaction>();
-  for (const transactions of Object.values(index.cells)) {
-    for (const transaction of transactions) byId.set(transaction.id, transaction);
-  }
-  return [...byId.values()].sort((left, right) => left.transactionDate.localeCompare(right.transactionDate) || left.id.localeCompare(right.id));
+interface IndexedTransaction {
+  cellKey: string;
+  transaction: MarketTransaction;
 }
 
-function historicalIndex(index: TransactionIndex, subject: MarketTransaction): TransactionIndex {
-  const subjectDate = subject.transactionDate;
-  const cells = Object.fromEntries(Object.entries(index.cells).map(([key, transactions]) => [key,
-    transactions.filter((candidate) => candidate.id !== subject.id && candidate.transactionDate < subjectDate),
-  ]).filter(([, transactions]) => transactions.length > 0));
-  return { ...index, cells };
+function allTransactions(index: TransactionIndex): IndexedTransaction[] {
+  const byId = new Map<string, IndexedTransaction>();
+  for (const [cellKey, transactions] of Object.entries(index.cells)) {
+    for (const transaction of transactions) byId.set(transaction.id, { cellKey, transaction });
+  }
+  return [...byId.values()].sort((left, right) =>
+    left.transaction.transactionDate.localeCompare(right.transaction.transactionDate)
+      || left.transaction.id.localeCompare(right.transaction.id));
 }
 
 const BACKTEST_FRESHNESS: SourceFreshness = {
@@ -143,20 +156,94 @@ function metrics(cases: readonly BacktestCase[]): BacktestMetrics {
   };
 }
 
+/** Deterministic acceptance policy shared by the CLI and persisted artifact. */
+export function evaluateBacktestGate(report: BacktestReport): BacktestGateResult {
+  const reasons: string[] = [];
+  const overall = report.overall;
+  const high = report.byConfidence.high;
+  const medium = report.byConfidence.medium;
+  if (overall.caseCount === 0 || overall.estimatedCount === 0 || overall.medianApe === null || overall.p75Ape === null) {
+    reasons.push('incomplete-overall');
+  }
+  if (high.estimatedCount < BACKTEST_GATE.minimumConfidenceSliceCases || high.medianApe === null) {
+    reasons.push('insufficient-high-confidence-cases');
+  }
+  if (medium.estimatedCount < BACKTEST_GATE.minimumConfidenceSliceCases || medium.medianApe === null) {
+    reasons.push('insufficient-medium-confidence-cases');
+  }
+  if (overall.medianApe !== null && overall.medianApe > BACKTEST_GATE.medianApeMax) {
+    reasons.push('median-ape-target-missed');
+  }
+  if (overall.p75Ape !== null && overall.p75Ape > BACKTEST_GATE.p75ApeMax) {
+    reasons.push('p75-ape-target-missed');
+  }
+  if (high.medianApe !== null && medium.medianApe !== null
+    && high.medianApe + BACKTEST_GATE.minimumHighConfidenceImprovement > medium.medianApe + Number.EPSILON) {
+    reasons.push('high-confidence-not-measurably-better');
+  }
+  const complete = !reasons.some((reason) =>
+    reason === 'incomplete-overall'
+      || reason === 'insufficient-high-confidence-cases'
+      || reason === 'insufficient-medium-confidence-cases');
+  return { passed: complete && reasons.length === 0, complete, reasons };
+}
+
+export function backtestAcceptance(
+  report: BacktestReport,
+  transactionArtifactSha256: string,
+  approvedAt: string,
+): BacktestAcceptance {
+  const gate = evaluateBacktestGate(report);
+  const high = report.byConfidence.high;
+  const medium = report.byConfidence.medium;
+  if (!gate.passed || report.overall.medianApe === null || report.overall.p75Ape === null
+    || high.medianApe === null || medium.medianApe === null) {
+    throw new Error(`Backtest does not pass acceptance: ${gate.reasons.join(', ')}`);
+  }
+  return {
+    schemaVersion: 1,
+    transactionArtifactSha256,
+    approvedAt,
+    asOf: report.asOf,
+    thresholds: { ...BACKTEST_GATE },
+    metrics: {
+      estimateCoverage: report.overall.estimateCoverage,
+      medianApe: report.overall.medianApe,
+      p75Ape: report.overall.p75Ape,
+      highConfidenceEstimatedCount: high.estimatedCount,
+      highConfidenceMedianApe: high.medianApe,
+      mediumConfidenceEstimatedCount: medium.estimatedCount,
+      mediumConfidenceMedianApe: medium.medianApe,
+    },
+  };
+}
+
 /**
  * Evaluates each historic sale as a held-out subject. Every input index is read
- * only; each estimate receives a fresh index containing strictly earlier sales.
+ * only. One incrementally growing index contains strictly earlier-date sales.
  */
 export function backtestTransactions(index: TransactionIndex, options: BacktestOptions): BacktestReport {
   const asOf = parseIsoDate(options.asOf);
   if (!asOf) throw new RangeError('Backtest requires a valid as-of date (YYYY-MM-DD)');
 
-  const cases = allTransactions(index)
-    .filter((transaction) => isEligibleSubject(transaction, asOf))
-    .map((transaction): BacktestCase => {
+  const entries = allTransactions(index).filter(({ transaction }) => {
+    const date = transactionDate(transaction);
+    return date !== null && date <= asOf;
+  });
+  const historicalCells: TransactionIndex['cells'] = {};
+  const historicalIndex: TransactionIndex = { ...index, cells: historicalCells };
+  const cases: BacktestCase[] = [];
+  let historicalInsertions = 0;
+  for (let start = 0; start < entries.length;) {
+    let end = start + 1;
+    const subjectDate = entries[start]!.transaction.transactionDate;
+    while (end < entries.length && entries[end]!.transaction.transactionDate === subjectDate) end += 1;
+
+    for (const { transaction } of entries.slice(start, end)) {
+      if (!isEligibleSubject(transaction, asOf)) continue;
       const estimate = estimateMarket(
         backtestSubjectFromTransaction(transaction),
-        historicalIndex(index, transaction),
+        historicalIndex,
         BACKTEST_FRESHNESS,
         transaction.transactionDate,
         { allowMissingAskingUnitPrice: true },
@@ -166,7 +253,7 @@ export function backtestTransactions(index: TransactionIndex, options: BacktestO
       const p75 = estimate.marketUnitPriceP75;
       const actual = transaction.buildingUnitPriceWan;
       const canScore = median !== null && p25 !== null && p75 !== null;
-      return {
+      cases.push({
         subjectDate: transaction.transactionDate,
         buildingType: transaction.buildingType,
         confidence: estimate.confidence,
@@ -179,8 +266,14 @@ export function backtestTransactions(index: TransactionIndex, options: BacktestO
         bias: canScore ? (median - actual) / actual : null,
         intervalHit: canScore ? actual >= p25 && actual <= p75 : null,
         comparableDates: estimate.comparables.map((candidate) => candidate.transaction.transactionDate).sort(),
-      };
-    });
+      });
+    }
+    for (const { cellKey, transaction } of entries.slice(start, end)) {
+      (historicalCells[cellKey] ??= []).push(transaction);
+      historicalInsertions += 1;
+    }
+    start = end;
+  }
 
   return {
     asOf: options.asOf,
@@ -195,6 +288,7 @@ export function backtestTransactions(index: TransactionIndex, options: BacktestO
       medium: metrics(cases.filter((backtestCase) => backtestCase.confidence === 'medium')),
       low: metrics(cases.filter((backtestCase) => backtestCase.confidence === 'low')),
     },
+    work: { historicalIndexBuilds: 1, historicalInsertions },
     cases,
   };
 }

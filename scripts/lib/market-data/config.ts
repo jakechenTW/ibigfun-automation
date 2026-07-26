@@ -7,6 +7,12 @@ export const MEDIUM_IQR_RATIO = 0.25;
 export const GRID_CELL_DEGREES = 0.005;
 export const MIN_PRODUCTION_DOORPLATES = 100_000;
 export const MIN_PRODUCTION_TRANSACTIONS = 1_000;
+export const BACKTEST_ACCEPTANCE_THRESHOLDS = {
+  medianApeMax: 0.12,
+  p75ApeMax: 0.20,
+  minimumConfidenceSliceCases: 20,
+  minimumHighConfidenceImprovement: 0.01,
+} as const;
 
 export const SEARCH_STAGES = [
   { radiusM: 300, months: 12, areaTolerance: 0.20, allowAdjacentFloor: false },

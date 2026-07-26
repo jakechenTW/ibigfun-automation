@@ -15,7 +15,7 @@ import { estimateMarket } from './market-data/estimator.ts';
 import { locateAddress, nearestDoorplate } from './market-data/doorplates.ts';
 import { normalizeTaiwanAddress } from './market-data/address.ts';
 import { floorGroup } from './market-data/property.ts';
-import { marketDataFreshness } from './market-data/store.ts';
+import { marketDataBacktestAccepted, marketDataFreshness } from './market-data/store.ts';
 import { ensureTaipeiMarketData } from './market-data/update.ts';
 import type {
   MarketDataBundle,
@@ -164,6 +164,15 @@ function listingOwnership(title: string): { ownership: 'freehold' | 'non-freehol
   return { ownership: 'freehold', evidence: 'profile-default-freehold' };
 }
 
+function enforceBacktestAcceptance(estimate: MarketEstimate, bundle: MarketDataBundle): MarketEstimate {
+  if (estimate.status === 'unavailable' || marketDataBacktestAccepted(bundle)) return estimate;
+  return {
+    ...estimate,
+    status: 'review',
+    unavailableReasons: [...new Set([...estimate.unavailableReasons, 'market-backtest-not-approved'])],
+  };
+}
+
 function integerField(value: string | null): number | null {
   if (!value || !/^\d+$/u.test(value.trim())) return null;
   const parsed = Number(value);
@@ -225,7 +234,7 @@ export function attachMarketEstimates(
 
     return {
       ...listing,
-      marketEstimate: attachLocationEvidence(estimateMarket({
+      marketEstimate: attachLocationEvidence(enforceBacktestAcceptance(estimateMarket({
         listingId: listing.id,
         coordinate: listing.coordinate,
         district: listing.district ?? '',
@@ -239,7 +248,7 @@ export function attachMarketEstimates(
         floorGroup: subjectFloorGroup,
         ageYears: listing.ageNum,
         parkingSeparable: true,
-      }, bundle.transactions, freshness, asOf), locationEvidence),
+      }, bundle.transactions, freshness, asOf), bundle), locationEvidence),
     };
   });
 }

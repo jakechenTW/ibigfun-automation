@@ -3,12 +3,42 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { attachMarketEstimates } from '../steps.ts';
 import type { PreMarketEnrichedListing } from '../types.ts';
-import type { MarketDataBundle } from './types.ts';
+import type { BacktestAcceptance, MarketDataBundle } from './types.ts';
 
 const AS_OF = '2026-07-25';
 const bundle = JSON.parse(
   readFileSync(new URL('./fixtures/enriched-market-index.json', import.meta.url), 'utf8'),
 ) as MarketDataBundle;
+
+function bundleWithAcceptance(transactionArtifactSha256 = 'fixture-transactions-index'): MarketDataBundle {
+  const accepted = structuredClone(bundle);
+  accepted.manifest.artifacts['transactions-index.json'] = {
+    sha256: 'fixture-transactions-index',
+    bytes: 1,
+  };
+  accepted.backtestAcceptance = {
+    schemaVersion: 1,
+    transactionArtifactSha256,
+    approvedAt: '2026-07-25T01:00:00.000Z',
+    asOf: AS_OF,
+    thresholds: {
+      medianApeMax: 0.12,
+      p75ApeMax: 0.20,
+      minimumConfidenceSliceCases: 20,
+      minimumHighConfidenceImprovement: 0.01,
+    },
+    metrics: {
+      estimateCoverage: 0.8,
+      medianApe: 0.08,
+      p75Ape: 0.16,
+      highConfidenceEstimatedCount: 20,
+      highConfidenceMedianApe: 0.07,
+      mediumConfidenceEstimatedCount: 20,
+      mediumConfidenceMedianApe: 0.09,
+    },
+  } satisfies BacktestAcceptance;
+  return accepted;
+}
 
 function listing(overrides: Partial<PreMarketEnrichedListing> = {}): PreMarketEnrichedListing {
   return {
@@ -54,9 +84,14 @@ function listing(overrides: Partial<PreMarketEnrichedListing> = {}): PreMarketEn
   };
 }
 
-test('matching listing GPS and exact address retain a reliable market estimate', () => {
-  const [result] = attachMarketEstimates([listing()], bundle, AS_OF);
+test('production estimate stays review before approval and becomes reliable only for matching acceptance', () => {
+  const [unapproved] = attachMarketEstimates([listing()], bundle, AS_OF);
+  const [mismatched] = attachMarketEstimates([listing()], bundleWithAcceptance('different-dataset'), AS_OF);
+  const [result] = attachMarketEstimates([listing()], bundleWithAcceptance(), AS_OF);
 
+  assert.equal(unapproved.marketEstimate.status, 'review');
+  assert.ok(unapproved.marketEstimate.unavailableReasons.includes('market-backtest-not-approved'));
+  assert.equal(mismatched.marketEstimate.status, 'review');
   assert.equal(result.marketEstimate.status, 'reliable');
   assert.equal(result.marketEstimate.comparables.length, 5);
   assert.equal(result.marketEstimate.selectedStage, 1);
