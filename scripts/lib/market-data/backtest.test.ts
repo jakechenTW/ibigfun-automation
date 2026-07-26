@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { gridKey } from './grid.ts';
 import {
+  backtestAcceptance,
   backtestSubjectFromTransaction,
   backtestTransactions,
   evaluateBacktestGate,
@@ -141,6 +142,27 @@ test('incomplete backtests fail the gate unless explicitly diagnostic', () => {
   assert.equal(backtestExitCode(incomplete, true), 0);
 });
 
+test('historical cutoff cannot approve a newer complete active transaction index', () => {
+  const historical = completeGateReport({}, '2025-04-01');
+
+  assert.equal(historical.latestEligibleTransactionDate, '2025-12-01');
+  assert.ok(evaluateBacktestGate(historical).reasons.includes('incomplete-active-transaction-coverage'));
+  assert.equal(backtestExitCode(historical, false), 1);
+  assert.equal(backtestExitCode(historical, true), 0);
+  assert.equal(shouldPersistBacktestAcceptance(historical, false), false);
+  assert.equal(shouldPersistBacktestAcceptance(historical, true), false);
+});
+
+test('gate cannot approve a report without an eligible transaction coverage boundary', () => {
+  const missingBoundary = {
+    ...completeGateReport(),
+    latestEligibleTransactionDate: null,
+  };
+
+  assert.ok(evaluateBacktestGate(missingBoundary).reasons.includes('incomplete-active-transaction-coverage'));
+  assert.equal(shouldPersistBacktestAcceptance(missingBoundary, false), false);
+});
+
 test('acceptance requires sufficient slices and high confidence to outperform medium by one point', () => {
   const insufficient = completeGateReport({
     high: { estimatedCount: 19, medianApe: 0.07 },
@@ -160,6 +182,15 @@ test('acceptance requires sufficient slices and high confidence to outperform me
   assert.equal(shouldPersistBacktestAcceptance(passing, false), true);
   assert.equal(shouldPersistBacktestAcceptance(passing, true), false);
   assert.equal(shouldPersistBacktestAcceptance(insufficient, false), false);
+});
+
+test('passing acceptance records policy identity and complete transaction coverage', () => {
+  const passing = completeGateReport({}, '2025-12-01');
+  const acceptance = backtestAcceptance(passing, 'transactions-checksum', '2026-07-26T01:00:00.000Z');
+
+  assert.equal(acceptance.estimatorPolicyVersion, 1);
+  assert.equal(acceptance.evaluatedThrough, '2025-12-01');
+  assert.equal(acceptance.latestEligibleTransactionDate, '2025-12-01');
 });
 
 test('held-out history is built incrementally with each source transaction inserted once', () => {
@@ -182,8 +213,8 @@ function completeGateReport(overrides: {
   overall?: Partial<BacktestReport['overall']>;
   high?: Partial<BacktestReport['byConfidence']['high']>;
   medium?: Partial<BacktestReport['byConfidence']['medium']>;
-} = {}): BacktestReport {
-  const report = backtestTransactions(indexWithFutureLeak, { asOf: '2026-07-25' });
+} = {}, asOf = '2026-07-25'): BacktestReport {
+  const report = backtestTransactions(indexWithFutureLeak, { asOf });
   const metric = (values: Partial<BacktestReport['overall']>): BacktestReport['overall'] => ({
     caseCount: 25,
     estimatedCount: 20,

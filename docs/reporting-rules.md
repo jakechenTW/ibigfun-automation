@@ -77,8 +77,11 @@ exclusion.
 通知只顯示這個摘要；完整可比成交及其排除理由留在 git-ignored 的 `enriched.json`，不可整份貼進通知。
 
 - 投資分桶的開價溢價以 **P25 保守行情** 計算/覆核；中位數溢價只能用於說明，不能單獨使物件進入推薦。
-- 只有當本機 backtest acceptance 的 `transactions-index.json` checksum 與目前資料完全相符時，估值才可為
-  `reliable`；缺少 acceptance、backtest 未完成/未達標或資料集已變更時一律降為 `review`，不得自動推薦。
+- 只有當本機 backtest acceptance 的 `transactions-index.json` checksum、`ESTIMATOR_POLICY_VERSION`、
+  以及完整有效交易索引的最新日期覆蓋均與目前執行環境完全相符時，估值才可為 `reliable`；缺少
+  acceptance、backtest 未完成/未達標、歷史 `--as-of` 未涵蓋完整索引、估值政策已變更或資料集已更新時
+  一律降為 `review`，不得自動推薦。任何 selector、weight、outlier、confidence、status 或 backtest
+  語意變更都必須提高 `ESTIMATOR_POLICY_VERSION` 並重新通過完整 backtest。
 - `status: reliable` 且兩個官方來源均未過期，才可能進入推薦；`low` 信心、`review`、`unavailable`，或只靠中位數才符合門檻者，最多是待人工覆核的候選。
 - 車位價格/面積無法與建物分離（含 `listing-parking-not-separable`）時，不得自動推薦。
 - 任一官方來源過期時，受影響物件不得推薦，快速摘要必須寫明資料偏舊，整則通知一律使用 `warn`。

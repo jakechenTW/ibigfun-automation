@@ -184,9 +184,12 @@ export interface MarketDataManifest {
 /** Aggregate-only proof that one exact transaction index passed the quality gate. */
 export interface BacktestAcceptance {
   schemaVersion: 1;
+  estimatorPolicyVersion: number;
   transactionArtifactSha256: string;
   approvedAt: string;
   asOf: string;
+  evaluatedThrough: string;
+  latestEligibleTransactionDate: string;
   thresholds: {
     medianApeMax: number;
     p75ApeMax: number;

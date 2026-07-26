@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { resolve, sep } from 'node:path';
 import {
   DOORPLATE_STALE_DAYS,
+  ESTIMATOR_POLICY_VERSION,
   MARKET_BACKTEST_DIAGNOSTIC_ROOT,
   MARKET_DATA_ROOT,
   SEARCH_STAGES,
@@ -29,6 +30,10 @@ test('approved weights and stale windows are centralized', () => {
   assert.equal(WEIGHTS.adjacentFloor, 0.7);
   assert.equal(TRANSACTION_STALE_DAYS, 30);
   assert.equal(DOORPLATE_STALE_DAYS, 60);
+});
+
+test('estimator acceptance uses an intentional policy compatibility version', () => {
+  assert.equal(ESTIMATOR_POLICY_VERSION, 1);
 });
 
 test('backtest diagnostics live outside the checksum-closed active build', () => {

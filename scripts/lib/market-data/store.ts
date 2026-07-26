@@ -4,11 +4,14 @@ import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import {
   BACKTEST_ACCEPTANCE_THRESHOLDS,
+  DOORPLATE_STALE_DAYS,
+  ESTIMATOR_POLICY_VERSION,
   MARKET_SCHEMA_VERSION,
   MIN_PRODUCTION_DOORPLATES,
   MIN_PRODUCTION_TRANSACTIONS,
+  TRANSACTION_STALE_DAYS,
 } from './config.ts';
-import { DOORPLATE_STALE_DAYS, TRANSACTION_STALE_DAYS } from './config.ts';
+import { latestEligibleTransactionDate } from './backtest.ts';
 import type {
   BacktestAcceptance,
   DoorplateIndex,
@@ -88,8 +91,14 @@ function approvedBacktestThresholds(thresholds: BacktestAcceptance['thresholds']
 
 function validBacktestAcceptance(value: BacktestAcceptance): boolean {
   const { thresholds, metrics } = value;
-  if (value.schemaVersion !== 1 || !value.transactionArtifactSha256
-    || !Number.isFinite(Date.parse(value.approvedAt)) || !/^\d{4}-\d{2}-\d{2}$/.test(value.asOf)
+  if (value.schemaVersion !== 1 || value.estimatorPolicyVersion !== ESTIMATOR_POLICY_VERSION
+    || !value.transactionArtifactSha256
+    || !Number.isFinite(Date.parse(value.approvedAt))
+    || !/^\d{4}-\d{2}-\d{2}$/.test(value.asOf)
+    || !/^\d{4}-\d{2}-\d{2}$/.test(value.evaluatedThrough)
+    || !/^\d{4}-\d{2}-\d{2}$/.test(value.latestEligibleTransactionDate)
+    || value.asOf !== value.evaluatedThrough
+    || value.evaluatedThrough < value.latestEligibleTransactionDate
     || !thresholds || !metrics) return false;
   if (!finiteRatio(thresholds.medianApeMax) || !finiteRatio(thresholds.p75ApeMax)
     || !Number.isInteger(thresholds.minimumConfidenceSliceCases) || thresholds.minimumConfidenceSliceCases <= 0
@@ -116,8 +125,17 @@ export function readBacktestAcceptance(root: string): BacktestAcceptance | null 
 
 /** Atomically replaces the aggregate-only local acceptance artifact. */
 export async function writeBacktestAcceptance(root: string, acceptance: BacktestAcceptance): Promise<void> {
+  if (acceptance.estimatorPolicyVersion !== ESTIMATOR_POLICY_VERSION) {
+    throw new Error('Backtest acceptance estimator policy does not match the runtime policy');
+  }
   if (!approvedBacktestThresholds(acceptance.thresholds)) {
     throw new Error('Backtest acceptance must use the approved quality thresholds');
+  }
+  const transactions = readJson<TransactionIndex>(path.join(root, 'transactions-index.json'));
+  const latest = transactions && latestEligibleTransactionDate(transactions);
+  if (!latest || acceptance.latestEligibleTransactionDate !== latest
+    || acceptance.evaluatedThrough < latest) {
+    throw new Error('Backtest acceptance must cover the complete active transaction index');
   }
   if (!validBacktestAcceptance(acceptance)) throw new Error('Refusing to persist a non-passing backtest acceptance');
   const target = backtestAcceptancePath(root);
@@ -128,9 +146,13 @@ export async function writeBacktestAcceptance(root: string, acceptance: Backtest
 
 export function marketDataBacktestAccepted(bundle: MarketDataBundle): boolean {
   const acceptance = bundle.backtestAcceptance;
+  const latest = latestEligibleTransactionDate(bundle.transactions);
   return acceptance !== undefined
     && validBacktestAcceptance(acceptance)
-    && acceptance.transactionArtifactSha256 === transactionArtifactChecksum(bundle.manifest);
+    && acceptance.transactionArtifactSha256 === transactionArtifactChecksum(bundle.manifest)
+    && latest !== null
+    && acceptance.latestEligibleTransactionDate === latest
+    && acceptance.evaluatedThrough >= latest;
 }
 
 function attachMatchingBacktestAcceptance(root: string, bundle: MarketDataBundle): MarketDataBundle {

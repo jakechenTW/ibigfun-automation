@@ -102,8 +102,12 @@ evaluation, and writing the report.
 - `npm run market-data -- backtest --city taipei [--as-of YYYY-MM-DD] [--no-gate]`
   — evaluates the active local build without refreshing it. It prints aggregate,
   non-identifying accuracy and interval metrics; it needs no credentials. A
-  completed passing gated run writes the checksum-keyed local acceptance needed
-  for `reliable` estimates; `--no-gate` is diagnostic and never approves.
+  completed passing gated run covering the complete eligible transaction index
+  writes the checksum-, policy-, and date-keyed local acceptance needed for
+  `reliable` estimates; a historical `--as-of` cannot approve a newer index and
+  `--no-gate` is diagnostic and never approves. Bump
+  `ESTIMATOR_POLICY_VERSION` whenever selector, weighting, outlier, confidence,
+  status, or backtest semantics change.
   Preserve optional diagnostic output under
   `state/market-data/backtests/taipei/`, never inside the checksum-closed active
   build.
@@ -211,7 +215,8 @@ ai-notify --tool <codex|claude> --status <ok|warn|fail> \
   source files, indexes, manifest/checksums, and no credentials. It is
   checksum-closed, so undeclared files invalidate it. Its sibling
   `state/market-data/taipei-backtest-acceptance.json` contains only aggregate
-  acceptance metrics keyed to the active transaction-index checksum. Optional
+  acceptance metrics keyed to the active transaction-index checksum, estimator
+  policy version, and complete eligible transaction-date coverage. Optional
   per-case diagnostic reports belong under
   `state/market-data/backtests/taipei/`, outside the active build.
 - `prompts/daily-run.md`: the committed headless worker prompt for the daily

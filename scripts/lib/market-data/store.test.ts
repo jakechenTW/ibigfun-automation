@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { MARKET_SCHEMA_VERSION } from './config.ts';
+import { ESTIMATOR_POLICY_VERSION, MARKET_SCHEMA_VERSION } from './config.ts';
 import {
   loadMarketData,
   marketDataFreshness,
@@ -34,7 +34,42 @@ const doorplates: DoorplateIndex = {
   byCanonicalAddress: {}, byRoad: {},
   cells: { '5000:24300': [{ canonicalAddress: '台北市中正區測試路1號', coordinate: { lat: 25, lng: 121.5 }, district: '中正區', roadKey: '台北市中正區測試路', mainNumber: 1, subNumber: null }] },
 };
-const transactions: TransactionIndex = { schemaVersion: MARKET_SCHEMA_VERSION, datasetVersion: 'transactions', builtAt: '2026-07-25T00:00:00.000Z', cells: {} };
+const transaction = {
+  id: 'tx-1',
+  transactionDate: '2025-12-01',
+  sourceVersion: 'transactions',
+  originalAddress: '台北市中正區測試路1號',
+  location: {
+    method: 'exact-doorplate' as const,
+    coordinate: { lat: 25, lng: 121.5 },
+    normalizedAddress: '台北市中正區測試路1號',
+    matchedAddress: '台北市中正區測試路1號',
+    uncertaintyMeters: 0,
+    confidence: 'high' as const,
+    datasetVersion: 'doorplates',
+  },
+  district: '中正區',
+  ownership: 'freehold' as const,
+  buildingType: 'apartment' as const,
+  totalPriceNtd: 30_000_000,
+  buildingPriceNtd: 30_000_000,
+  buildingAreaPing: 30,
+  parkingPriceNtd: 0,
+  parkingAreaPing: 0,
+  buildingUnitPriceWan: 100,
+  floor: 3,
+  totalFloors: 5,
+  floorGroup: 'middle' as const,
+  completionDate: null,
+  notes: '',
+  exclusionFlags: [],
+};
+const transactions: TransactionIndex = {
+  schemaVersion: MARKET_SCHEMA_VERSION,
+  datasetVersion: 'transactions',
+  builtAt: '2026-07-25T00:00:00.000Z',
+  cells: { '5000:24300': [transaction] },
+};
 
 async function writeBuild(dir: string, buildId: string, count = 1): Promise<void> {
   await mkdir(join(dir, 'raw'), { recursive: true });
@@ -42,7 +77,7 @@ async function writeBuild(dir: string, buildId: string, count = 1): Promise<void
   await writeFile(join(dir, 'doorplates-index.json'), JSON.stringify(doorplates));
   await writeFile(join(dir, 'transactions-index.json'), JSON.stringify(transactions));
   const value = manifest(buildId, count);
-  value.transactions.recordCount = 0;
+  value.transactions.recordCount = Object.values(transactions.cells).flat().length;
   for (const file of ['raw/doorplates.csv', 'doorplates-index.json', 'transactions-index.json']) {
     value.artifacts[file] = { sha256: await sha256File(join(dir, file)), bytes: (await readFile(join(dir, file))).byteLength };
   }
@@ -160,9 +195,12 @@ test('backtest acceptance loads only for the active transaction artifact checksu
 
   const acceptance: BacktestAcceptance = {
     schemaVersion: 1,
+    estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
     transactionArtifactSha256: checksum,
     approvedAt: '2026-07-26T01:00:00.000Z',
     asOf: '2026-07-25',
+    evaluatedThrough: '2026-07-25',
+    latestEligibleTransactionDate: '2025-12-01',
     thresholds: {
       medianApeMax: 0.12,
       p75ApeMax: 0.20,
@@ -191,6 +229,27 @@ test('backtest acceptance loads only for the active transaction artifact checksu
       thresholds: { ...acceptance.thresholds, medianApeMax: 0.50 },
     }),
     /approved quality thresholds/,
+  );
+  await assert.rejects(
+    () => writeBacktestAcceptance(root, {
+      ...acceptance,
+      estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION + 1,
+    }),
+    /estimator policy/,
+  );
+  await assert.rejects(
+    () => writeBacktestAcceptance(root, {
+      ...acceptance,
+      evaluatedThrough: '2025-11-30',
+    }),
+    /complete active transaction index/,
+  );
+  await assert.rejects(
+    () => writeBacktestAcceptance(root, {
+      ...acceptance,
+      latestEligibleTransactionDate: '2025-11-30',
+    }),
+    /complete active transaction index/,
   );
   await writeBacktestAcceptance(root, { ...acceptance, transactionArtifactSha256: 'different-dataset' });
   assert.equal(

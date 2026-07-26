@@ -1,4 +1,9 @@
 export const MARKET_SCHEMA_VERSION = 1;
+/**
+ * Intentional acceptance compatibility contract. Bump whenever selector,
+ * weighting, outlier, confidence, status, or backtest semantics change.
+ */
+export const ESTIMATOR_POLICY_VERSION = 1;
 export const MARKET_DATA_ROOT = 'state/market-data/taipei';
 export const MARKET_BACKTEST_DIAGNOSTIC_ROOT = 'state/market-data/backtests/taipei';
 export const MIN_COMPARABLES = 3;

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { attachMarketEstimates } from '../steps.ts';
 import type { PreMarketEnrichedListing } from '../types.ts';
+import { ESTIMATOR_POLICY_VERSION } from './config.ts';
 import type { BacktestAcceptance, MarketDataBundle } from './types.ts';
 
 const AS_OF = '2026-07-25';
@@ -18,9 +19,12 @@ function bundleWithAcceptance(transactionArtifactSha256 = 'fixture-transactions-
   };
   accepted.backtestAcceptance = {
     schemaVersion: 1,
+    estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
     transactionArtifactSha256,
     approvedAt: '2026-07-25T01:00:00.000Z',
     asOf: AS_OF,
+    evaluatedThrough: AS_OF,
+    latestEligibleTransactionDate: '2026-01-25',
     thresholds: {
       medianApeMax: 0.12,
       p75ApeMax: 0.20,
@@ -87,11 +91,26 @@ function listing(overrides: Partial<PreMarketEnrichedListing> = {}): PreMarketEn
 test('production estimate stays review before approval and becomes reliable only for matching acceptance', () => {
   const [unapproved] = attachMarketEstimates([listing()], bundle, AS_OF);
   const [mismatched] = attachMarketEstimates([listing()], bundleWithAcceptance('different-dataset'), AS_OF);
+  const policyMismatchBundle = bundleWithAcceptance();
+  policyMismatchBundle.backtestAcceptance!.estimatorPolicyVersion = ESTIMATOR_POLICY_VERSION + 1;
+  const [policyMismatched] = attachMarketEstimates([listing()], policyMismatchBundle, AS_OF);
+  const staleCoverageBundle = bundleWithAcceptance();
+  const cell = Object.keys(staleCoverageBundle.transactions.cells)[0]!;
+  staleCoverageBundle.transactions.cells[cell]!.push({
+    ...structuredClone(staleCoverageBundle.transactions.cells[cell]![0]!),
+    id: 'newer-transaction',
+    transactionDate: '2026-07-01',
+  });
+  const [staleCoverage] = attachMarketEstimates([listing()], staleCoverageBundle, AS_OF);
   const [result] = attachMarketEstimates([listing()], bundleWithAcceptance(), AS_OF);
 
   assert.equal(unapproved.marketEstimate.status, 'review');
   assert.ok(unapproved.marketEstimate.unavailableReasons.includes('market-backtest-not-approved'));
   assert.equal(mismatched.marketEstimate.status, 'review');
+  assert.equal(policyMismatched.marketEstimate.status, 'review');
+  assert.ok(policyMismatched.marketEstimate.unavailableReasons.includes('market-backtest-not-approved'));
+  assert.equal(staleCoverage.marketEstimate.status, 'review');
+  assert.ok(staleCoverage.marketEstimate.unavailableReasons.includes('market-backtest-not-approved'));
   assert.equal(result.marketEstimate.status, 'reliable');
   assert.equal(result.marketEstimate.comparables.length, 5);
   assert.equal(result.marketEstimate.selectedStage, 1);

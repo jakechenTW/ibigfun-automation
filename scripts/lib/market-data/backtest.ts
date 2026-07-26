@@ -1,5 +1,5 @@
 import { estimateMarket } from './estimator.ts';
-import { BACKTEST_ACCEPTANCE_THRESHOLDS } from './config.ts';
+import { BACKTEST_ACCEPTANCE_THRESHOLDS, ESTIMATOR_POLICY_VERSION } from './config.ts';
 import { weightedQuantile } from './statistics.ts';
 import type {
   BacktestAcceptance,
@@ -43,6 +43,8 @@ export interface BacktestCase {
 
 export interface BacktestReport {
   asOf: string;
+  /** Latest eligible sale in the complete active index, before as-of filtering. */
+  latestEligibleTransactionDate: string | null;
   overall: BacktestMetrics;
   byBuildingType: Record<BuildingType, BacktestMetrics>;
   byConfidence: Record<EstimateConfidence, BacktestMetrics>;
@@ -135,6 +137,20 @@ function allTransactions(index: TransactionIndex): IndexedTransaction[] {
       || left.transaction.id.localeCompare(right.transaction.id));
 }
 
+function latestEligibleDate(entries: readonly IndexedTransaction[]): string | null {
+  let latest: string | null = null;
+  for (const { transaction } of entries) {
+    const date = transactionDate(transaction);
+    if (date && isEligibleSubject(transaction, date)) latest = transaction.transactionDate;
+  }
+  return latest;
+}
+
+/** Latest held-out-eligible transaction represented by the complete deduplicated index. */
+export function latestEligibleTransactionDate(index: TransactionIndex): string | null {
+  return latestEligibleDate(allTransactions(index));
+}
+
 const BACKTEST_FRESHNESS: SourceFreshness = {
   transactionCheckedAt: null,
   doorplateCheckedAt: null,
@@ -171,6 +187,9 @@ export function evaluateBacktestGate(report: BacktestReport): BacktestGateResult
   if (medium.estimatedCount < BACKTEST_GATE.minimumConfidenceSliceCases || medium.medianApe === null) {
     reasons.push('insufficient-medium-confidence-cases');
   }
+  if (report.latestEligibleTransactionDate === null || report.asOf < report.latestEligibleTransactionDate) {
+    reasons.push('incomplete-active-transaction-coverage');
+  }
   if (overall.medianApe !== null && overall.medianApe > BACKTEST_GATE.medianApeMax) {
     reasons.push('median-ape-target-missed');
   }
@@ -184,7 +203,8 @@ export function evaluateBacktestGate(report: BacktestReport): BacktestGateResult
   const complete = !reasons.some((reason) =>
     reason === 'incomplete-overall'
       || reason === 'insufficient-high-confidence-cases'
-      || reason === 'insufficient-medium-confidence-cases');
+      || reason === 'insufficient-medium-confidence-cases'
+      || reason === 'incomplete-active-transaction-coverage');
   return { passed: complete && reasons.length === 0, complete, reasons };
 }
 
@@ -197,14 +217,18 @@ export function backtestAcceptance(
   const high = report.byConfidence.high;
   const medium = report.byConfidence.medium;
   if (!gate.passed || report.overall.medianApe === null || report.overall.p75Ape === null
-    || high.medianApe === null || medium.medianApe === null) {
+    || high.medianApe === null || medium.medianApe === null
+    || report.latestEligibleTransactionDate === null) {
     throw new Error(`Backtest does not pass acceptance: ${gate.reasons.join(', ')}`);
   }
   return {
     schemaVersion: 1,
+    estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
     transactionArtifactSha256,
     approvedAt,
     asOf: report.asOf,
+    evaluatedThrough: report.asOf,
+    latestEligibleTransactionDate: report.latestEligibleTransactionDate,
     thresholds: { ...BACKTEST_GATE },
     metrics: {
       estimateCoverage: report.overall.estimateCoverage,
@@ -226,7 +250,9 @@ export function backtestTransactions(index: TransactionIndex, options: BacktestO
   const asOf = parseIsoDate(options.asOf);
   if (!asOf) throw new RangeError('Backtest requires a valid as-of date (YYYY-MM-DD)');
 
-  const entries = allTransactions(index).filter(({ transaction }) => {
+  const completeEntries = allTransactions(index);
+  const completeLatestEligibleDate = latestEligibleDate(completeEntries);
+  const entries = completeEntries.filter(({ transaction }) => {
     const date = transactionDate(transaction);
     return date !== null && date <= asOf;
   });
@@ -277,6 +303,7 @@ export function backtestTransactions(index: TransactionIndex, options: BacktestO
 
   return {
     asOf: options.asOf,
+    latestEligibleTransactionDate: completeLatestEligibleDate,
     overall: metrics(cases),
     byBuildingType: {
       apartment: metrics(cases.filter((backtestCase) => backtestCase.buildingType === 'apartment')),

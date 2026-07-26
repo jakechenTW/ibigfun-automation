@@ -152,6 +152,7 @@ confidence. Interpret them as follows:
 - `medianApe` and `p75Ape` are absolute percentage errors; lower is better.
 - `bias` is signed `(estimate - actual) / actual`; a persistent positive or negative value signals calibration drift.
 - `intervalCoverage` is the fraction of actual prices inside the P25--P75 interval.
+- `latestEligibleTransactionDate` is computed from the complete deduplicated active index before `--as-of` filtering.
 - `cases` is local audit evidence, including the strictly earlier comparable dates used for each held-out sale.
 
 The quality gate targets median APE at or below 12% and P75 APE at or below
@@ -162,15 +163,25 @@ median APE. This fixed margin prevents tiny floating-point differences from
 being treated as measurable confidence calibration.
 
 A gated run is incomplete—and exits non-zero—when overall APE metrics are
-missing or either confidence slice lacks its 20 scored cases. A completed run
-also exits non-zero when any accuracy/calibration target fails. Only a completed
-passing gated run atomically writes
+missing, either confidence slice lacks its 20 scored cases, or `--as-of`
+precedes the complete index's `latestEligibleTransactionDate`. Historical
+cutoffs remain useful with `--no-gate`, but they cannot approve a newer active
+index. A completed run also exits non-zero when any accuracy/calibration target
+fails. Only a completed passing gated run atomically writes
 `state/market-data/taipei-backtest-acceptance.json`. That aggregate-only artifact
-records the exact `transactions-index.json` SHA-256, thresholds, slice counts,
+records the exact `transactions-index.json` SHA-256, estimator policy version,
+`evaluatedThrough`, `latestEligibleTransactionDate`, thresholds, slice counts,
 and summary metrics. Enrichment treats estimates as review-only until this
-artifact exists and matches the active transaction checksum. Publishing a
-different transaction index therefore invalidates prior acceptance
-automatically.
+artifact matches the active transaction checksum, runtime estimator policy, and
+complete index's latest eligible date. Publishing a different transaction
+index or adding a newer eligible transaction therefore invalidates prior
+acceptance automatically.
+
+`ESTIMATOR_POLICY_VERSION` is the intentional valuation compatibility
+contract. Any change to comparable selection stages, weights, outlier handling,
+confidence, estimate status, or backtest semantics must bump it and obtain a
+new passing acceptance. The market-data schema version is not a substitute for
+this policy bump.
 
 `--no-gate` is for recording or diagnosing a baseline; it returns diagnostic
 metrics without writing or updating acceptance and does not make failed or
