@@ -173,9 +173,18 @@ function cmdMark(argv: string[]): void {
     }
     if (!title) fail('marking report ok requires --title "<short>".');
     const enrichedFile = enrichedPath(profile.id, range.label);
-    if (sNotify === 'ok' && fs.existsSync(enrichedFile)) {
+    if (sNotify === 'ok') {
+      if (!fs.existsSync(enrichedFile)) {
+        fail(`cannot mark report ok: required enriched artifact ${enrichedFile} is missing.`);
+      }
+      let enriched: unknown;
       try {
-        assertNotificationStatusAllowsMarketData('ok', JSON.parse(fs.readFileSync(enrichedFile, 'utf8')));
+        enriched = JSON.parse(fs.readFileSync(enrichedFile, 'utf8'));
+      } catch (error) {
+        fail(`cannot mark report ok: malformed enriched artifact ${enrichedFile}: ${(error as Error).message}`);
+      }
+      try {
+        assertNotificationStatusAllowsMarketData('ok', enriched);
       } catch (error) {
         fail(`cannot mark report ok: ${(error as Error).message}`);
       }

@@ -20,7 +20,14 @@ export function hasStaleOfficialMarketData(enriched: unknown): boolean {
 
 /** Policy gate: stale official sources must be surfaced to the recipient as warn. */
 export function assertNotificationStatusAllowsMarketData(status: NotificationStatus, enriched: unknown): void {
-  if (status === 'ok' && hasStaleOfficialMarketData(enriched)) {
+  if (status !== 'ok') return;
+  if (enriched === undefined) throw new Error('enriched artifact is required for --status-notify ok');
+  const result = record(enriched);
+  const staleCount = result?.marketDataStale;
+  if (!result || !Array.isArray(result.listings) || typeof staleCount !== 'number' || !Number.isSafeInteger(staleCount) || staleCount < 0) {
+    throw new Error('a valid enriched artifact is required for --status-notify ok');
+  }
+  if (hasStaleOfficialMarketData(result)) {
     throw new Error('stale official market data requires --status-notify warn, not ok');
   }
 }

@@ -28,3 +28,11 @@ test('allows warn status for stale data and ok status for fresh data', () => {
   assert.doesNotThrow(() => assertNotificationStatusAllowsMarketData('warn', { ...freshEnrichment, marketDataStale: 1 }));
   assert.doesNotThrow(() => assertNotificationStatusAllowsMarketData('ok', freshEnrichment));
 });
+
+test('rejects ok notification status when the enriched artifact is missing', () => {
+  assert.throws(() => assertNotificationStatusAllowsMarketData('ok', undefined), /enriched artifact is required/);
+});
+
+test('rejects ok notification status when the enriched artifact is malformed', () => {
+  assert.throws(() => assertNotificationStatusAllowsMarketData('ok', { marketDataStale: 0 }), /valid enriched artifact/);
+});
