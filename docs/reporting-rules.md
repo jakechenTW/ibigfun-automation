@@ -86,7 +86,9 @@ exclusion.
 僅對低信心、`review`/`unavailable`，或以中位數才看似跨過門檻的少數邊界物件，可人工查閱外部估值
 （例如好時價 AVM）。不得全量查詢、逆向 endpoint 或把外部值寫回 `marketEstimate`。外部結果不會取代
 官方值；若它改變物件分桶，必須在同一 run 寫入 `valuation-review.json`，並保留 listing ID、來源及 HTTPS
-URL、查核時間、外部單價/總價、官方 P25/中位/P75、差異、是否採納、理由與結果分桶。pipeline 在
+URL、查核時間、外部單價/總價（來源有回傳時）、官方狀態與 unavailable reasons、可用的官方
+P25/中位/P75、兩邊單價皆有時的差異、是否採納、理由與結果分桶。缺值明確寫 `null`；不得用 0 或虛構值
+填補。未取得任何外部價格的查核只能記為 `accepted: false`。pipeline 在
 `mark report --status ok` 時會驗證此檔；沒有可驗證證據不得藉外部值改桶。官方行情不可用時，外部查核
 只能讓物件留在人工候選，不能直接升為推薦。
 

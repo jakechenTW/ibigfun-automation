@@ -72,7 +72,8 @@ Do these once before the first run; stop and ask the user if any fails:
    `profiles/<profile>/notify-template.md` as the structure.
 11. Notify with the canonical command below. Any stale official market source
    requires notification status `warn`; `pipeline mark report --status ok`
-   rejects `--status-notify ok` when the run's enriched market evidence is stale.
+   rejects `--status-notify ok` when the run's enriched market evidence is stale,
+   `review`, `unavailable`, malformed, or inconsistent with its summary counts.
 
 ### Tooling
 

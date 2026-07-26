@@ -31,7 +31,7 @@ Trigger 也會在訊息裡告訴你要監測的區間。把它對應成 pipeline
 
    它會跑 fetch + enrich，然後**停在 agent `report` 步**並印出需求；已經 ok 的步會被 skip（重跑＝自動續跑）。若它印出 `report` 步的需求，繼續第 2 步；若它以非 0 結束（fetch/enrich 失敗），跳到「Headless 失敗政策」。
 
-2. 親手完成 `report` 步：對 `state/runs/<profile>/<label>/enriched.json` 做 `withinWalk:null` 三角定位、估價/評估、跨日彙整，依 `docs/reporting-rules.md`、profile 規則檔與 profile 模板寫出**一份**合併報告到 orchestrator 指定的 `state/runs/<profile>/<label>/report.md`。行情一律先讀 `marketEstimate`：顯示 reliable/review/unavailable、官方中位與 P25–P75、信心、可比筆數、選用階段及資料日期；投資推薦以 P25 保守溢價為閘門。`review`/`unavailable`、low 信心、資料過期或車位不可分離不得自動推薦。只在低信心/review/unavailable 或中位數才達標的少數邊界物件做外部覆核，絕不可靜默覆寫官方值；若覆核改變 bucket，於同一 run 寫 `valuation-review.json`（來源 URL、查核時間、官方與外部數值、差異、理由、結果 bucket 完整記錄）。通知只放一行精簡覆核結論，不貼完整可比或外部原始資料。
+2. 親手完成 `report` 步：對 `state/runs/<profile>/<label>/enriched.json` 做 `withinWalk:null` 三角定位、估價/評估、跨日彙整，依 `docs/reporting-rules.md`、profile 規則檔與 profile 模板寫出**一份**合併報告到 orchestrator 指定的 `state/runs/<profile>/<label>/report.md`。行情一律先讀 `marketEstimate`：顯示 reliable/review/unavailable、官方中位與 P25–P75、信心、可比筆數、選用階段及資料日期；投資推薦以 P25 保守溢價為閘門。`review`/`unavailable`、low 信心、資料過期或車位不可分離不得自動推薦。只在低信心/review/unavailable 或中位數才達標的少數邊界物件做外部覆核，絕不可靜默覆寫官方值；若覆核改變 bucket，於同一 run 寫 `valuation-review.json`（來源 URL、查核時間、外部回傳值或 `null`、官方 status/unavailable reasons 與可用區間、可計算時的差異、理由、結果 bucket 完整記錄）。未取得外部價格時必須 `accepted: false`；官方 unavailable 不得因外部值升為推薦。通知只放一行精簡覆核結論，不貼完整可比或外部原始資料。
 
 3. 標記完成（會自動觸發 notify，idempotent）：
 

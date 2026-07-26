@@ -4,18 +4,21 @@
  * output; this file records the independent review rather than overwriting it.
  */
 export type ValuationReviewBucket = 'recommended' | 'near-threshold' | 'suspicious' | 'excluded';
+export type OfficialValuationStatus = 'reliable' | 'review' | 'unavailable';
 
 export interface ValuationReview {
   listingId: number;
   source: string;
   sourceUrl: string;
   checkedAt: string;
-  externalUnitPriceWan: number;
-  externalTotalPriceWan: number;
-  officialMedianWan: number;
-  officialP25Wan: number;
-  officialP75Wan: number;
-  differencePercent: number;
+  externalUnitPriceWan: number | null;
+  externalTotalPriceWan: number | null;
+  officialStatus: OfficialValuationStatus;
+  officialUnavailableReasons: string[];
+  officialMedianWan: number | null;
+  officialP25Wan: number | null;
+  officialP75Wan: number | null;
+  differencePercent: number | null;
   accepted: boolean;
   rationale: string;
   resultingBucket: ValuationReviewBucket;
@@ -27,6 +30,7 @@ export interface ValuationReviewFile {
 }
 
 const BUCKETS = new Set<ValuationReviewBucket>(['recommended', 'near-threshold', 'suspicious', 'excluded']);
+const OFFICIAL_STATUSES = new Set<OfficialValuationStatus>(['reliable', 'review', 'unavailable']);
 const ISO_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{3})?Z$/u;
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -48,6 +52,19 @@ function positive(value: unknown, label: string): number {
   const number = finite(value, label);
   if (number <= 0) throw new RangeError(`${label} must be greater than zero`);
   return number;
+}
+
+function optionalPositive(value: unknown, label: string): number | null {
+  return value === null || value === undefined ? null : positive(value, label);
+}
+
+function optionalFinite(value: unknown, label: string): number | null {
+  return value === null || value === undefined ? null : finite(value, label);
+}
+
+function stringArray(value: unknown, label: string): string[] {
+  if (!Array.isArray(value)) throw new TypeError(`${label} must be an array`);
+  return value.map((item, itemIndex) => text(item, `${label}[${itemIndex}]`));
 }
 
 function sourceUrl(value: unknown): string {
@@ -83,30 +100,65 @@ function review(value: unknown, index: number): ValuationReview {
   if (!Number.isSafeInteger(listingId) || listingId <= 0) {
     throw new RangeError(`reviews[${index}].listingId must be a positive safe integer`);
   }
-  const officialP25Wan = positive(entry.officialP25Wan, `reviews[${index}].officialP25Wan`);
-  const officialMedianWan = positive(entry.officialMedianWan, `reviews[${index}].officialMedianWan`);
-  const officialP75Wan = positive(entry.officialP75Wan, `reviews[${index}].officialP75Wan`);
-  if (officialP25Wan > officialMedianWan || officialMedianWan > officialP75Wan) {
+  const externalUnitPriceWan = optionalPositive(entry.externalUnitPriceWan, `reviews[${index}].externalUnitPriceWan`);
+  const externalTotalPriceWan = optionalPositive(entry.externalTotalPriceWan, `reviews[${index}].externalTotalPriceWan`);
+  const officialP25Wan = optionalPositive(entry.officialP25Wan, `reviews[${index}].officialP25Wan`);
+  const officialMedianWan = optionalPositive(entry.officialMedianWan, `reviews[${index}].officialMedianWan`);
+  const officialP75Wan = optionalPositive(entry.officialP75Wan, `reviews[${index}].officialP75Wan`);
+  const differencePercent = optionalFinite(entry.differencePercent, `reviews[${index}].differencePercent`);
+  if ((externalUnitPriceWan === null || officialMedianWan === null) && differencePercent !== null) {
+    throw new RangeError(`reviews[${index}].differencePercent requires externalUnitPriceWan and officialMedianWan`);
+  }
+  if (externalUnitPriceWan !== null && officialMedianWan !== null && differencePercent === null) {
+    throw new RangeError(`reviews[${index}].differencePercent is required when both unit-price inputs are available`);
+  }
+  if (officialP25Wan !== null && officialMedianWan !== null && officialP75Wan !== null &&
+    (officialP25Wan > officialMedianWan || officialMedianWan > officialP75Wan)) {
     throw new RangeError(`reviews[${index}] official P25/median/P75 must be ordered`);
   }
   if (typeof entry.accepted !== 'boolean') throw new TypeError(`reviews[${index}].accepted must be boolean`);
+  if (entry.accepted && externalUnitPriceWan === null && externalTotalPriceWan === null) {
+    throw new RangeError(`reviews[${index}] cannot be accepted without an external price`);
+  }
+  if (typeof entry.officialStatus !== 'string' || !OFFICIAL_STATUSES.has(entry.officialStatus as OfficialValuationStatus)) {
+    throw new TypeError(`reviews[${index}].officialStatus must be one of ${[...OFFICIAL_STATUSES].join('|')}`);
+  }
+  const officialStatus = entry.officialStatus as OfficialValuationStatus;
+  const officialUnavailableReasons = stringArray(entry.officialUnavailableReasons, `reviews[${index}].officialUnavailableReasons`);
+  if (officialStatus === 'reliable' &&
+    (officialP25Wan === null || officialMedianWan === null || officialP75Wan === null || officialUnavailableReasons.length > 0)) {
+    throw new RangeError(`reviews[${index}] reliable official evidence requires a complete interval and no unavailable reasons`);
+  }
+  if (officialStatus !== 'reliable' && officialUnavailableReasons.length === 0) {
+    throw new RangeError(`reviews[${index}] ${officialStatus} official evidence requires unavailable reasons`);
+  }
+  if (officialStatus === 'unavailable' &&
+    (officialP25Wan !== null || officialMedianWan !== null || officialP75Wan !== null)) {
+    throw new RangeError(`reviews[${index}] unavailable official evidence cannot contain official prices`);
+  }
   if (typeof entry.resultingBucket !== 'string' || !BUCKETS.has(entry.resultingBucket as ValuationReviewBucket)) {
     throw new TypeError(`reviews[${index}].resultingBucket must be one of ${[...BUCKETS].join('|')}`);
+  }
+  const resultingBucket = entry.resultingBucket as ValuationReviewBucket;
+  if (officialStatus !== 'reliable' && resultingBucket === 'recommended') {
+    throw new RangeError(`reviews[${index}] ${officialStatus} official evidence cannot result in recommended`);
   }
   return {
     listingId,
     source: text(entry.source, `reviews[${index}].source`),
     sourceUrl: sourceUrl(entry.sourceUrl),
     checkedAt: checkedAt(entry.checkedAt),
-    externalUnitPriceWan: positive(entry.externalUnitPriceWan, `reviews[${index}].externalUnitPriceWan`),
-    externalTotalPriceWan: positive(entry.externalTotalPriceWan, `reviews[${index}].externalTotalPriceWan`),
+    externalUnitPriceWan,
+    externalTotalPriceWan,
+    officialStatus,
+    officialUnavailableReasons,
     officialMedianWan,
     officialP25Wan,
     officialP75Wan,
-    differencePercent: finite(entry.differencePercent, `reviews[${index}].differencePercent`),
+    differencePercent,
     accepted: entry.accepted,
     rationale: text(entry.rationale, `reviews[${index}].rationale`),
-    resultingBucket: entry.resultingBucket as ValuationReviewBucket,
+    resultingBucket,
   };
 }
 
