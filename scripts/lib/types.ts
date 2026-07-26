@@ -1,5 +1,6 @@
 import type { Coordinate } from './coords.ts';
 import type { RegionGate } from './region.ts';
+import type { BuildingType } from './market-data/types.ts';
 
 /** One row of iBigFun's 刊登紀錄: this property's appearance on one source/date. */
 export interface ListingHistoryEntry {
@@ -45,6 +46,10 @@ export interface Listing {
   room: number | null;
   livingRoom: number | null;
   bathroom: number | null;
+  /** The server-side house_type query that produced this listing, if typed. */
+  queryHouseType: string | null;
+  /** Building type derived only from queryHouseType and totalFloors. */
+  buildingType: BuildingType | null;
 }
 
 /** Output document written to state/runs/<label>/listings.json and stdout. */

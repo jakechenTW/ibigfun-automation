@@ -92,8 +92,9 @@ The fetch body is profile-driven. The variable filters come entirely from the
 selected profile's `fetch` map in `profiles/<id>/profile.json`, which
 `buildSearchBody` walks generically (scalar → `key=value`, `{min,max}` →
 `key[min_val]`/`key[max_val]`, array → repeated `key[]`). The captured shape
-above is exactly what `example-investment`'s `fetch` produces (`city`,
-`price_segment` max, `floor_segment` 2–4, `total_floor` max). `example-owner-occupied`
+above is the base envelope of `example-investment`'s `fetch`; its `house_type`
+values are sent as separate typed requests, each with `city`, `price_segment`
+max, `floor_segment` 2–4, and `total_floor` max. `example-owner-occupied`
 carries a different map: `city`, `town[]`, `house_type[]`,
 `price_segment[max_val]`, `floor_segment[min_val]` (no max),
 `main_ping_number[min_val]`, `house_age_segment[max_val]`, and `parking` (no
@@ -109,6 +110,13 @@ reference and `profiles/README.md` for how to author the `fetch` map.
 `/api/search/list` returns `total_ping` (not 主建物 ping) and `typeLayout`
 (room layout, not a building-type category), so neither constraint can be
 re-verified per-result from the response — they are trusted server-side.
+
+When a profile uses multiple `house_type` values, the fetcher sends one
+server-side query per value rather than combining them. Each normalized listing
+therefore records the query value that returned it (`queryHouseType`) and a
+derived `buildingType`: `16` is `apartment`; `17` is `midrise` through 10 total
+floors and `highrise` from 11 floors. Invalid or absent floors stay untyped.
+`buildingType` is never inferred from the listing title or `pattern`.
 
 Response JSON shape: `{ data: ListItem[], total_records: number, per_page: number, current_page: number }`.
 

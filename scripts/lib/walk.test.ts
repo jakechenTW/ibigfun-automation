@@ -18,6 +18,7 @@ function offline(over: Partial<OfflineEnriched>): OfflineEnriched {
     publishedDate: null, totalPrice: '1000萬', totalPing: '20坪', unitPrice: '50萬/坪',
     floor: '3', totalFloors: '5', typeLayout: '公寓', age: '30', parking: '無車位', realPriceUrl: null, listingHistory: [],
     id: null, source: null, sourceLink: null, room: null, livingRoom: null, bathroom: null,
+    queryHouseType: null, buildingType: null,
     totalPriceWan: 1000, totalPriceNtd: 10_000_000, totalPingNum: 20, unitPriceWan: 50, ageNum: 30,
     monthlyMortgage: 32031, district: '中正區', coordConsistent: true,
     candidates: [cand('東門', '4', 600)], hasAuction: false, ...over,

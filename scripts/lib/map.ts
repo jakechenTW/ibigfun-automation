@@ -6,6 +6,7 @@
 import type { ListItem, HistoryEntry, OffMarketEntry } from './api.ts';
 import type { Coordinate } from './coords.ts';
 import type { Listing, ListingHistoryEntry } from './types.ts';
+import type { BuildingType } from './market-data/types.ts';
 import { normalizeHistory, type RawHistoryRow } from './history.ts';
 
 /** Stringify a numeric field, or null when it is null/undefined. */
@@ -59,8 +60,22 @@ function coordinateOf(it: ListItem): Coordinate | null {
   return null;
 }
 
+/** Derive type solely from the server-side house_type query and floor count. */
+export function buildingTypeFromQuery(
+  queryHouseType: string | null,
+  totalFloors: number | null,
+): BuildingType | null {
+  if (queryHouseType === '16') return 'apartment';
+  if (queryHouseType !== '17' || totalFloors == null || totalFloors <= 0) return null;
+  return totalFloors <= 10 ? 'midrise' : 'highrise';
+}
+
 /** Map one API item (+ its already-merged history) to a Listing. */
-export function apiItemToListing(it: ListItem, history: ListingHistoryEntry[]): Listing {
+export function apiItemToListing(
+  it: ListItem,
+  history: ListingHistoryEntry[],
+  queryHouseType: string | null = null,
+): Listing {
   return {
     title: it.subject ?? '',
     url: it.link || null,
@@ -84,5 +99,7 @@ export function apiItemToListing(it: ListItem, history: ListingHistoryEntry[]): 
     room: it.room ?? null,
     livingRoom: it.living_room ?? null,
     bathroom: it.bathroom ?? null,
+    queryHouseType,
+    buildingType: buildingTypeFromQuery(queryHouseType, it.total_floor ?? null),
   };
 }

@@ -105,6 +105,28 @@ export type FetchValue =
   | { min?: string | number; max?: string | number };
 export type FetchMap = Record<string, FetchValue>;
 
+/** One server-side filter variant and its resulting building-type provenance. */
+export interface FetchVariant {
+  filters: FetchMap;
+  queryHouseType: string | null;
+}
+
+/**
+ * Split a multi-value house_type filter so every result preserves the exact
+ * server-side type query that returned it. Other multi-value filters remain a
+ * single request; only house_type carries listing-type provenance.
+ */
+export function fetchVariants(fetch: FetchMap): FetchVariant[] {
+  const raw = fetch.house_type;
+  if (!Array.isArray(raw) || raw.length <= 1) {
+    return [{ filters: fetch, queryHouseType: Array.isArray(raw) ? raw[0] ?? null : null }];
+  }
+  return raw.map((value) => ({
+    filters: { ...fetch, house_type: [value] },
+    queryHouseType: value,
+  }));
+}
+
 /** Build the URL-encoded /api/search/list POST body for a date range + page.
  *  Fixed envelope (method/on_market/expand/exclude_land/source allow-lists/
  *  dates) is the API contract; `fetchMap` supplies the variable filters:

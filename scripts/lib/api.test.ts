@@ -1,7 +1,7 @@
 // scripts/lib/api.test.ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSearchBody, pageCount, SEARCH_LIST_URL, historyUrl, OFF_MARKET_URL, buildOffMarketBody, type FetchMap } from './api.ts';
+import { buildSearchBody, fetchVariants, pageCount, SEARCH_LIST_URL, historyUrl, OFF_MARKET_URL, buildOffMarketBody, type FetchMap } from './api.ts';
 
 const investmentFetch: FetchMap = {
   city: '1',
@@ -71,6 +71,10 @@ test('buildSearchBody emits town[] and house_type[] arrays for owner fetch', () 
   assert.match(b, /town%5B%5D=4/);
   assert.match(b, /town%5B%5D=9/);
   assert.match(b, /house_type%5B%5D=17/);
+});
+
+test('fetchVariants keeps a single house_type as one server query', () => {
+  assert.deepEqual(fetchVariants(ownerFetch), [{ filters: ownerFetch, queryHouseType: '17' }]);
 });
 
 test('buildSearchBody emits price/ping/age segments and parking for owner fetch', () => {

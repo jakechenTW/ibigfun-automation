@@ -64,6 +64,14 @@ test('apiItemToListing fills the new structured fields', () => {
   assert.equal(l.bathroom, 1);
 });
 
+test('query house type supplies deterministic building type', () => {
+  assert.equal(apiItemToListing(ITEM, [], '16').buildingType, 'apartment');
+  assert.equal(apiItemToListing({ ...ITEM, total_floor: 8 }, [], '17').buildingType, 'midrise');
+  assert.equal(apiItemToListing({ ...ITEM, total_floor: 12 }, [], '17').buildingType, 'highrise');
+  assert.equal(apiItemToListing({ ...ITEM, total_floor: 0 }, [], '17').buildingType, null);
+  assert.equal(apiItemToListing(ITEM, [], null).buildingType, null);
+});
+
 test('listingHistory feeds tenure: earliest record is first listed', () => {
   const l = apiItemToListing(ITEM, MERGED);
   assert.equal(l.listingHistory.length, 2);

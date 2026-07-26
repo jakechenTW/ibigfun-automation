@@ -1,5 +1,5 @@
 import * as fs from 'node:fs';
-import { collectListings } from './extract.ts';
+import { collectListingVariants } from './extract.ts';
 import { loadEnv, defaultDeps } from './http.ts';
 import type { Logger } from './journal.ts';
 import { type RunContext } from './profiles.ts';
@@ -107,8 +107,9 @@ export async function enrichStep(ctx: RunContext, logger: Logger): Promise<StepO
 export async function fetchStep(ctx: RunContext, logger: Logger): Promise<StepOutput> {
   const { profile, range } = ctx;
   loadEnv();
-  const filters = profile.fetch;
-  const { listings, dropped, duplicates } = await collectListings(range, defaultDeps(filters), logger);
+  const { listings, dropped, duplicates, provenanceConflicts } = await collectListingVariants(
+    range, profile.fetch, defaultDeps, logger,
+  );
   const result: FetchResult = {
     from: range.from,
     to: range.to,
@@ -123,5 +124,5 @@ export async function fetchStep(ctx: RunContext, logger: Logger): Promise<StepOu
   );
   const outPath = listingsPath(profile.id, range.label);
   fs.writeFileSync(outPath, JSON.stringify(result, null, 2));
-  return { summary: { listings: listings.length, historyDropped: dropped, duplicates }, artifacts: [outPath] };
+  return { summary: { listings: listings.length, historyDropped: dropped, duplicates, provenanceConflicts }, artifacts: [outPath] };
 }
