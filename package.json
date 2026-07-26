@@ -14,6 +14,7 @@
     "fetch": "tsx scripts/fetch.ts",
     "enrich": "tsx scripts/enrich.ts",
     "route": "tsx scripts/route.ts",
+    "market-data": "tsx scripts/market-data.ts",
     "test": "node --import tsx --test scripts/lib/*.test.ts scripts/lib/market-data/*.test.ts",
     "pipeline": "tsx scripts/pipeline.ts"
   },
