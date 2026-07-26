@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -159,4 +159,56 @@ test('filesystem refresh lock serializes overlapping jobs and cleans up after er
     /inside lock/,
   );
   await withMarketDataLock(rootPath, async () => undefined, { timeoutMs: 100, pollMs: 5 });
+});
+
+test('lock removes only its newly-created directory when owner metadata write fails', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-lock-'));
+  const rootPath = join(parent, 'taipei');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await assert.rejects(
+    () => withMarketDataLock(rootPath, async () => undefined, {
+      writeOwner: async () => { throw new Error('owner write failed'); },
+    }),
+    /owner write failed/,
+  );
+  await withMarketDataLock(rootPath, async () => undefined, { timeoutMs: 100, pollMs: 5 });
+});
+
+test('lock rejects unsafe timing values and heartbeat prevents reclaiming a live lease', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-lock-'));
+  const rootPath = join(parent, 'taipei');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  for (const timings of [
+    { timeoutMs: 0 }, { timeoutMs: Number.NaN }, { pollMs: 0 },
+    { staleMs: 20 }, { timeoutMs: 10, pollMs: 20 },
+  ]) {
+    await assert.rejects(() => withMarketDataLock(rootPath, async () => undefined, timings), /lock timing/i);
+  }
+
+  let firstExited = false;
+  const first = withMarketDataLock(rootPath, async () => {
+    await new Promise((resolve) => setTimeout(resolve, 140));
+    firstExited = true;
+  }, { timeoutMs: 500, staleMs: 60, pollMs: 5 });
+  await new Promise((resolve) => setTimeout(resolve, 70));
+  await withMarketDataLock(rootPath, async () => {
+    assert.equal(firstExited, true);
+  }, { timeoutMs: 500, staleMs: 60, pollMs: 5 });
+  await first;
+});
+
+test('lock takes over a genuinely stale abandoned lease', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-lock-'));
+  const rootPath = join(parent, 'taipei');
+  const lockPath = join(parent, '.taipei-refresh.lock');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await mkdir(lockPath);
+  await writeFile(join(lockPath, 'owner'), 'abandoned');
+  const old = new Date(Date.now() - 10_000);
+  await utimes(lockPath, old, old);
+  let entered = false;
+  await withMarketDataLock(rootPath, async () => { entered = true; }, {
+    timeoutMs: 200, staleMs: 60, pollMs: 5,
+  });
+  assert.equal(entered, true);
 });

@@ -29,6 +29,7 @@ export interface MarketDataLockOptions {
   timeoutMs?: number;
   staleMs?: number;
   pollMs?: number;
+  writeOwner?: (ownerPath: string, owner: string) => Promise<void>;
 }
 
 function nowIso(clock: () => Date): string { return clock().toISOString(); }
@@ -51,20 +52,32 @@ export async function withMarketDataLock<T>(
   const timeoutMs = options.timeoutMs ?? 60_000;
   const staleMs = options.staleMs ?? 30 * 60_000;
   const pollMs = options.pollMs ?? 50;
+  const heartbeatMs = Math.max(10, Math.floor(staleMs / 3));
+  const validPositive = (value: number) => Number.isFinite(value) && value > 0;
+  if (!validPositive(timeoutMs) || !validPositive(staleMs) || !validPositive(pollMs) ||
+      staleMs < 30 || heartbeatMs * 2 >= staleMs || pollMs > timeoutMs) {
+    throw new RangeError('Invalid market-data lock timing relationship');
+  }
+  const writeOwner = options.writeOwner ??
+    ((file: string, value: string) => fs.writeFile(file, value, { flag: 'wx' }));
   const startedAt = Date.now();
   await fs.mkdir(path.dirname(root), { recursive: true });
   for (;;) {
+    let created = false;
     try {
       await fs.mkdir(lockPath);
-      await fs.writeFile(ownerPath, owner, { flag: 'wx' });
-      break;
+      created = true;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
       try {
         const stat = await fs.stat(lockPath);
         if (Date.now() - stat.mtimeMs > staleMs) {
-          await fs.rm(lockPath, { recursive: true, force: true });
-          continue;
+          const confirmed = await fs.stat(lockPath);
+          if (confirmed.ino === stat.ino && confirmed.mtimeMs === stat.mtimeMs &&
+              Date.now() - confirmed.mtimeMs > staleMs) {
+            await fs.rm(lockPath, { recursive: true, force: true });
+            continue;
+          }
         }
       } catch (statError) {
         if ((statError as NodeJS.ErrnoException).code !== 'ENOENT') throw statError;
@@ -73,12 +86,20 @@ export async function withMarketDataLock<T>(
       if (Date.now() - startedAt >= timeoutMs) throw new Error(`Timed out waiting for market-data refresh lock: ${lockPath}`);
       await new Promise((resolve) => setTimeout(resolve, pollMs));
     }
+    if (!created) continue;
+    try {
+      await writeOwner(ownerPath, owner);
+    } catch (error) {
+      await fs.rm(lockPath, { recursive: true, force: true });
+      throw error;
+    }
+    break;
   }
 
   const heartbeat = setInterval(() => {
     const now = new Date();
     void fs.utimes(lockPath, now, now).catch(() => undefined);
-  }, Math.max(100, Math.floor(staleMs / 3)));
+  }, heartbeatMs);
   heartbeat.unref();
   try {
     return await operation();
