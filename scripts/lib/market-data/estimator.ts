@@ -39,6 +39,14 @@ function excludedOutlier(candidate: ComparableEvidence): ComparableEvidence {
   return { ...candidate, included: false, reasons: [...candidate.reasons, 'weighted-mad-outlier'] };
 }
 
+function excludedUnsupportedWeight(candidate: ComparableEvidence): ComparableEvidence {
+  return {
+    ...candidate,
+    included: false,
+    reasons: [...candidate.reasons, 'distance-max-outside-supported-weight'],
+  };
+}
+
 /** Produces a reproducible, evidence-carrying price estimate from local official transactions. */
 export function estimateMarket(
   subject: MarketSubject,
@@ -65,17 +73,24 @@ export function estimateMarket(
   }
   const selection = selectComparables(subject, nearbyTransactions(subject, index), asOf);
   const initialIncluded = selection.included;
+  const unsupportedWeight = initialIncluded.filter((candidate) =>
+    !Number.isFinite(candidate.weight.total) || candidate.weight.total <= 0,
+  );
+  const weightSupported = initialIncluded.filter((candidate) =>
+    Number.isFinite(candidate.weight.total) && candidate.weight.total > 0,
+  );
   const outlierIds = hardReasons.length === 0
-    ? new Set(weightedMadOutliers(initialIncluded.map((candidate) => ({
+    ? new Set(weightedMadOutliers(weightSupported.map((candidate) => ({
       id: candidate.transaction.id,
       value: candidate.transaction.buildingUnitPriceWan,
       weight: candidate.weight.total,
     }))).map((observation) => observation.id))
     : new Set<string>();
-  const comparables = initialIncluded.filter((candidate) => !outlierIds.has(candidate.transaction.id));
+  const comparables = weightSupported.filter((candidate) => !outlierIds.has(candidate.transaction.id));
   const excludedCandidates = [
     ...selection.excluded,
-    ...initialIncluded.filter((candidate) => outlierIds.has(candidate.transaction.id)).map(excludedOutlier),
+    ...unsupportedWeight.map(excludedUnsupportedWeight),
+    ...weightSupported.filter((candidate) => outlierIds.has(candidate.transaction.id)).map(excludedOutlier),
   ];
   const unavailableReasons = [...hardReasons];
   if (comparables.length === 0) unavailableReasons.push('no-comparables');

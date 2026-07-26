@@ -63,11 +63,15 @@ function transaction(id: string, price: number): MarketTransaction {
 }
 
 function indexWithPrices(prices: number[]): TransactionIndex {
+  return indexWithTransactions(prices.map((price, index) => transaction(`tx-${index}`, price)));
+}
+
+function indexWithTransactions(transactions: MarketTransaction[]): TransactionIndex {
   return {
     schemaVersion: 1,
     datasetVersion: 'fixture',
     builtAt: '2026-07-25T00:00:00.000Z',
-    cells: { [gridKey(coordinate)]: prices.map((price, index) => transaction(`tx-${index}`, price)) },
+    cells: { [gridKey(coordinate)]: transactions },
   };
 }
 
@@ -102,4 +106,21 @@ test('unreliable listing GPS makes the estimate unavailable without querying gri
   assert.equal(estimate.status, 'unavailable');
   assert.equal(estimate.comparables.length, 0);
   assert.ok(estimate.unavailableReasons.includes('location-unreliable'));
+});
+
+test('keeps an eligible address range beyond the final weighting band as excluded review evidence', () => {
+  const uncertain = transaction('uncertain-range', 100);
+  uncertain.location = {
+    ...uncertain.location,
+    method: 'address-range',
+    coordinate: { lat: coordinate.lat, lng: coordinate.lng + 900 / (111_320 * Math.cos(coordinate.lat * Math.PI / 180)) },
+    uncertaintyMeters: 200,
+    confidence: 'medium',
+  };
+  const estimate = estimateMarket(subject, indexWithTransactions([uncertain]), fresh, AS_OF);
+
+  assert.equal(estimate.status, 'unavailable');
+  assert.equal(estimate.comparables.length, 0);
+  const excluded = estimate.excludedCandidates.find((candidate) => candidate.transaction.id === 'uncertain-range');
+  assert.ok(excluded?.reasons.includes('distance-max-outside-supported-weight'));
 });
