@@ -30,6 +30,12 @@ to the automated run. Comparable selection has no enforceable time, distance,
 area, floor, parking, or confidence rules, and the report does not preserve
 structured valuation evidence.
 
+The listing API also does not return a building-type category: its `pattern`
+field is room layout, and `house_type` exists only as a server-side search
+filter. The investment profile currently sends no `house_type`, so a listing
+cannot safely be classified as apartment, midrise, or highrise from the
+normalized response alone.
+
 The existing premium formula remains unchanged:
 
 ```text
@@ -186,6 +192,26 @@ criteria, calculate weights and robust statistics, and attach a structured
 The report agent consumes this baseline. It no longer invents a market unit
 price when deterministic evidence is available.
 
+### 5. Listing building-type provenance
+
+For the investment profile, fetch only the supported iBigFun types and query
+them separately:
+
+- `house_type=16`: apartment;
+- `house_type=17`: elevator building.
+
+Merge and deduplicate the results after fetching, but retain the server-side
+query type on every normalized listing. Classify `house_type=17` using total
+floors:
+
+- 10 floors or fewer: midrise;
+- 11 floors or more: highrise;
+- missing or invalid total floors: review.
+
+Do not infer building type from title text or the `pattern` room-layout field.
+Listings returned from an untyped query or another unsupported `house_type`
+cannot receive automatic market valuation.
+
 ## Transaction Normalization
 
 ### Building types
@@ -198,6 +224,10 @@ Normalize official and listing labels into at least:
 
 These types are never compared across categories. Unrecognized or conflicting
 types yield `review`.
+
+For iBigFun listings, normalized type must originate from the split server-side
+query described above. The distinction between midrise and highrise then uses
+total-floor count; it is not guessed from marketing copy.
 
 ### Floor groups
 
@@ -443,6 +473,9 @@ Each comparable includes enough normalized source fields, distance, location
 precision, weight components, and inclusion/exclusion reasons to reproduce the
 estimate.
 
+The normalized listing also carries its `queryHouseType` and derived
+`buildingType` so the estimate's type match is auditable.
+
 ## Update Safety and Failure Handling
 
 Use last-known-good and atomic publication:
@@ -549,4 +582,6 @@ The first release does not:
 - auto-resolve unreliable iBigFun coordinates;
 - estimate an inseparable listing parking value;
 - change the profile's negotiation-rate or premium thresholds;
+- infer listing building type from title or room-layout text;
+- automatically value unsupported iBigFun `house_type` categories;
 - commit official raw data, derived local indexes, or run evidence.
