@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Readable } from 'node:stream';
 import { test } from 'node:test';
 import {
+  downloadConditional,
   extractTaipeiSalesCsv,
   moiSeasonUrl,
   quartersForLookback,
@@ -42,18 +47,45 @@ test('doorplate source parser rejects missing or ambiguous CSV resources', () =>
 });
 
 test('ZIP extraction accepts only Taipei sale CSV and rejects traversal entries', async () => {
-  const csv = await extractTaipeiSalesCsv([
-    { path: 'a_lvr_land_a.csv', buffer: Buffer.from('交易年月日\n1150105\n') },
-    { path: 'b_lvr_land_a.csv', buffer: Buffer.from('ignored') },
-  ]);
-  assert.equal(csv.toString('utf8'), '交易年月日\n1150105\n');
+  const root = await mkdtemp(join(tmpdir(), 'market-source-'));
+  const destination = join(root, 'a_lvr_land_a.csv');
+  try {
+    await extractTaipeiSalesCsv([
+      { path: 'a_lvr_land_a.csv', stream: () => Readable.from('交易年月日\n1150105\n') },
+      { path: 'b_lvr_land_a.csv', stream: () => Readable.from('ignored') },
+    ], destination);
+    assert.equal(await readFile(destination, 'utf8'), '交易年月日\n1150105\n');
 
-  await assert.rejects(
-    () => extractTaipeiSalesCsv([{ path: '../a_lvr_land_a.csv', buffer: Buffer.from('bad') }]),
-    /unsafe ZIP entry/i,
+    await assert.rejects(
+      () => extractTaipeiSalesCsv([{ path: '../a_lvr_land_a.csv', stream: () => Readable.from('bad') }], destination),
+      /unsafe ZIP entry/i,
+    );
+    await assert.rejects(
+      () => extractTaipeiSalesCsv([{ path: '/a_lvr_land_a.csv', stream: () => Readable.from('bad') }], destination),
+      /unsafe ZIP entry/i,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('conditional download streams a response directly to a staging file', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'market-source-'));
+  const destination = join(root, 'source.csv');
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const chunks = ['first,', 'second\n'];
+  const result = await downloadConditional(
+    async () => new Response(new ReadableStream({
+      pull(controller) {
+        const next = chunks.shift();
+        if (next === undefined) controller.close();
+        else controller.enqueue(new TextEncoder().encode(next));
+      },
+    }), { status: 200, headers: { etag: '"fresh"' } }),
+    'https://example.test/source.csv',
+    {},
+    destination,
   );
-  await assert.rejects(
-    () => extractTaipeiSalesCsv([{ path: '/a_lvr_land_a.csv', buffer: Buffer.from('bad') }]),
-    /unsafe ZIP entry/i,
-  );
+  assert.equal(result.kind, 'downloaded');
+  assert.equal(await readFile(destination, 'utf8'), 'first,second\n');
 });

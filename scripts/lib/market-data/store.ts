@@ -13,6 +13,11 @@ export interface PublishOptions {
   minTransactions?: number;
 }
 
+/** Byte/code-unit ordering is locale-independent and therefore checksum-safe. */
+export function compareStableText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 export async function sha256File(file: string): Promise<string> {
   const hash = createHash('sha256');
   await new Promise<void>((resolve, reject) => {
@@ -27,7 +32,7 @@ export async function sha256File(file: string): Promise<string> {
 export function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
   if (value && typeof value === 'object') {
-    return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))
+    return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => compareStableText(a, b))
       .map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`).join(',')}}`;
   }
   return JSON.stringify(value);
@@ -64,7 +69,7 @@ export function marketDataFreshness(manifest: MarketDataManifest, asOf: string |
 
 function sortedKeys(value: Record<string, unknown>): boolean {
   const keys = Object.keys(value);
-  return keys.every((key, index) => index === 0 || keys[index - 1]! <= key);
+  return keys.every((key, index) => index === 0 || compareStableText(keys[index - 1]!, key) <= 0);
 }
 
 function validCoordinate(value: unknown): boolean {

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { MARKET_SCHEMA_VERSION } from './config.ts';
-import { loadMarketData, marketDataFreshness, publishStagedBuild, readManifest, sha256File } from './store.ts';
+import { loadMarketData, marketDataFreshness, publishStagedBuild, readManifest, sha256File, stableJson } from './store.ts';
 import type { DoorplateIndex, MarketDataManifest, TransactionIndex } from './types.ts';
 
 function manifest(buildId: string, recordCount = 1): MarketDataManifest {
@@ -97,4 +97,8 @@ test('freshness marks independently stale source checks without changing the act
     doorplateStale: true,
     transactionStale: false,
   });
+});
+
+test('stable JSON uses code-unit key order for Han keys on every runtime locale', () => {
+  assert.equal(stableJson({ 中: 2, 一: 1 }), '{"一":1,"中":2}');
 });

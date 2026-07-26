@@ -1,4 +1,8 @@
+import { createWriteStream } from 'node:fs';
+import { mkdir } from 'node:fs/promises';
+import path from 'node:path';
 import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import unzipper from 'unzipper';
 
 export const TAIPEI_DOORPLATE_DETAIL_URL =
@@ -16,14 +20,13 @@ export interface ConditionalSource {
 
 export type ConditionalDownload =
   | { kind: 'not-modified'; etag: string | null; lastModified: string | null }
-  | { kind: 'downloaded'; bytes: Buffer; etag: string | null; lastModified: string | null };
+  | { kind: 'downloaded'; etag: string | null; lastModified: string | null };
 
 export type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
 export interface ZipEntry {
   path: string;
-  buffer?: Buffer | Uint8Array;
-  stream?: () => Readable;
+  stream: () => Readable;
 }
 
 function quarter(year: number, month: number): string {
@@ -94,6 +97,7 @@ export async function downloadConditional(
   fetcher: FetchLike,
   url: string,
   previous: ConditionalSource = {},
+  destination: string,
 ): Promise<ConditionalDownload> {
   const headers = new Headers();
   if (previous.etag) headers.set('if-none-match', previous.etag);
@@ -103,7 +107,10 @@ export async function downloadConditional(
   const lastModified = response.headers.get('last-modified');
   if (response.status === 304) return { kind: 'not-modified', etag, lastModified };
   if (!response.ok) throw new Error(`Download failed (${response.status}) for ${url}`);
-  return { kind: 'downloaded', bytes: Buffer.from(await response.arrayBuffer()), etag, lastModified };
+  if (!response.body) throw new Error(`Download returned an empty body for ${url}`);
+  await mkdir(path.dirname(destination), { recursive: true });
+  await pipeline(Readable.fromWeb(response.body as import('node:stream/web').ReadableStream), createWriteStream(destination));
+  return { kind: 'downloaded', etag, lastModified };
 }
 
 function unsafeZipPath(path: string): boolean {
@@ -111,18 +118,11 @@ function unsafeZipPath(path: string): boolean {
   return normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized) || normalized.split('/').includes('..');
 }
 
-async function entryBytes(entry: ZipEntry): Promise<Buffer> {
-  if (entry.buffer) return Buffer.from(entry.buffer);
-  if (entry.stream) {
-    const chunks: Buffer[] = [];
-    for await (const chunk of entry.stream()) chunks.push(Buffer.from(chunk));
-    return Buffer.concat(chunks);
-  }
-  throw new Error(`ZIP entry has no readable content: ${entry.path}`);
-}
-
 /** Extracts only Taipei City's MOI sale CSV, rejecting zip-slip entries before use. */
-export async function extractTaipeiSalesCsv(entries: Iterable<ZipEntry> | AsyncIterable<ZipEntry>): Promise<Buffer> {
+export async function extractTaipeiSalesCsv(
+  entries: Iterable<ZipEntry> | AsyncIterable<ZipEntry>,
+  destination: string,
+): Promise<void> {
   let selected: ZipEntry | null = null;
   for await (const entry of entries) {
     if (unsafeZipPath(entry.path)) throw new Error(`Unsafe ZIP entry path: ${entry.path}`);
@@ -132,11 +132,12 @@ export async function extractTaipeiSalesCsv(entries: Iterable<ZipEntry> | AsyncI
     }
   }
   if (!selected) throw new Error('MOI ZIP schema drift: missing a_lvr_land_a.csv');
-  return entryBytes(selected);
+  await mkdir(path.dirname(destination), { recursive: true });
+  await pipeline(selected.stream(), createWriteStream(destination));
 }
 
 /** Adapts unzipper entries for the injection-friendly extractor above. */
-export async function zipEntriesFromBuffer(bytes: Buffer): Promise<ZipEntry[]> {
-  const directory = await unzipper.Open.buffer(bytes);
+export async function zipEntriesFromFile(file: string): Promise<ZipEntry[]> {
+  const directory = await unzipper.Open.file(file);
   return directory.files.map((file) => ({ path: file.path, stream: () => file.stream() }));
 }
