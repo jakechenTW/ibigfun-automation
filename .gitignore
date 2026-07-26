@@ -23,6 +23,9 @@ downloads/
 # Node toolchain
 node_modules/
 
+# Local feature worktrees.
+.worktrees/
+
 # Private profiles — the template ships only example-* profiles.
 # Your own tuned profiles live in profiles/<name>.local/ folders: they stay
 # on disk and are auto-discovered, but are never committed.
