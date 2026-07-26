@@ -86,6 +86,17 @@ function finitePositive(value: string): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+function isZeroOrEmpty(value: string): boolean {
+  if (!value) return true;
+  const parsed = Number(value.normalize('NFKC').replaceAll(',', ''));
+  return Number.isFinite(parsed) && parsed === 0;
+}
+
+function isNoParkingType(value: string): boolean {
+  const normalized = value.normalize('NFKC').replace(/\s+/g, '');
+  return normalized === '' || normalized === '無車位';
+}
+
 function chineseInteger(value: string): number | null {
   const digits: Record<string, number> = {
     零: 0, 〇: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 兩: 2,
@@ -198,7 +209,11 @@ export function normalizeSaleTransaction(
   const parkingPriceRaw = aliasValue(values, 'parkingPrice');
   const parkingAreaSqM = finitePositive(parkingAreaRaw);
   const parkingPriceNtd = finitePositive(parkingPriceRaw);
-  const parkingExists = Boolean(parkingType) || Boolean(parkingAreaRaw) || Boolean(parkingPriceRaw);
+  const parkingExists = !(
+    isNoParkingType(parkingType) &&
+    isZeroOrEmpty(parkingAreaRaw) &&
+    isZeroOrEmpty(parkingPriceRaw)
+  );
   if (parkingExists && (!parkingAreaSqM || !parkingPriceNtd)) return excluded(id, 'parking-not-separable');
 
   const parkingArea = parkingAreaSqM ?? 0;

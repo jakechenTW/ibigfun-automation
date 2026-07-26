@@ -79,6 +79,37 @@ test('parking that cannot be fully separated is excluded', () => {
   assert.deepEqual(tx.reasons, ['parking-not-separable']);
 });
 
+test('treats conventional zero parking fields as no parking', () => {
+  for (const parkingType of ['', '無車位']) {
+    const tx = normalizeSaleTransaction(row({
+      '交易標的': '房地(土地+建物)',
+      '單價元平方公尺': '300000',
+      '車位類別': parkingType,
+      '車位移轉總面積平方公尺': '0',
+      '車位總價元': '0',
+    }), context);
+
+    assert.equal(tx.kind, 'included', parkingType || 'empty parking type');
+    if (tx.kind !== 'included') continue;
+    assert.equal(tx.transaction.buildingPriceNtd, 30_000_000);
+    assert.ok(Math.abs(tx.transaction.buildingAreaPing - 30.25) < 0.01);
+    assert.equal(tx.transaction.parkingPriceNtd, 0);
+    assert.equal(tx.transaction.parkingAreaPing, 0);
+  }
+});
+
+test('rejects partial parking fields even when the other field is zero', () => {
+  for (const partialParking of [
+    { '車位類別': '坡道平面', '車位移轉總面積平方公尺': '20', '車位總價元': '0' },
+    { '車位類別': '坡道平面', '車位移轉總面積平方公尺': '0', '車位總價元': '3000000' },
+  ]) {
+    const tx = normalizeSaleTransaction(row(partialParking), context);
+    assert.equal(tx.kind, 'excluded');
+    if (tx.kind !== 'excluded') continue;
+    assert.deepEqual(tx.reasons, ['parking-not-separable']);
+  }
+});
+
 test('explicit special relationship is excluded but ambiguous prose is reviewed', () => {
   assert.ok(specialTransactionFlags('親友、員工、共有人或其他特殊關係間之交易').includes('related-party'));
   assert.deepEqual(specialTransactionFlags('屋主誠意出售'), []);
