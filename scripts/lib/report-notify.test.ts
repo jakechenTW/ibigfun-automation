@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { assertNotificationStatusAllowsMarketData } from './report-notify.ts';
+import { assertNotificationStatusAllowsMarketData, validateReportEvidence } from './report-notify.ts';
 
 const freshEnrichment = {
   marketReliable: 1,
@@ -72,4 +72,45 @@ test('fails closed when market summary counts disagree with listings', () => {
 test('warn and fail statuses do not validate incomplete market evidence', () => {
   assert.doesNotThrow(() => assertNotificationStatusAllowsMarketData('warn', undefined));
   assert.doesNotThrow(() => assertNotificationStatusAllowsMarketData('fail', { malformed: true }));
+});
+
+test('warn status cannot bypass valuation review binding', () => {
+  const enriched = {
+    marketReliable: 0,
+    marketReview: 1,
+    marketUnavailable: 0,
+    marketDataStale: 0,
+    listings: [{
+      id: 53199422,
+      marketEstimate: {
+        status: 'review',
+        unavailableReasons: ['insufficient-comparables'],
+        marketUnitPriceMedian: 88,
+        marketUnitPriceP25: 82,
+        marketUnitPriceP75: 95,
+        sourceFreshness: { transactionStale: false, doorplateStale: false },
+      },
+    }],
+  };
+  const fabricatedReview = {
+    schemaVersion: 1,
+    reviews: [{
+      listingId: 53199422,
+      source: '好時價',
+      sourceUrl: 'https://example.invalid/warn-bypass',
+      checkedAt: '2026-07-26T04:00:00.000Z',
+      externalUnitPriceWan: 92,
+      externalTotalPriceWan: null,
+      officialStatus: 'review',
+      officialUnavailableReasons: ['fabricated-reason'],
+      officialMedianWan: 88,
+      officialP25Wan: 82,
+      officialP75Wan: 95,
+      differencePercent: 4.55,
+      accepted: true,
+      rationale: '測試 warn 不可繞過官方證據綁定',
+      resultingBucket: 'near-threshold',
+    }],
+  };
+  assert.throws(() => validateReportEvidence('warn', enriched, fabricatedReview), /officialUnavailableReasons/);
 });

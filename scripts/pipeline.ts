@@ -31,8 +31,7 @@ import { fetchStep, enrichStep } from './lib/steps.ts';
 import { resolveRange, rangeFlags, type RunRange } from './lib/range.ts';
 import { runDir, reportPath, enrichedPath, valuationReviewPath } from './lib/runpaths.ts';
 import { resolveProfileFromArgs, profileFlags, type Profile } from './lib/profiles.ts';
-import { validateValuationReview } from './lib/valuation-review.ts';
-import { assertNotificationStatusAllowsMarketData } from './lib/report-notify.ts';
+import { validateReportEvidence } from './lib/report-notify.ts';
 
 const now = () => new Date().toISOString();
 
@@ -173,29 +172,31 @@ function cmdMark(argv: string[]): void {
     }
     if (!title) fail('marking report ok requires --title "<short>".');
     const enrichedFile = enrichedPath(profile.id, range.label);
-    if (sNotify === 'ok') {
+    const reviewPath = valuationReviewPath(profile.id, range.label);
+    const hasValuationReview = fs.existsSync(reviewPath);
+    let enriched: unknown;
+    if (sNotify === 'ok' || hasValuationReview) {
       if (!fs.existsSync(enrichedFile)) {
         fail(`cannot mark report ok: required enriched artifact ${enrichedFile} is missing.`);
       }
-      let enriched: unknown;
       try {
         enriched = JSON.parse(fs.readFileSync(enrichedFile, 'utf8'));
       } catch (error) {
         fail(`cannot mark report ok: malformed enriched artifact ${enrichedFile}: ${(error as Error).message}`);
       }
-      try {
-        assertNotificationStatusAllowsMarketData('ok', enriched);
-      } catch (error) {
-        fail(`cannot mark report ok: ${(error as Error).message}`);
-      }
     }
-    const reviewPath = valuationReviewPath(profile.id, range.label);
-    if (fs.existsSync(reviewPath)) {
+    let valuationReview: unknown;
+    if (hasValuationReview) {
       try {
-        validateValuationReview(JSON.parse(fs.readFileSync(reviewPath, 'utf8')));
+        valuationReview = JSON.parse(fs.readFileSync(reviewPath, 'utf8'));
       } catch (error) {
         fail(`cannot mark report ok: malformed ${reviewPath}: ${(error as Error).message}`);
       }
+    }
+    try {
+      validateReportEvidence(sNotify, enriched, valuationReview);
+    } catch (error) {
+      fail(`cannot mark report ok: ${(error as Error).message}`);
     }
     m.notify = { tool, status: sNotify, title } as NotifyParams;
   }

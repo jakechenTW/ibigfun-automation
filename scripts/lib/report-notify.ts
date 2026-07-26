@@ -1,3 +1,5 @@
+import { validateValuationReview, validateValuationReviewAgainstEnriched } from './valuation-review.ts';
+
 export type NotificationStatus = 'ok' | 'warn' | 'fail';
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -53,4 +55,17 @@ export function assertNotificationStatusAllowsMarketData(status: NotificationSta
   if (actual.marketReview > 0 || actual.marketUnavailable > 0) {
     throw new Error('market review or unavailable evidence requires --status-notify warn, not ok');
   }
+}
+
+/** Validates optional review evidence for every status, then applies the ok-only market gate. */
+export function validateReportEvidence(
+  status: NotificationStatus,
+  enriched: unknown,
+  valuationReview?: unknown,
+): void {
+  if (valuationReview !== undefined) {
+    const reviewFile = validateValuationReview(valuationReview);
+    validateValuationReviewAgainstEnriched(reviewFile, enriched);
+  }
+  assertNotificationStatusAllowsMarketData(status, enriched);
 }

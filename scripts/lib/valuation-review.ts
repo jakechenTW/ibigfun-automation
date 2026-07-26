@@ -32,6 +32,7 @@ export interface ValuationReviewFile {
 const BUCKETS = new Set<ValuationReviewBucket>(['recommended', 'near-threshold', 'suspicious', 'excluded']);
 const OFFICIAL_STATUSES = new Set<OfficialValuationStatus>(['reliable', 'review', 'unavailable']);
 const ISO_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{3})?Z$/u;
+const DIFFERENCE_TOLERANCE_PERCENTAGE_POINTS = 0.01;
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError(`${label} must be an object`);
@@ -169,4 +170,63 @@ export function validateValuationReview(value: unknown): ValuationReviewFile {
   if (!Array.isArray(file.reviews)) throw new TypeError('reviews must be an array');
   if (file.reviews.length === 0) throw new RangeError('reviews must contain at least one review');
   return { schemaVersion: 1, reviews: file.reviews.map(review) };
+}
+
+function authoritativePrice(value: unknown, label: string): number | null {
+  return value === null ? null : positive(value, label);
+}
+
+function sameStrings(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+/** Binds agent-authored review claims to one authoritative enriched listing. */
+export function validateValuationReviewAgainstEnriched(file: ValuationReviewFile, enriched: unknown): void {
+  const enrichedFile = record(enriched, 'enriched artifact');
+  if (!Array.isArray(enrichedFile.listings)) throw new TypeError('enriched artifact listings must be an array');
+  const seenReviewIds = new Set<number>();
+
+  for (const [index, reviewEntry] of file.reviews.entries()) {
+    if (seenReviewIds.has(reviewEntry.listingId)) {
+      throw new RangeError(`duplicate review listingId ${reviewEntry.listingId}`);
+    }
+    seenReviewIds.add(reviewEntry.listingId);
+    const matches = enrichedFile.listings.filter((listing) => record(listing, 'enriched listing').id === reviewEntry.listingId);
+    if (matches.length !== 1) {
+      throw new RangeError(`review listingId ${reviewEntry.listingId} must match exactly one enriched listing; found ${matches.length}`);
+    }
+    const listing = record(matches[0], `enriched listing ${reviewEntry.listingId}`);
+    const estimate = record(listing.marketEstimate, `listing ${reviewEntry.listingId} marketEstimate`);
+    if (estimate.status !== reviewEntry.officialStatus) {
+      throw new RangeError(`reviews[${index}].officialStatus does not match enriched marketEstimate`);
+    }
+    const reasons = stringArray(estimate.unavailableReasons, `listing ${reviewEntry.listingId} marketEstimate.unavailableReasons`);
+    if (!sameStrings(reviewEntry.officialUnavailableReasons, reasons)) {
+      throw new RangeError(`reviews[${index}].officialUnavailableReasons do not match enriched marketEstimate`);
+    }
+    const officialFields = [
+      ['officialMedianWan', 'marketUnitPriceMedian'],
+      ['officialP25Wan', 'marketUnitPriceP25'],
+      ['officialP75Wan', 'marketUnitPriceP75'],
+    ] as const;
+    for (const [reviewField, estimateField] of officialFields) {
+      const authoritative = authoritativePrice(estimate[estimateField], `listing ${reviewEntry.listingId} marketEstimate.${estimateField}`);
+      if (!Object.is(reviewEntry[reviewField], authoritative)) {
+        throw new RangeError(`reviews[${index}].${reviewField} does not match enriched marketEstimate.${estimateField}`);
+      }
+    }
+    if (reviewEntry.externalUnitPriceWan !== null && reviewEntry.officialMedianWan !== null) {
+      const expected = (reviewEntry.externalUnitPriceWan - reviewEntry.officialMedianWan) /
+        reviewEntry.officialMedianWan * 100;
+      if (reviewEntry.differencePercent === null ||
+        Math.abs(reviewEntry.differencePercent - expected) > DIFFERENCE_TOLERANCE_PERCENTAGE_POINTS) {
+        throw new RangeError(`reviews[${index}].differencePercent does not match external-versus-official unit-price difference`);
+      }
+    } else if (reviewEntry.differencePercent !== null) {
+      throw new RangeError(`reviews[${index}].differencePercent must be null without both unit-price inputs`);
+    }
+    if (reviewEntry.officialStatus !== 'reliable' && reviewEntry.resultingBucket === 'recommended') {
+      throw new RangeError(`reviews[${index}] non-reliable official evidence cannot result in recommended`);
+    }
+  }
 }

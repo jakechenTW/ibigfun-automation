@@ -94,6 +94,13 @@ P25/中位/P75、兩邊單價皆有時的差異、是否採納、理由與結果
 `mark report --status ok` 時會驗證此檔；沒有可驗證證據不得藉外部值改桶。官方行情不可用時，外部查核
 只能讓物件留在人工候選，不能直接升為推薦。
 
+每個 review `listingId` 必須在同 run 的 `enriched.json` **恰好出現一次**，review 內的
+`officialStatus`、`officialUnavailableReasons`、官方中位/P25/P75（包含 `null`）必須逐欄等於該 listing 的
+`marketEstimate`；同一 listing 不得有重複 review。`differencePercent` 定義為
+`(externalUnitPriceWan − officialMedianWan) / officialMedianWan * 100`，只有兩個單價都有時可填，pipeline
+以 ±0.01 個百分點容差重算驗證。只要 `valuation-review.json` 存在，這些綁定規則對 `ok`、`warn`、`fail`
+通知狀態都生效；換成 `warn` 不能繞過稽核。
+
 通知的逐筆「覆核」欄只能是一行精簡結論（是否查核、來源、結果和待確認事項），不得包含完整可比清單、
 原始地址、交易列或外部頁面抓取內容。
 

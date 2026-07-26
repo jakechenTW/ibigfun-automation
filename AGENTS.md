@@ -117,7 +117,7 @@ evaluation, and writing the report.
   `<from>_<to>`. One run per profile and label is recorded under
   `state/runs/<profile>/<label>/`; artifacts are
   `state/runs/<profile>/<label>/{listings.json, enriched.json, report.md, valuation-review.json?}`.
-  `valuation-review.json` is optional and exists only if a bounded external review affects a report bucket; `mark report --status ok` validates it. A whole range is fetched in **one** query
+  `valuation-review.json` is optional and exists only if a bounded external review affects a report bucket; `mark report --status ok` binds every review to exactly one listing's authoritative `marketEstimate` even when notification status is `warn`/`fail`. A whole range is fetched in **one** query
   (`add_date`/`add_date_max`), deduped by listing id, and emitted as **one**
   merged report + **one** notification. Already-ok steps are skipped, so
   re-running resumes.

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { validateValuationReview } from './valuation-review.ts';
+import { validateValuationReview, validateValuationReviewAgainstEnriched } from './valuation-review.ts';
 
 const completeReview = {
   schemaVersion: 1,
@@ -143,4 +143,130 @@ test('rejects recommending from officially unavailable evidence', () => {
     }],
   };
   assert.throws(() => validateValuationReview(unavailableRecommendation), /cannot result in recommended/);
+});
+
+const authoritativeEnriched = {
+  listings: [{
+    id: 53199422,
+    marketEstimate: {
+      status: 'reliable',
+      unavailableReasons: [],
+      marketUnitPriceMedian: 88,
+      marketUnitPriceP25: 82,
+      marketUnitPriceP75: 95,
+    },
+  }],
+};
+
+test('binds a valid external review to authoritative enriched market evidence', () => {
+  const review = validateValuationReview(completeReview);
+  assert.doesNotThrow(() => validateValuationReviewAgainstEnriched(review, authoritativeEnriched));
+});
+
+test('rejects review listing IDs missing from or duplicated in enriched listings', () => {
+  const review = validateValuationReview(completeReview);
+  assert.throws(() => validateValuationReviewAgainstEnriched(review, { listings: [] }), /listingId 53199422.*exactly one/);
+  assert.throws(() => validateValuationReviewAgainstEnriched(review, {
+    listings: [...authoritativeEnriched.listings, ...authoritativeEnriched.listings],
+  }), /listingId 53199422.*exactly one/);
+});
+
+test('rejects duplicate review entries for one listing ID', () => {
+  const review = validateValuationReview({
+    ...completeReview,
+    reviews: [completeReview.reviews[0], { ...completeReview.reviews[0] }],
+  });
+  assert.throws(() => validateValuationReviewAgainstEnriched(review, authoritativeEnriched), /duplicate review listingId/);
+});
+
+test('rejects fabricated official status or unavailable reasons', () => {
+  const statusMismatch = validateValuationReview({
+    ...completeReview,
+    reviews: [{
+      ...completeReview.reviews[0],
+      officialStatus: 'review',
+      officialUnavailableReasons: ['insufficient-comparables'],
+    }],
+  });
+  assert.throws(() => validateValuationReviewAgainstEnriched(statusMismatch, authoritativeEnriched), /officialStatus/);
+
+  const reasonsMismatch = validateValuationReview({
+    ...completeReview,
+    reviews: [{
+      ...completeReview.reviews[0],
+      officialStatus: 'review',
+      officialUnavailableReasons: ['fabricated'],
+    }],
+  });
+  assert.throws(() => validateValuationReviewAgainstEnriched(reasonsMismatch, {
+    listings: [{
+      id: 53199422,
+      marketEstimate: {
+        status: 'review',
+        unavailableReasons: ['insufficient-comparables'],
+        marketUnitPriceMedian: 88,
+        marketUnitPriceP25: 82,
+        marketUnitPriceP75: 95,
+      },
+    }],
+  }), /officialUnavailableReasons/);
+});
+
+test('rejects fabricated official interval values including null mismatches', () => {
+  const numericMismatches = [
+    { field: 'officialMedianWan', value: 89, differencePercent: 3.37 },
+    { field: 'officialP25Wan', value: 83, differencePercent: 4.55 },
+    { field: 'officialP75Wan', value: 96, differencePercent: 4.55 },
+  ] as const;
+  for (const { field, value, differencePercent } of numericMismatches) {
+    const mismatch = validateValuationReview({
+      ...completeReview,
+      reviews: [{ ...completeReview.reviews[0], [field]: value, differencePercent }],
+    });
+    assert.throws(
+      () => validateValuationReviewAgainstEnriched(mismatch, authoritativeEnriched),
+      new RegExp(field),
+    );
+  }
+
+  const reviewAuthority = {
+    listings: [{
+      id: 53199422,
+      marketEstimate: {
+        status: 'review',
+        unavailableReasons: ['insufficient-comparables'],
+        marketUnitPriceMedian: 88,
+        marketUnitPriceP25: 82,
+        marketUnitPriceP75: 95,
+      },
+    }],
+  };
+  for (const field of ['officialMedianWan', 'officialP25Wan', 'officialP75Wan'] as const) {
+    const nullMismatch = validateValuationReview({
+      schemaVersion: 1,
+      reviews: [{
+        ...completeReview.reviews[0],
+        officialStatus: 'review',
+        officialUnavailableReasons: ['insufficient-comparables'],
+        [field]: null,
+        differencePercent: field === 'officialMedianWan' ? null : 4.55,
+        resultingBucket: 'near-threshold',
+      }],
+    });
+    assert.throws(
+      () => validateValuationReviewAgainstEnriched(nullMismatch, reviewAuthority),
+      new RegExp(field),
+    );
+  }
+});
+
+test('recomputes external-versus-official difference within a 0.01 point tolerance', () => {
+  const validRounded = validateValuationReview(completeReview);
+  assert.doesNotThrow(() => validateValuationReviewAgainstEnriched(validRounded, authoritativeEnriched));
+
+  const fabricatedDifference = validateValuationReview({
+    ...completeReview,
+    reviews: [{ ...completeReview.reviews[0], differencePercent: 4.57 }],
+  });
+  assert.throws(() => validateValuationReviewAgainstEnriched(fabricatedDifference, authoritativeEnriched), /differencePercent/);
 });
