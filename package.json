@@ -6,17 +6,26 @@
   "description": "Template: monitor iBigFun property listings via configurable profiles and send profile-specific report notifications.",
   "license": "MIT",
   "author": "Jake Chen",
-  "repository": { "type": "git", "url": "https://github.com/jakechenTW/ibigfun-automation" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jakechenTW/ibigfun-automation"
+  },
   "scripts": {
     "fetch": "tsx scripts/fetch.ts",
     "enrich": "tsx scripts/enrich.ts",
     "route": "tsx scripts/route.ts",
-    "test": "node --import tsx --test scripts/lib/date.test.ts scripts/lib/parse.test.ts scripts/lib/geo.test.ts scripts/lib/finance.test.ts scripts/lib/exclude.test.ts scripts/lib/mrt.test.ts scripts/lib/districts.test.ts scripts/lib/enrich-offline.test.ts scripts/lib/walk.test.ts scripts/lib/history.test.ts scripts/lib/relogin.test.ts scripts/lib/tenure.test.ts scripts/lib/cookies.test.ts scripts/lib/api.test.ts scripts/lib/map.test.ts scripts/lib/http.test.ts scripts/lib/extract.test.ts scripts/lib/manifest.test.ts scripts/lib/journal.test.ts scripts/lib/run.test.ts scripts/lib/notify.test.ts scripts/lib/range.test.ts scripts/lib/runpaths.test.ts scripts/lib/profiles.test.ts scripts/lib/region.test.ts",
+    "test": "node --import tsx --test scripts/lib/*.test.ts scripts/lib/market-data/*.test.ts",
     "pipeline": "tsx scripts/pipeline.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/unzipper": "^0.10.11",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
+  },
+  "dependencies": {
+    "csv-parse": "^7.0.1",
+    "proj4": "^2.20.9",
+    "unzipper": "^0.12.5"
   }
 }
