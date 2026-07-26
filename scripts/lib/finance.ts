@@ -43,6 +43,14 @@ export function discountPercent(
   return ((marketUnitPrice - listingUnitPrice) / marketUnitPrice) * 100;
 }
 
+/** Asking premium vs market, in percent: positive means the listing is above market. */
+export function askingPremiumPercent(
+  listingUnitPrice: number,
+  marketUnitPrice: number,
+): number {
+  return ((listingUnitPrice - marketUnitPrice) / marketUnitPrice) * 100;
+}
+
 /**
  * Rent coverage ratio: monthly rent / monthly mortgage payment.
  * Advisory display only — the investment screen no longer gates buckets on this

@@ -4,6 +4,7 @@ import {
   monthlyMortgage,
   mortgageForPrice,
   discountPercent,
+  askingPremiumPercent,
   rentCoverage,
 } from './finance.ts';
 
@@ -18,6 +19,10 @@ test('zero-rate loan is principal split evenly', () => {
 
 test('discountPercent: 55 vs 35.2 -> 36%', () => {
   assert.ok(Math.abs(discountPercent(55, 35.2) - 36.0) < 0.1);
+});
+
+test('asking premium is positive above market', () => {
+  assert.equal(askingPremiumPercent(108, 100), 8);
 });
 
 test('rentCoverage: 34000 / 40449 -> ~0.84', () => {
