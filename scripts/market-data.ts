@@ -3,6 +3,7 @@
  * Backtesting reads only the active validated build; it never refreshes sources.
  */
 import { pathToFileURL } from 'node:url';
+import { isValidDateString, taipeiDateString } from './lib/date.ts';
 import { backtestTransactions, type BacktestReport } from './lib/market-data/backtest.ts';
 import { MARKET_DATA_ROOT } from './lib/market-data/config.ts';
 import { loadMarketData, marketDataFreshness } from './lib/market-data/store.ts';
@@ -15,19 +16,8 @@ const P75_APE_TARGET = 0.20;
 export class CliInputError extends Error {}
 
 export type MarketDataCommand =
-  | { command: 'update'; city: typeof SUPPORTED_CITY }
+  | { command: 'update'; city: typeof SUPPORTED_CITY; asOf: string }
   | { command: 'backtest'; city: typeof SUPPORTED_CITY; asOf: string; noGate: boolean };
-
-function validDate(value: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const [year, month, day] = value.split('-').map(Number);
-  const date = new Date(Date.UTC(year!, month! - 1, day!));
-  return date.getUTCFullYear() === year && date.getUTCMonth() === month! - 1 && date.getUTCDate() === day;
-}
-
-function defaultAsOf(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 function readFlagValue(args: readonly string[], index: number, flag: string): [string, number] {
   const value = args[index + 1];
@@ -36,7 +26,7 @@ function readFlagValue(args: readonly string[], index: number, flag: string): [s
 }
 
 /** Strictly parses the small public CLI surface before any filesystem or network work. */
-export function parseMarketDataArgs(args: readonly string[]): MarketDataCommand {
+export function parseMarketDataArgs(args: readonly string[], now: Date = new Date()): MarketDataCommand {
   const command = args[0];
   if (command !== 'update' && command !== 'backtest') {
     throw new CliInputError('usage: market-data <update|backtest> --city taipei [--as-of YYYY-MM-DD] [--no-gate]');
@@ -73,9 +63,9 @@ export function parseMarketDataArgs(args: readonly string[]): MarketDataCommand 
   if (city !== SUPPORTED_CITY) {
     throw new CliInputError(`unsupported city: ${city ?? '(missing)'}; supported city: ${SUPPORTED_CITY}`);
   }
-  if (command === 'update') return { command, city };
-  const resolvedAsOf = asOf ?? defaultAsOf();
-  if (!validDate(resolvedAsOf)) throw new CliInputError('--as-of must be a valid YYYY-MM-DD date');
+  const resolvedAsOf = asOf ?? taipeiDateString(now);
+  if (!isValidDateString(resolvedAsOf)) throw new CliInputError('--as-of must be a valid YYYY-MM-DD date');
+  if (command === 'update') return { command, city, asOf: resolvedAsOf };
   return { command, city, asOf: resolvedAsOf, noGate };
 }
 
@@ -93,8 +83,8 @@ export function backtestExitCode(report: BacktestReport, noGate: boolean): numbe
   return report.overall.medianApe! > MEDIAN_APE_TARGET || report.overall.p75Ape! > P75_APE_TARGET ? 1 : 0;
 }
 
-async function update(): Promise<void> {
-  const bundle = await ensureTaipeiMarketData({ asOf: defaultAsOf() });
+async function update(asOf: string): Promise<void> {
+  const bundle = await ensureTaipeiMarketData({ asOf });
   if (!bundle) throw new Error('No validated Taipei market-data build is available after update');
   process.stdout.write(`${JSON.stringify({
     buildId: bundle.manifest.buildId,
@@ -106,7 +96,7 @@ async function update(): Promise<void> {
       doorplates: bundle.manifest.doorplates.recordCount,
       transactions: bundle.manifest.transactions.recordCount,
     },
-    freshness: marketDataFreshness(bundle.manifest, defaultAsOf()),
+    freshness: marketDataFreshness(bundle.manifest, asOf),
   }, null, 2)}\n`);
 }
 
@@ -125,10 +115,10 @@ async function backtest(command: Extract<MarketDataCommand, { command: 'backtest
   return exitCode;
 }
 
-export async function runMarketDataCommand(args: readonly string[]): Promise<number> {
-  const command = parseMarketDataArgs(args);
+export async function runMarketDataCommand(args: readonly string[], now: Date = new Date()): Promise<number> {
+  const command = parseMarketDataArgs(args, now);
   if (command.command === 'update') {
-    await update();
+    await update(command.asOf);
     return 0;
   }
   return backtest(command);

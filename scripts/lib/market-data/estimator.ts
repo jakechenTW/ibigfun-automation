@@ -11,17 +11,24 @@ import type {
   TransactionIndex,
 } from './types.ts';
 
-function finitePositive(value: number): boolean {
-  return Number.isFinite(value) && value > 0;
+function finitePositive(value: number | null): boolean {
+  return value !== null && Number.isFinite(value) && value > 0;
 }
 
-function subjectHardReasons(subject: MarketSubject): string[] {
+export interface EstimateMarketOptions {
+  /** Backtests intentionally hide the held-out actual price, so premiums are unavailable. */
+  allowMissingAskingUnitPrice?: boolean;
+}
+
+function subjectHardReasons(subject: MarketSubject, options: EstimateMarketOptions): string[] {
   const reasons: string[] = [];
   if (!Number.isFinite(subject.coordinate.lat) || !Number.isFinite(subject.coordinate.lng)) reasons.push('location-unreliable');
   if (!subject.district) reasons.push('missing-district');
   if (subject.ownership === 'unknown') reasons.push('ownership-unknown');
   if (!finitePositive(subject.buildingAreaPing)) reasons.push('invalid-building-area');
-  if (!finitePositive(subject.askingUnitPriceWan)) reasons.push('invalid-asking-unit-price');
+  if (subject.askingUnitPriceWan === null
+    ? !options.allowMissingAskingUnitPrice
+    : !finitePositive(subject.askingUnitPriceWan)) reasons.push('invalid-asking-unit-price');
   if (!subject.parkingSeparable) reasons.push('parking-not-separable');
   if (subject.buildingType !== 'apartment' && subject.ageYears === null) reasons.push('missing-subject-building-age');
   return reasons;
@@ -53,8 +60,9 @@ export function estimateMarket(
   index: TransactionIndex,
   freshness: SourceFreshness,
   asOf: string,
+  options: EstimateMarketOptions = {},
 ): MarketEstimate {
-  const hardReasons = subjectHardReasons(subject);
+  const hardReasons = subjectHardReasons(subject, options);
   if (hardReasons.includes('location-unreliable')) {
     return {
       status: 'unavailable',
@@ -139,8 +147,8 @@ export function estimateMarket(
     marketUnitPriceMedian: median,
     marketUnitPriceP25: p25,
     marketUnitPriceP75: p75,
-    askingPremiumMedian: askingPremiumPercent(subject.askingUnitPriceWan, median),
-    askingPremiumConservative: askingPremiumPercent(subject.askingUnitPriceWan, p25),
+    askingPremiumMedian: subject.askingUnitPriceWan === null ? null : askingPremiumPercent(subject.askingUnitPriceWan, median),
+    askingPremiumConservative: subject.askingUnitPriceWan === null ? null : askingPremiumPercent(subject.askingUnitPriceWan, p25),
     selectedStage: selection.selectedStage,
     sourceFreshness: freshness,
     unavailableReasons,

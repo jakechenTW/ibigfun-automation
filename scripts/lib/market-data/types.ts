@@ -62,7 +62,8 @@ export interface MarketSubject {
   ownershipEvidence?: SubjectOwnershipEvidence;
   buildingType: BuildingType;
   buildingAreaPing: number;
-  askingUnitPriceWan: number;
+  /** Null only for offline held-out evaluation, where the outcome must stay hidden from the estimator. */
+  askingUnitPriceWan: number | null;
   floor: number;
   totalFloors: number;
   floorGroup: FloorGroup;

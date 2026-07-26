@@ -101,6 +101,22 @@ test('listing-side hard conflicts make an otherwise supported estimate unavailab
   assert.ok(estimate.unavailableReasons.includes('parking-not-separable'));
 });
 
+test('evaluation mode allows a missing asking price but not an invalid supplied asking price', () => {
+  const hiddenOutcome = estimateMarket(
+    { ...subject, askingUnitPriceWan: null }, indexWithPrices([100, 101, 102]), fresh, AS_OF,
+    { allowMissingAskingUnitPrice: true },
+  );
+  const invalidAskingPrice = estimateMarket(
+    { ...subject, askingUnitPriceWan: 0 }, indexWithPrices([100, 101, 102]), fresh, AS_OF,
+    { allowMissingAskingUnitPrice: true },
+  );
+
+  assert.equal(hiddenOutcome.status, 'reliable');
+  assert.equal(hiddenOutcome.askingPremiumMedian, null);
+  assert.equal(invalidAskingPrice.status, 'unavailable');
+  assert.ok(invalidAskingPrice.unavailableReasons.includes('invalid-asking-unit-price'));
+});
+
 test('unreliable listing GPS makes the estimate unavailable without querying grid cells', () => {
   const estimate = estimateMarket({ ...subject, coordinate: { lat: Number.NaN, lng: coordinate.lng } }, indexWithPrices([100, 101, 102]), fresh, AS_OF);
   assert.equal(estimate.status, 'unavailable');

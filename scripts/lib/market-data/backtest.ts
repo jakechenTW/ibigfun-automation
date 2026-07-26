@@ -87,7 +87,8 @@ function isEligibleSubject(transaction: MarketTransaction, asOf: Date): boolean 
   return transaction.buildingType === 'apartment' || ageYearsAt(transaction.completionDate, date) !== null;
 }
 
-function subjectFromTransaction(transaction: MarketTransaction): MarketSubject {
+/** Builds an evaluation subject without exposing the held-out sale price to the estimator. */
+export function backtestSubjectFromTransaction(transaction: MarketTransaction): MarketSubject {
   const subjectDate = transactionDate(transaction)!;
   return {
     listingId: null,
@@ -96,9 +97,7 @@ function subjectFromTransaction(transaction: MarketTransaction): MarketSubject {
     ownership: transaction.ownership,
     buildingType: transaction.buildingType,
     buildingAreaPing: transaction.buildingAreaPing,
-    // The actual transaction price is the held-out outcome, not listing input.
-    // The estimator only needs this positive value to calculate its unused premium fields.
-    askingUnitPriceWan: transaction.buildingUnitPriceWan,
+    askingUnitPriceWan: null,
     floor: transaction.floor,
     totalFloors: transaction.totalFloors,
     floorGroup: transaction.floorGroup,
@@ -156,10 +155,11 @@ export function backtestTransactions(index: TransactionIndex, options: BacktestO
     .filter((transaction) => isEligibleSubject(transaction, asOf))
     .map((transaction): BacktestCase => {
       const estimate = estimateMarket(
-        subjectFromTransaction(transaction),
+        backtestSubjectFromTransaction(transaction),
         historicalIndex(index, transaction),
         BACKTEST_FRESHNESS,
         transaction.transactionDate,
+        { allowMissingAskingUnitPrice: true },
       );
       const median = estimate.marketUnitPriceMedian;
       const p25 = estimate.marketUnitPriceP25;
