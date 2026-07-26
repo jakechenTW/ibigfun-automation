@@ -115,5 +115,6 @@ export function validateValuationReview(value: unknown): ValuationReviewFile {
   const file = record(value, 'valuation review');
   if (file.schemaVersion !== 1) throw new TypeError('schemaVersion must be 1');
   if (!Array.isArray(file.reviews)) throw new TypeError('reviews must be an array');
+  if (file.reviews.length === 0) throw new RangeError('reviews must contain at least one review');
   return { schemaVersion: 1, reviews: file.reviews.map(review) };
 }

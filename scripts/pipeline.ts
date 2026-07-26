@@ -29,9 +29,10 @@ import { runStep } from './lib/run.ts';
 import { composeNotifyCommand, runNotify, renderFailDetails } from './lib/notify.ts';
 import { fetchStep, enrichStep } from './lib/steps.ts';
 import { resolveRange, rangeFlags, type RunRange } from './lib/range.ts';
-import { runDir, reportPath, valuationReviewPath } from './lib/runpaths.ts';
+import { runDir, reportPath, enrichedPath, valuationReviewPath } from './lib/runpaths.ts';
 import { resolveProfileFromArgs, profileFlags, type Profile } from './lib/profiles.ts';
 import { validateValuationReview } from './lib/valuation-review.ts';
+import { assertNotificationStatusAllowsMarketData } from './lib/report-notify.ts';
 
 const now = () => new Date().toISOString();
 
@@ -171,6 +172,14 @@ function cmdMark(argv: string[]): void {
       fail('marking report ok requires --status-notify <ok|warn|fail>.');
     }
     if (!title) fail('marking report ok requires --title "<short>".');
+    const enrichedFile = enrichedPath(profile.id, range.label);
+    if (sNotify === 'ok' && fs.existsSync(enrichedFile)) {
+      try {
+        assertNotificationStatusAllowsMarketData('ok', JSON.parse(fs.readFileSync(enrichedFile, 'utf8')));
+      } catch (error) {
+        fail(`cannot mark report ok: ${(error as Error).message}`);
+      }
+    }
     const reviewPath = valuationReviewPath(profile.id, range.label);
     if (fs.existsSync(reviewPath)) {
       try {

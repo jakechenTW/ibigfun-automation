@@ -33,6 +33,11 @@
 - {{price}} 萬／{{ping}} 坪／{{unit_price}} 萬/坪・{{floor}}/{{total_floor}} 樓・屋齡 {{age}}・{{address_or_area}}
 - 行情狀態 {{market_status}}｜官方中位 {{market_median_wan}} 萬/坪（P25–P75 {{market_p25_wan}}–{{market_p75_wan}}）・信心 {{market_confidence}}・可比 {{comparable_count}} 筆・階段 {{selected_stage}}・官方資料 {{official_source_date}}（{{market_freshness}}）
 - 房貸 {{monthly_mortgage}}・月租 ~{{estimated_rent}}（參考）・現金流 ~{{monthly_cash_flow}}/月（參考）
+{{#if market_requires_review}}
+
+- 需人工確認：{{market_manual_review_reason}}
+
+{{/if}}
 - 覆核：{{valuation_review_line}}
 - 推薦理由：{{recommendation_reason}}
 - 風險：{{risks_or_manual_checks}}
@@ -58,6 +63,11 @@
 - {{price}} 萬／{{ping}} 坪／{{unit_price}} 萬/坪・{{floor}}/{{total_floor}} 樓・屋齡 {{age}}・{{address_or_area}}
 - 行情狀態 {{market_status}}｜官方中位 {{market_median_wan}} 萬/坪（P25–P75 {{market_p25_wan}}–{{market_p75_wan}}）・信心 {{market_confidence}}・可比 {{comparable_count}} 筆・階段 {{selected_stage}}・官方資料 {{official_source_date}}（{{market_freshness}}）
 - 房貸 {{monthly_mortgage}}・月租 ~{{estimated_rent}}（參考）・現金流 ~{{monthly_cash_flow}}/月（參考）
+{{#if market_requires_review}}
+
+- 需人工確認：{{market_manual_review_reason}}
+
+{{/if}}
 - 覆核：{{valuation_review_line}}
 - 需人工確認：{{manual_checks}}
 
@@ -79,6 +89,13 @@
 
 - {{tenure_line}}
 - 命中訊號：{{suspicious_signals}}
+- 行情狀態 {{market_status}}｜官方中位 {{market_median_wan}} 萬/坪（P25–P75 {{market_p25_wan}}–{{market_p75_wan}}）・信心 {{market_confidence}}・可比 {{comparable_count}} 筆・階段 {{selected_stage}}・官方資料 {{official_source_date}}（{{market_freshness}}）
+{{#if market_requires_review}}
+
+- 需人工確認：{{market_manual_review_reason}}
+
+{{/if}}
+- 覆核：{{valuation_review_line}}
 - 理由：{{suspicious_reason}}（信心：{{suspicious_confidence}}・{{detail_page_checked}}）
 
 {{/each}}
@@ -99,7 +116,13 @@
 
 - {{price}} 萬／{{ping}} 坪／{{unit_price}} 萬/坪・開價溢價 {{premium_percent}}%
 - {{tenure_line}}
-- 行情狀態 {{market_status}}｜官方資料 {{official_source_date}}（{{market_freshness}}）・覆核：{{valuation_review_line}}
+- 行情狀態 {{market_status}}｜官方中位 {{market_median_wan}} 萬/坪（P25–P75 {{market_p25_wan}}–{{market_p75_wan}}）・信心 {{market_confidence}}・可比 {{comparable_count}} 筆・階段 {{selected_stage}}・官方資料 {{official_source_date}}（{{market_freshness}}）
+{{#if market_requires_review}}
+
+- 需人工確認：{{market_manual_review_reason}}
+
+{{/if}}
+- 覆核：{{valuation_review_line}}
 - 排除：{{exclusion_reason}}
 
 {{/each}}

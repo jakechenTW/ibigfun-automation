@@ -246,6 +246,7 @@ listing lacking solid data cannot be labeled recommended.
   - This line is information-only: it never changes the recommend / exclusion / suspicious decision.
 - When any field (月租, 現金流, 行情, 屋齡, 地址 等) is null, render it as `—` rather than dropping the line.
 - For every evaluated listing, render one compact market-evidence line: status (`reliable` / `review` / `unavailable`), official median and P25–P75 when available, confidence, comparable count, selected stage, official source date, and freshness. A `review` or `unavailable` result must say `需人工確認`; do not imply it is a reliable valuation.
+- In the profile templates, set `market_requires_review` for `review` or `unavailable` and render `需人工確認：{{market_manual_review_reason}}`; the reason is a compact summary of `unavailableReasons`/freshness, never raw comparables. Apply this to every individually rendered bucket.
 - If an external valuation was consulted, render one compact review line. Do not embed raw comparables or the external response in the notification.
 - Render each listed property with a 1-based `rank` value inside its section.
 - Use the selected profile template for bucket names, inline metrics, omitted

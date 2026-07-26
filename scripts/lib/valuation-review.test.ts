@@ -56,3 +56,7 @@ test('rejects a non-finite official valuation field', () => {
   };
   assert.throws(() => validateValuationReview(invalidReview), /officialP25Wan/);
 });
+
+test('rejects an empty external valuation review file', () => {
+  assert.throws(() => validateValuationReview({ schemaVersion: 1, reviews: [] }), /at least one review/);
+});
