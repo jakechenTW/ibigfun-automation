@@ -13,6 +13,12 @@ test('enumerates all intersecting grid cells in lexicographic order', () => {
   assert.ok(keys.length > 1);
 });
 
+test('covers a north boundary cell at the maximum Taipei search radius', () => {
+  const keys = neighborGridKeys({ lat: 25.03281, lng: 121.564468 }, 800);
+  assert.ok(keys.some((key) => key.startsWith('5008:')));
+  assert.deepEqual(keys, [...keys].sort());
+});
+
 test('rejects an invalid spatial radius', () => {
   assert.throws(() => neighborGridKeys({ lat: 25.033964, lng: 121.564468 }, -1), RangeError);
 });

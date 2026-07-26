@@ -1,7 +1,10 @@
 import type { Coordinate } from '../coords.ts';
 import { GRID_CELL_DEGREES } from './config.ts';
 
-const METERS_PER_LATITUDE_DEGREE = 111_320;
+// A WGS84 latitude degree throughout Taipei is more than 110 km. Keeping this
+// deliberately below that minimum over-covers the north/south search extent.
+const MIN_TAIPEI_METERS_PER_LATITUDE_DEGREE = 110_000;
+const METERS_PER_LONGITUDE_DEGREE_AT_EQUATOR = 111_320;
 
 function assertFiniteCoordinate(coordinate: Coordinate): void {
   if (!Number.isFinite(coordinate.lat) || !Number.isFinite(coordinate.lng)) {
@@ -26,9 +29,9 @@ export function neighborGridKeys(coordinate: Coordinate, radiusM: number): strin
     throw new RangeError('Grid radius must be a non-negative finite number');
   }
 
-  const latitudeDelta = radiusM / METERS_PER_LATITUDE_DEGREE;
+  const latitudeDelta = radiusM / MIN_TAIPEI_METERS_PER_LATITUDE_DEGREE;
   const longitudeDelta = radiusM /
-    (METERS_PER_LATITUDE_DEGREE * Math.cos((coordinate.lat * Math.PI) / 180));
+    (METERS_PER_LONGITUDE_DEGREE_AT_EQUATOR * Math.cos((coordinate.lat * Math.PI) / 180));
   const minLatCell = Math.floor((coordinate.lat - latitudeDelta) / GRID_CELL_DEGREES);
   const maxLatCell = Math.floor((coordinate.lat + latitudeDelta) / GRID_CELL_DEGREES);
   const minLngCell = Math.floor((coordinate.lng - longitudeDelta) / GRID_CELL_DEGREES);
