@@ -1,7 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { resolve, sep } from 'node:path';
 import {
-  SEARCH_STAGES, WEIGHTS, TRANSACTION_STALE_DAYS, DOORPLATE_STALE_DAYS,
+  DOORPLATE_STALE_DAYS,
+  MARKET_BACKTEST_DIAGNOSTIC_ROOT,
+  MARKET_DATA_ROOT,
+  SEARCH_STAGES,
+  TRANSACTION_STALE_DAYS,
+  WEIGHTS,
 } from './config.ts';
 
 test('search stages relax in the approved order', () => {
@@ -23,4 +29,11 @@ test('approved weights and stale windows are centralized', () => {
   assert.equal(WEIGHTS.adjacentFloor, 0.7);
   assert.equal(TRANSACTION_STALE_DAYS, 30);
   assert.equal(DOORPLATE_STALE_DAYS, 60);
+});
+
+test('backtest diagnostics live outside the checksum-closed active build', () => {
+  assert.equal(MARKET_BACKTEST_DIAGNOSTIC_ROOT, 'state/market-data/backtests/taipei');
+  const active = resolve(MARKET_DATA_ROOT);
+  const diagnostics = resolve(MARKET_BACKTEST_DIAGNOSTIC_ROOT);
+  assert.equal(diagnostics === active || diagnostics.startsWith(`${active}${sep}`), false);
 });

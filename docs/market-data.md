@@ -42,12 +42,18 @@ state/market-data/taipei/
     transactions/<season>.zip
     transactions/<season>.csv
 state/market-data/taipei-backtest-acceptance.json
+state/market-data/backtests/taipei/
+  <date>.json
 ```
 
 `state/` must never be committed. It contains raw public source files,
-derived indexes, manifests, checksums, aggregate backtest acceptance, and any local backtest captures; it can
-also contain listing evidence elsewhere under `state/runs/`. Do not paste raw
-transactions or a listing's full comparable set into notifications.
+derived indexes, manifests, checksums, aggregate backtest acceptance, and any
+local backtest captures; it can also contain listing evidence elsewhere under
+`state/runs/`. The active `state/market-data/taipei/` directory is
+checksum-closed: every file in it must be declared in its manifest. Never put
+diagnostics or other ad-hoc files there, because an undeclared file invalidates
+the active build. Do not paste raw transactions or a listing's full comparable
+set into notifications.
 
 Run an explicit initial build (or a manual refresh) with network access:
 
@@ -171,14 +177,15 @@ metrics without writing or updating acceptance and does not make failed or
 incomplete quality acceptable:
 
 ```bash
-mkdir -p state/market-data/taipei/backtests
+mkdir -p state/market-data/backtests/taipei
 npm run market-data -- backtest --city taipei --as-of 2026-07-26 --no-gate \
-  > state/market-data/taipei/backtests/2026-07-26.json
+  > state/market-data/backtests/taipei/2026-07-26.json
 ```
 
 The CLI prints the full report to standard output. Redirect it as above when
 preserving per-case diagnostic evidence; the automatically managed acceptance
-file remains aggregate-only and separate. Keep both under git-ignored `state/`,
+file remains aggregate-only and separate. The diagnostics path is deliberately
+outside the checksum-closed active build. Keep both under git-ignored `state/`,
 summarize only aggregate metrics in handoff, and never commit transaction rows.
 If targets are missed or high-confidence cases do not outperform weaker
 evidence, keep results in review and recalibrate selection/weight constants

@@ -96,6 +96,26 @@ test('load rejects a manifest count that does not equal its checked index', asyn
   assert.equal(await loadMarketData(root, { minDoorplates: 0, minTransactions: 0 }), null);
 });
 
+test('external diagnostics leave the active build valid while undeclared internal files fail closed', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-'));
+  const active = join(parent, 'taipei');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(active, 'closed-build');
+
+  const diagnostics = join(parent, 'backtests', 'taipei');
+  await mkdir(diagnostics, { recursive: true });
+  await writeFile(join(diagnostics, '2026-07-26.json'), '{}\n');
+  assert.equal(
+    (await loadMarketData(active, { minDoorplates: 1, minTransactions: 0 }))?.manifest.buildId,
+    'closed-build',
+  );
+
+  const undeclared = join(active, 'backtests');
+  await mkdir(undeclared, { recursive: true });
+  await writeFile(join(undeclared, '2026-07-26.json'), '{}\n');
+  assert.equal(await loadMarketData(active, { minDoorplates: 1, minTransactions: 0 }), null);
+});
+
 test('freshness marks independently stale source checks without changing the active build', () => {
   const value = manifest('good-build');
   value.doorplates.checkedAt = '2026-05-25T00:00:00.000Z';

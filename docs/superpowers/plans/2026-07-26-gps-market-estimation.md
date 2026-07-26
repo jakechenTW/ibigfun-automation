@@ -1415,8 +1415,9 @@ npm run market-data -- backtest --city taipei --no-gate
 
 Expected: coverage, median APE, P75 APE, signed bias, interval coverage, and
 confidence/type slices. Save the full local report under
-`state/market-data/taipei/backtests/`; document the aggregate metrics in the
-handoff without committing transaction rows.
+`state/market-data/backtests/taipei/`, outside the checksum-closed active build;
+document the aggregate metrics in the handoff without committing transaction
+rows.
 
 - [ ] **Step 6: Write the operator guide**
 

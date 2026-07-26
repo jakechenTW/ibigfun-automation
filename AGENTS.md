@@ -104,6 +104,9 @@ evaluation, and writing the report.
   non-identifying accuracy and interval metrics; it needs no credentials. A
   completed passing gated run writes the checksum-keyed local acceptance needed
   for `reliable` estimates; `--no-gate` is diagnostic and never approves.
+  Preserve optional diagnostic output under
+  `state/market-data/backtests/taipei/`, never inside the checksum-closed active
+  build.
 - `npm run route -- --lat <> --lng <>` — deterministic nearest-walk exit for one
   coordinate (shared ORS cache). Used during triage (step 5) to get a trustworthy
   walking distance after re-locating a listing from its address.
@@ -205,9 +208,12 @@ ai-notify --tool <codex|claude> --status <ok|warn|fail> \
   allowlist).
 - `state/market-data/taipei/`: git-ignored, versioned local official doorplate
   and transaction build used for deterministic market estimates; contains raw
-  source files, indexes, manifest/checksums, and no credentials. Its sibling
+  source files, indexes, manifest/checksums, and no credentials. It is
+  checksum-closed, so undeclared files invalidate it. Its sibling
   `state/market-data/taipei-backtest-acceptance.json` contains only aggregate
-  acceptance metrics keyed to the active transaction-index checksum.
+  acceptance metrics keyed to the active transaction-index checksum. Optional
+  per-case diagnostic reports belong under
+  `state/market-data/backtests/taipei/`, outside the active build.
 - `prompts/daily-run.md`: the committed headless worker prompt for the daily
   automated run (profile/range-agnostic; the trigger injects the profile and
   date range).
