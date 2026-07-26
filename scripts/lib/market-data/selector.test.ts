@@ -161,3 +161,65 @@ test('applies every approved relaxation weight and lower time weight after twelv
   assert.equal(candidate.weight.floor, 0.7);
   assert.equal(candidate.weight.total, 0.5 * 0.7 * (1 / 1.1) * 0.85 * 0.85 * 0.7);
 });
+
+test('uses the exact twelve-month calendar cutoff for stage eligibility and time weight', () => {
+  const cases = [
+    { date: '2025-07-24', stage: 3, time: 0.7 },
+    { date: '2025-07-25', stage: 1, time: 1 },
+    { date: '2025-07-26', stage: 1, time: 1 },
+  ] as const;
+
+  for (const { date, stage, time } of cases) {
+    const result = selectComparables(subject, [
+      transaction(`${date}-a`, { transactionDate: date }),
+      transaction(`${date}-b`, { transactionDate: date }),
+      transaction(`${date}-c`, { transactionDate: date }),
+    ], AS_OF);
+    assert.equal(result.selectedStage, stage, date);
+    assert.ok(result.included.every((candidate) => candidate.weight.time === time), date);
+  }
+});
+
+test('uses exact day boundaries at the twenty-four and thirty-six month cutoffs', () => {
+  const cases = [
+    { date: '2024-07-24', time: 0.4, included: true },
+    { date: '2024-07-25', time: 0.7, included: true },
+    { date: '2024-07-26', time: 0.7, included: true },
+    { date: '2023-07-24', time: 0, included: false },
+    { date: '2023-07-25', time: 0.4, included: true },
+    { date: '2023-07-26', time: 0.4, included: true },
+  ] as const;
+
+  for (const expected of cases) {
+    const result = selectComparables(subject, [transaction(expected.date, { transactionDate: expected.date })], AS_OF);
+    assert.equal(result.candidates[0]?.weight.time, expected.time, expected.date);
+    assert.equal(result.included.length === 1, expected.included, expected.date);
+    if (!expected.included) {
+      assert.ok(result.excluded[0]?.reasons.includes('transaction-too-old'), expected.date);
+    }
+  }
+});
+
+test('clamps leap-day calendar cutoffs to the last day of February', () => {
+  const cases = [
+    { date: '2023-02-27', time: 0.7, included: true },
+    { date: '2023-02-28', time: 1, included: true },
+    { date: '2023-03-01', time: 1, included: true },
+    { date: '2022-02-27', time: 0.4, included: true },
+    { date: '2022-02-28', time: 0.7, included: true },
+    { date: '2022-03-01', time: 0.7, included: true },
+    { date: '2021-02-27', time: 0, included: false },
+    { date: '2021-02-28', time: 0.4, included: true },
+    { date: '2021-03-01', time: 0.4, included: true },
+  ] as const;
+
+  for (const expected of cases) {
+    const result = selectComparables(
+      subject,
+      [transaction(expected.date, { transactionDate: expected.date })],
+      '2024-02-29',
+    );
+    assert.equal(result.candidates[0]?.weight.time, expected.time, expected.date);
+    assert.equal(result.included.length === 1, expected.included, expected.date);
+  }
+});

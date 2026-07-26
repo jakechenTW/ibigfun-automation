@@ -30,6 +30,14 @@ function completeMonthsBetween(start: Date, end: Date): number {
   return months;
 }
 
+function subtractCalendarMonths(date: Date, months: number): Date {
+  const totalMonths = date.getUTCFullYear() * 12 + date.getUTCMonth() - months;
+  const year = Math.floor(totalMonths / 12);
+  const month = totalMonths - year * 12;
+  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(year, month, Math.min(date.getUTCDate(), lastDay)));
+}
+
 function ageYearsAt(completionDate: string | null, asOf: Date): number | null {
   if (!completionDate) return null;
   const completion = parseIsoDate(completionDate);
@@ -55,7 +63,12 @@ function locationDistances(subject: MarketSubject, transaction: MarketTransactio
   return { min: Math.max(0, distance - uncertainty), max: distance + uncertainty };
 }
 
-function hardReasons(subject: MarketSubject, transaction: MarketTransaction, asOf: Date, months: number): string[] {
+function hardReasons(
+  subject: MarketSubject,
+  transaction: MarketTransaction,
+  transactionDate: Date,
+  asOf: Date,
+): string[] {
   const reasons: string[] = [];
   if (transaction.district !== subject.district) reasons.push('district-mismatch');
   if (transaction.buildingType !== subject.buildingType) reasons.push('building-type-mismatch');
@@ -63,8 +76,8 @@ function hardReasons(subject: MarketSubject, transaction: MarketTransaction, asO
   if (!finitePositive(transaction.buildingUnitPriceWan)) reasons.push('invalid-building-unit-price');
   if (!finitePositive(transaction.buildingAreaPing)) reasons.push('invalid-building-area');
   if (!transaction.location.coordinate || transaction.location.method === 'unresolved') reasons.push('location-unresolved');
-  if (months < 0) reasons.push('transaction-in-future');
-  if (months > 36) reasons.push('transaction-too-old');
+  if (transactionDate > asOf) reasons.push('transaction-in-future');
+  if (transactionDate < subtractCalendarMonths(asOf, 36)) reasons.push('transaction-too-old');
   if (subject.buildingType !== 'apartment' && (subject.ageYears === null || ageYearsAt(transaction.completionDate, asOf) === null)) {
     reasons.push('missing-building-age');
   }
@@ -76,12 +89,12 @@ function stageReasons(
   transaction: MarketTransaction,
   stage: SearchStage,
   distances: { min: number; max: number } | null,
-  transactionMonths: number,
+  transactionDate: Date,
   asOf: Date,
 ): string[] {
   const reasons: string[] = [];
   if (!distances || distances.min > stage.radiusM) reasons.push('distance-too-far');
-  if (transactionMonths > stage.months) reasons.push('transaction-too-old-for-stage');
+  if (transactionDate < subtractCalendarMonths(asOf, stage.months)) reasons.push('transaction-too-old-for-stage');
   const areaDifference = Math.abs(transaction.buildingAreaPing - subject.buildingAreaPing) / subject.buildingAreaPing;
   if (areaDifference > stage.areaTolerance) reasons.push('area-difference-too-large');
 
@@ -104,16 +117,19 @@ function weightBreakdown(
   subject: MarketSubject,
   transaction: MarketTransaction,
   distances: { min: number; max: number } | null,
-  transactionMonths: number,
+  transactionDate: Date | null,
   asOf: Date,
 ): WeightBreakdown {
   const distance = !distances || distances.max > 800 ? 0
     : distances.max <= 300 ? WEIGHTS.distance[0]
       : distances.max <= 500 ? WEIGHTS.distance[1]
         : WEIGHTS.distance[2];
-  const time = transactionMonths < 0 || transactionMonths > 36 ? 0
-    : transactionMonths <= 12 ? WEIGHTS.time[0]
-      : transactionMonths <= 24 ? WEIGHTS.time[1]
+  const twelveMonthCutoff = subtractCalendarMonths(asOf, 12);
+  const twentyFourMonthCutoff = subtractCalendarMonths(asOf, 24);
+  const thirtySixMonthCutoff = subtractCalendarMonths(asOf, 36);
+  const time = !transactionDate || transactionDate > asOf || transactionDate < thirtySixMonthCutoff ? 0
+    : transactionDate >= twelveMonthCutoff ? WEIGHTS.time[0]
+      : transactionDate >= twentyFourMonthCutoff ? WEIGHTS.time[1]
         : WEIGHTS.time[2];
   const locationPrecision = transaction.location.method === 'address-range'
     ? Math.max(0.5, 1 / (1 + (transaction.location.uncertaintyMeters ?? 0) / 400))
@@ -136,6 +152,7 @@ function weightBreakdown(
 interface CandidateState {
   evidence: ComparableEvidence;
   hardReasons: string[];
+  transactionDate: Date | null;
 }
 
 /** Selects exact-stage comparables using only official transaction metadata and GPS evidence. */
@@ -154,18 +171,19 @@ export function selectComparables(
     const transactionDate = parseIsoDate(transaction.transactionDate);
     const transactionMonths = transactionDate ? completeMonthsBetween(transactionDate, targetDate) : Number.POSITIVE_INFINITY;
     const distances = locationDistances(subject, transaction);
-    const hard = transactionDate ? hardReasons(subject, transaction, targetDate, transactionMonths) : ['invalid-transaction-date'];
+    const hard = transactionDate ? hardReasons(subject, transaction, transactionDate, targetDate) : ['invalid-transaction-date'];
     return {
       evidence: {
         transaction,
         distanceMinM: distances?.min ?? Number.POSITIVE_INFINITY,
         distanceMaxM: distances?.max ?? Number.POSITIVE_INFINITY,
         transactionAgeMonths: transactionMonths,
-        weight: weightBreakdown(subject, transaction, distances, transactionMonths, targetDate),
+        weight: weightBreakdown(subject, transaction, distances, transactionDate, targetDate),
         included: false,
         reasons: [],
       },
       hardReasons: hard,
+      transactionDate,
     };
   });
 
@@ -174,12 +192,12 @@ export function selectComparables(
   const finalStageReasons = new Map<CandidateState, string[]>();
   for (const [index, stage] of SEARCH_STAGES.entries()) {
     const qualifying = states.filter((state) => {
-      const reasons = state.hardReasons.length > 0
+      const reasons = state.hardReasons.length > 0 || !state.transactionDate
         ? state.hardReasons
         : stageReasons(subject, state.evidence.transaction, stage, {
           min: state.evidence.distanceMinM,
           max: state.evidence.distanceMaxM,
-        }, state.evidence.transactionAgeMonths, targetDate);
+        }, state.transactionDate, targetDate);
       finalStageReasons.set(state, reasons);
       return reasons.length === 0;
     });
