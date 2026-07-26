@@ -6,7 +6,7 @@ import type { Logger } from '../journal.ts';
 import { buildDoorplateIndex } from './doorplates.ts';
 import { gridKey } from './grid.ts';
 import { MARKET_DATA_ROOT, MARKET_SCHEMA_VERSION } from './config.ts';
-import { extractTaipeiSalesCsv, downloadConditional, moiSeasonUrl, quartersForLookback, resolveTaipeiDoorplateSource, TAIPEI_DOORPLATE_DETAIL_URL, type FetchLike, zipEntriesFromFile } from './sources.ts';
+import { extractTaipeiSalesCsv, downloadConditional, moiSeasonUrl, quartersForLookback, resolveTaipeiDoorplateSource, TAIPEI_DOORPLATE_DETAIL_URL, type FetchLike, type ZipEntry, zipEntriesFromFile } from './sources.ts';
 import { compareStableText, loadMarketData, publishStagedBuild, sha256File, writeStableJson } from './store.ts';
 import { normalizeSaleTransaction, validateSaleTransactionHeaders, type SaleTransactionRow } from './transactions.ts';
 import type { MarketDataBundle, MarketDataManifest, TransactionIndex } from './types.ts';
@@ -19,6 +19,7 @@ export interface EnsureTaipeiMarketDataOptions {
   logger?: Pick<Logger, 'event'>;
   minDoorplates?: number;
   minTransactions?: number;
+  openZip?: (file: string) => Promise<ZipEntry[]>;
 }
 
 function nowIso(clock: () => Date): string { return clock().toISOString(); }
@@ -83,6 +84,7 @@ export async function ensureTaipeiMarketData(options: EnsureTaipeiMarketDataOpti
   const root = options.rootPath ?? MARKET_DATA_ROOT;
   const fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
   const clock = options.clock ?? (() => new Date());
+  const openZip = options.openZip ?? zipEntriesFromFile;
   const existing = await loadMarketData(root, {
     minDoorplates: options.minDoorplates,
     minTransactions: options.minTransactions,
@@ -109,12 +111,11 @@ export async function ensureTaipeiMarketData(options: EnsureTaipeiMarketDataOpti
     }, doorplatePath);
     if (doorplate.kind === 'not-modified') await fs.copyFile(path.join(root, 'raw', 'doorplates.csv'), doorplatePath);
     const doorplateSha = await sha256File(doorplatePath);
-    const doorplates = await buildDoorplateIndex(createReadStream(doorplatePath), doorplateSha);
     const seasons = quartersForLookback(options.asOf, 36);
     const mutableSeasons = new Set([currentSeason(options.asOf), priorSeason(options.asOf)]);
     const sourceVersions: NonNullable<MarketDataManifest['transactionSources']> = {};
-    const transactionCells: TransactionIndex['cells'] = {};
-    let transactionCount = 0;
+    const stagedCsvPaths: Array<{ season: string; path: string }> = [];
+    let sourcesChanged = !existing || doorplateSha !== existing.manifest.doorplates.sha256;
     for (const season of seasons) {
       const old = existing?.manifest.transactionSources?.[season];
       const stagedCsvPath = path.join(rawRoot, 'transactions', `${season}.csv`);
@@ -125,7 +126,7 @@ export async function ensureTaipeiMarketData(options: EnsureTaipeiMarketDataOpti
             await fs.mkdir(path.dirname(stagedCsvPath), { recursive: true });
             await fs.copyFile(rawPath, stagedCsvPath);
             sourceVersions[season] = old;
-            transactionCount += await addTransactionCsv(stagedCsvPath, season, doorplates, transactionCells);
+            stagedCsvPaths.push({ season, path: stagedCsvPath });
             continue;
           }
         } catch { /* source will be re-downloaded */ }
@@ -136,7 +137,7 @@ export async function ensureTaipeiMarketData(options: EnsureTaipeiMarketDataOpti
         await fs.mkdir(path.dirname(stagedCsvPath), { recursive: true });
         await fs.copyFile(rawPath, stagedCsvPath);
       } else {
-        await extractTaipeiSalesCsv(await zipEntriesFromFile(zipPath), stagedCsvPath);
+        await extractTaipeiSalesCsv(await openZip(zipPath), stagedCsvPath);
       }
       const csvSha = await sha256File(stagedCsvPath);
       sourceVersions[season] = {
@@ -144,10 +145,43 @@ export async function ensureTaipeiMarketData(options: EnsureTaipeiMarketDataOpti
         etag: downloaded.etag ?? old?.etag ?? null,
         lastModified: downloaded.lastModified ?? old?.lastModified ?? null,
       };
-      transactionCount += await addTransactionCsv(stagedCsvPath, season, doorplates, transactionCells);
+      if (!old || csvSha !== old.sha256) sourcesChanged = true;
+      stagedCsvPaths.push({ season, path: stagedCsvPath });
     }
 
     const builtAt = nowIso(clock);
+    if (existing && !sourcesChanged) {
+      const refreshedManifest: MarketDataManifest = {
+        ...existing.manifest,
+        doorplates: {
+          ...existing.manifest.doorplates,
+          sourceUrl: doorplateSource.url,
+          publishedAt: doorplateSource.publishedAt,
+          checkedAt: builtAt,
+          etag: doorplate.etag ?? oldDoorplate?.etag ?? null,
+          lastModified: doorplate.lastModified ?? oldDoorplate?.lastModified ?? null,
+        },
+        transactions: { ...existing.manifest.transactions, checkedAt: builtAt },
+        transactionSources: sourceVersions,
+        lastFailure: null,
+      };
+      const stagedManifest = path.join(stage, 'manifest.json');
+      await writeStableJson(stagedManifest, refreshedManifest);
+      await fs.rename(stagedManifest, path.join(root, 'manifest.json'));
+      await fs.rm(stage, { recursive: true, force: true });
+      stage = null;
+      existing.manifest = refreshedManifest;
+      existing.refresh = { status: 'not-modified' };
+      log(options.logger, 'info', 'market-data.not-modified', 'official source checksums are unchanged', { buildId: existing.manifest.buildId });
+      return existing;
+    }
+
+    const doorplates = await buildDoorplateIndex(createReadStream(doorplatePath), doorplateSha);
+    const transactionCells: TransactionIndex['cells'] = {};
+    let transactionCount = 0;
+    for (const source of stagedCsvPaths) {
+      transactionCount += await addTransactionCsv(source.path, source.season, doorplates, transactionCells);
+    }
     const transactions = finishTransactionIndex(
       transactionCells,
       builtAt,
@@ -173,6 +207,7 @@ export async function ensureTaipeiMarketData(options: EnsureTaipeiMarketDataOpti
     await writeStableJson(path.join(stage, 'manifest.json'), manifest);
     const published = await publishStagedBuild(root, stage, { minDoorplates: options.minDoorplates, minTransactions: options.minTransactions });
     stage = null;
+    published.refresh = { status: 'updated' };
     log(options.logger, 'info', 'market-data.updated', 'published a validated Taipei market-data build', { buildId: published.manifest.buildId });
     return published;
   } catch (error) {
@@ -181,6 +216,7 @@ export async function ensureTaipeiMarketData(options: EnsureTaipeiMarketDataOpti
     const schemaDrift = /schema drift|Missing required|headers/i.test(reason);
     log(options.logger, 'warn', schemaDrift ? 'market-data.schema-drift' : existing ? 'market-data.last-known-good' : 'market-data.unavailable',
       existing ? 'market-data refresh failed; retaining last-known-good build' : 'market-data is unavailable', { reason });
+    if (existing) existing.refresh = { status: 'last-known-good', failure: reason };
     return existing;
   }
 }

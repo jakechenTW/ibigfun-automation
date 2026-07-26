@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { gridKey } from './grid.ts';
 import { backtestSubjectFromTransaction, backtestTransactions } from './backtest.ts';
-import { backtestExitCode, parseMarketDataArgs } from '../../market-data.ts';
+import { backtestExitCode, marketUpdateExitCode, parseMarketDataArgs } from '../../market-data.ts';
 import type { BuildingType, MarketTransaction, TransactionIndex } from './types.ts';
 
 const coordinate = { lat: 25.033964, lng: 121.564468 };
@@ -117,4 +117,10 @@ test('quality gate fails only completed reports over a target and can be disable
 
   assert.equal(backtestExitCode(failed, false), 1);
   assert.equal(backtestExitCode(failed, true), 0);
+});
+
+test('retained last-known-good refresh has a distinct nonzero operator exit', () => {
+  assert.equal(marketUpdateExitCode('updated'), 0);
+  assert.equal(marketUpdateExitCode('not-modified'), 0);
+  assert.equal(marketUpdateExitCode('last-known-good'), 3);
 });

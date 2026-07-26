@@ -83,11 +83,19 @@ export function backtestExitCode(report: BacktestReport, noGate: boolean): numbe
   return report.overall.medianApe! > MEDIAN_APE_TARGET || report.overall.p75Ape! > P75_APE_TARGET ? 1 : 0;
 }
 
-async function update(asOf: string): Promise<void> {
+export function marketUpdateExitCode(status: 'updated' | 'not-modified' | 'last-known-good' | undefined): number {
+  return status === 'last-known-good' ? 3 : 0;
+}
+
+async function update(asOf: string): Promise<number> {
   const bundle = await ensureTaipeiMarketData({ asOf });
   if (!bundle) throw new Error('No validated Taipei market-data build is available after update');
+  if (bundle.refresh?.status === 'last-known-good') {
+    process.stderr.write(`WARN: refresh failed; retained last-known-good build ${bundle.manifest.buildId}: ${bundle.refresh.failure ?? 'unknown failure'}\n`);
+  }
   process.stdout.write(`${JSON.stringify({
     buildId: bundle.manifest.buildId,
+    refresh: bundle.refresh ?? { status: 'updated' },
     sourceDates: {
       doorplates: { publishedAt: bundle.manifest.doorplates.publishedAt, checkedAt: bundle.manifest.doorplates.checkedAt },
       transactions: { publishedAt: bundle.manifest.transactions.publishedAt, checkedAt: bundle.manifest.transactions.checkedAt },
@@ -98,6 +106,7 @@ async function update(asOf: string): Promise<void> {
     },
     freshness: marketDataFreshness(bundle.manifest, asOf),
   }, null, 2)}\n`);
+  return marketUpdateExitCode(bundle.refresh?.status);
 }
 
 async function backtest(command: Extract<MarketDataCommand, { command: 'backtest' }>): Promise<number> {
@@ -118,8 +127,7 @@ async function backtest(command: Extract<MarketDataCommand, { command: 'backtest
 export async function runMarketDataCommand(args: readonly string[], now: Date = new Date()): Promise<number> {
   const command = parseMarketDataArgs(args, now);
   if (command.command === 'update') {
-    await update(command.asOf);
-    return 0;
+    return update(command.asOf);
   }
   return backtest(command);
 }

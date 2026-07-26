@@ -185,6 +185,10 @@ export interface MarketDataBundle {
   manifest: MarketDataManifest;
   doorplates: DoorplateIndex;
   transactions: TransactionIndex;
+  refresh?: {
+    status: 'updated' | 'not-modified' | 'last-known-good';
+    failure?: string;
+  };
 }
 
 export interface SourceDescriptor {
