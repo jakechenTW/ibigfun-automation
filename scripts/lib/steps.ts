@@ -9,13 +9,119 @@ import { enrichOffline } from './enrich-offline.ts';
 import { finalizeWalk } from './walk.ts';
 import { routeWalkDistances } from './routing.ts';
 import { loadCache, saveCache, cacheKey } from './route-cache.ts';
-import type { EnrichResult, EnrichedListing, FetchResult } from './types.ts';
+import type { EnrichResult, EnrichedListing, PreMarketEnrichedListing, FetchResult } from './types.ts';
 import { runDir, listingsPath, enrichedPath, effectiveProfilePath } from './runpaths.ts';
+import { estimateMarket } from './market-data/estimator.ts';
+import { floorGroup } from './market-data/property.ts';
+import { marketDataFreshness } from './market-data/store.ts';
+import { ensureTaipeiMarketData } from './market-data/update.ts';
+import type { MarketDataBundle, MarketEstimate, SourceFreshness, SubjectOwnershipEvidence } from './market-data/types.ts';
 
 const MRT_CSV = 'data/taipei_mrt_exits.csv';
 const ORS_DELAY_MS = 1600;        // ORS free tier ~40 req/min
 const ORS_RETRY_WAIT_MS = 65_000; // wait out the per-minute window once
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+const NO_ACTIVE_MARKET_FRESHNESS: SourceFreshness = {
+  transactionCheckedAt: null,
+  doorplateCheckedAt: null,
+  transactionStale: false,
+  doorplateStale: false,
+};
+
+function unavailableMarketEstimate(
+  freshness: SourceFreshness,
+  unavailableReasons: string[],
+  status: 'review' | 'unavailable' = 'unavailable',
+  subjectOwnershipEvidence: SubjectOwnershipEvidence = 'unspecified',
+): MarketEstimate {
+  return {
+    status,
+    confidence: 'low',
+    subjectOwnershipEvidence,
+    marketUnitPriceMedian: null,
+    marketUnitPriceP25: null,
+    marketUnitPriceP75: null,
+    askingPremiumMedian: null,
+    askingPremiumConservative: null,
+    selectedStage: null,
+    sourceFreshness: freshness,
+    unavailableReasons,
+    comparables: [],
+    excludedCandidates: [],
+  };
+}
+
+function listingOwnership(title: string): { ownership: 'freehold' | 'non-freehold'; evidence: SubjectOwnershipEvidence } {
+  if (/(?:地上權|使用權|區分地上權)/u.test(title)) {
+    return { ownership: 'non-freehold', evidence: 'title-explicit-non-freehold' };
+  }
+  return { ownership: 'freehold', evidence: 'profile-default-freehold' };
+}
+
+function integerField(value: string | null): number | null {
+  if (!value || !/^\d+$/u.test(value.trim())) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+/**
+ * Adds an estimate from one already-loaded local market-data bundle. This is
+ * intentionally pure so routing behaviour and offline valuation stay separate.
+ */
+export function attachMarketEstimates(
+  listings: PreMarketEnrichedListing[],
+  bundle: MarketDataBundle | null,
+  asOf: string,
+): EnrichedListing[] {
+  const freshness = bundle ? marketDataFreshness(bundle.manifest, asOf) : NO_ACTIVE_MARKET_FRESHNESS;
+  return listings.map((listing) => {
+    const ownership = listingOwnership(listing.title);
+    if (!bundle) {
+      return { ...listing, marketEstimate: unavailableMarketEstimate(freshness, ['market-data-unavailable'], 'unavailable', ownership.evidence) };
+    }
+    if (!listing.coordinate) {
+      return { ...listing, marketEstimate: unavailableMarketEstimate(freshness, ['listing-coordinate-unavailable'], 'unavailable', ownership.evidence) };
+    }
+    if (listing.reliability.coordConsistent === false) {
+      return { ...listing, marketEstimate: unavailableMarketEstimate(freshness, ['listing-coordinate-unreliable'], 'unavailable', ownership.evidence) };
+    }
+    if (!listing.buildingType) {
+      return { ...listing, marketEstimate: unavailableMarketEstimate(freshness, ['listing-building-type-unavailable'], 'unavailable', ownership.evidence) };
+    }
+    if (listing.parking !== '無車位') {
+      return { ...listing, marketEstimate: unavailableMarketEstimate(freshness, ['listing-parking-not-separable'], 'review', ownership.evidence) };
+    }
+    const floor = integerField(listing.floor);
+    const totalFloors = integerField(listing.totalFloors);
+    if (floor == null || totalFloors == null) {
+      return { ...listing, marketEstimate: unavailableMarketEstimate(freshness, ['listing-floor-group-unavailable'], 'unavailable', ownership.evidence) };
+    }
+    const subjectFloorGroup = floorGroup(listing.buildingType, floor, totalFloors);
+    if (!subjectFloorGroup) {
+      return { ...listing, marketEstimate: unavailableMarketEstimate(freshness, ['listing-floor-group-unavailable'], 'unavailable', ownership.evidence) };
+    }
+
+    return {
+      ...listing,
+      marketEstimate: estimateMarket({
+        listingId: listing.id,
+        coordinate: listing.coordinate,
+        district: listing.district ?? '',
+        ownership: ownership.ownership,
+        ownershipEvidence: ownership.evidence,
+        buildingType: listing.buildingType,
+        buildingAreaPing: listing.totalPingNum ?? Number.NaN,
+        askingUnitPriceWan: listing.unitPriceWan ?? Number.NaN,
+        floor,
+        totalFloors,
+        floorGroup: subjectFloorGroup,
+        ageYears: listing.ageNum,
+        parkingSeparable: true,
+      }, bundle.transactions, freshness, asOf),
+    };
+  });
+}
 
 export async function enrichStep(ctx: RunContext, logger: Logger): Promise<StepOutput> {
   const { profile, range } = ctx;
@@ -33,9 +139,20 @@ export async function enrichStep(ctx: RunContext, logger: Logger): Promise<StepO
   const input = JSON.parse(fs.readFileSync(inPath, 'utf8')) as FetchResult;
   const exits = loadExits(MRT_CSV);
   const cache = loadCache();
+  const marketBundle = await ensureTaipeiMarketData({ asOf: range.to, logger });
+  if (marketBundle) {
+    const freshness = marketDataFreshness(marketBundle.manifest, range.to);
+    logger.event('info', 'market-data.ready', 'using validated Taipei market-data build', {
+      buildId: marketBundle.manifest.buildId,
+      transactionStale: freshness.transactionStale,
+      doorplateStale: freshness.doorplateStale,
+    });
+  } else {
+    logger.event('warn', 'market-data.unavailable', 'no validated Taipei market-data build; estimates will be unavailable');
+  }
 
   const offline = input.listings.map((l) => enrichOffline(l, exits));
-  const enriched: EnrichedListing[] = [];
+  const enriched: PreMarketEnrichedListing[] = [];
   let apiCalls = 0, cacheHits = 0, routeErrors = 0;
 
   for (const o of offline) {
@@ -75,15 +192,24 @@ export async function enrichStep(ctx: RunContext, logger: Logger): Promise<StepO
     enriched.push(finalizeWalk(o, routed, range.to));
   }
 
-  const withinWalkCount = enriched.filter((l) => l.withinWalk === true).length;
-  const manualReviewCount = enriched.filter((l) => l.withinWalk === null).length;
-  const hardExcludedCount = enriched.filter((l) => l.hardExclusion.excluded).length;
-  const outOfRegionCount = enriched.filter((l) => l.regionGate === 'out-of-region').length;
-  const inRegionTooFarCount = enriched.filter((l) => l.regionGate === 'in-region-too-far').length;
+  const valued = attachMarketEstimates(enriched, marketBundle, range.to);
+  const withinWalkCount = valued.filter((l) => l.withinWalk === true).length;
+  const manualReviewCount = valued.filter((l) => l.withinWalk === null).length;
+  const hardExcludedCount = valued.filter((l) => l.hardExclusion.excluded).length;
+  const outOfRegionCount = valued.filter((l) => l.regionGate === 'out-of-region').length;
+  const inRegionTooFarCount = valued.filter((l) => l.regionGate === 'in-region-too-far').length;
+  const marketReliable = valued.filter((l) => l.marketEstimate.status === 'reliable').length;
+  const marketReview = valued.filter((l) => l.marketEstimate.status === 'review').length;
+  const marketUnavailable = valued.filter((l) => l.marketEstimate.status === 'unavailable').length;
+  const marketDataStale = valued.filter((l) =>
+    l.marketEstimate.sourceFreshness.transactionStale || l.marketEstimate.sourceFreshness.doorplateStale,
+  ).length;
   const result: EnrichResult = {
     from: range.from, to: range.to, enrichedAt: new Date().toISOString(), count: enriched.length,
     withinWalkCount, manualReviewCount, hardExcludedCount,
-    outOfRegionCount, inRegionTooFarCount, listings: enriched,
+    outOfRegionCount, inRegionTooFarCount,
+    marketReliable, marketReview, marketUnavailable, marketDataStale,
+    listings: valued,
   };
 
   fs.mkdirSync(runDir(profile.id, range.label), { recursive: true });
@@ -93,13 +219,16 @@ export async function enrichStep(ctx: RunContext, logger: Logger): Promise<StepO
   logger.event('info', 'enrich.summary',
     `enriched ${enriched.length}: ${withinWalkCount} within-walk, ${manualReviewCount} manual-review, ` +
       `${hardExcludedCount} hard-excluded, ${outOfRegionCount} out-of-region, ${inRegionTooFarCount} too-far ` +
-      `(ORS ${apiCalls}, cache ${cacheHits}, errors ${routeErrors})`,
+      `(${marketReliable} market-reliable, ${marketReview} market-review, ${marketUnavailable} market-unavailable, ` +
+      `${marketDataStale} market-stale; ORS ${apiCalls}, cache ${cacheHits}, errors ${routeErrors})`,
     { count: enriched.length, withinWalk: withinWalkCount, manualReview: manualReviewCount,
       hardExcluded: hardExcludedCount, outOfRegion: outOfRegionCount, inRegionTooFar: inRegionTooFarCount,
+      marketReliable, marketReview, marketUnavailable, marketDataStale,
       orsCalls: apiCalls, cacheHits, routeErrors });
   return {
     summary: { withinWalk: withinWalkCount, manualReview: manualReviewCount,
-      hardExcluded: hardExcludedCount, orsCalls: apiCalls, cacheHits, routeErrors },
+      hardExcluded: hardExcludedCount, marketReliable, marketReview, marketUnavailable, marketDataStale,
+      orsCalls: apiCalls, cacheHits, routeErrors },
     artifacts: [outPath],
   };
 }

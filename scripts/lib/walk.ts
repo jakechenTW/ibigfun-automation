@@ -10,7 +10,7 @@
  */
 import type { OfflineEnriched } from './enrich-offline.ts';
 import type { NearestExit } from './mrt.ts';
-import type { EnrichedListing, Reliability, WalkInfo } from './types.ts';
+import type { PreMarketEnrichedListing, Reliability, WalkInfo } from './types.ts';
 import { computeTenure } from './tenure.ts';
 import { classifyRegion } from './region.ts';
 
@@ -84,7 +84,7 @@ export function finalizeWalk(
   o: OfflineEnriched,
   routed: (number | null)[] | null,
   targetDate = '',
-): EnrichedListing {
+): PreMarketEnrichedListing {
   const coordPresent = o.candidates.length > 0;
   const reliability: Reliability = {
     coordPresent,

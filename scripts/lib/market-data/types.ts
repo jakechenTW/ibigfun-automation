@@ -5,6 +5,10 @@ export type FloorGroup = 'first' | 'low' | 'middle' | 'top' | 'high';
 export type LocationMethod = 'exact-doorplate' | 'address-range' | 'nearest-doorplate' | 'unresolved';
 export type EstimateStatus = 'reliable' | 'review' | 'unavailable';
 export type EstimateConfidence = 'high' | 'medium' | 'low';
+export type SubjectOwnershipEvidence =
+  | 'profile-default-freehold'
+  | 'title-explicit-non-freehold'
+  | 'unspecified';
 
 export interface LocationEvidence {
   method: LocationMethod;
@@ -54,6 +58,8 @@ export interface MarketSubject {
   coordinate: Coordinate;
   district: string;
   ownership: 'freehold' | 'non-freehold' | 'unknown';
+  /** Why the listing ownership class was selected for this estimate. */
+  ownershipEvidence?: SubjectOwnershipEvidence;
   buildingType: BuildingType;
   buildingAreaPing: number;
   askingUnitPriceWan: number;
@@ -84,6 +90,8 @@ export interface SourceFreshness {
 export interface MarketEstimate {
   status: EstimateStatus;
   confidence: EstimateConfidence;
+  /** Retains the listing-side ownership classification and any profile assumption. */
+  subjectOwnershipEvidence: SubjectOwnershipEvidence;
   marketUnitPriceMedian: number | null;
   marketUnitPriceP25: number | null;
   marketUnitPriceP75: number | null;

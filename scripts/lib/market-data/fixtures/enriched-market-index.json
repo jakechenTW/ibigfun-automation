@@ -1,0 +1,79 @@
+{
+  "manifest": {
+    "schemaVersion": 1,
+    "buildId": "fixture-enriched-market",
+    "builtAt": "2026-07-25T00:00:00.000Z",
+    "doorplates": {
+      "sourceUrl": "https://example.test/doorplates.csv",
+      "publishedAt": null,
+      "checkedAt": "2026-07-25T00:00:00.000Z",
+      "sha256": "fixture-doorplates",
+      "recordCount": 1
+    },
+    "transactions": {
+      "sourceUrls": ["https://example.test/transactions.csv"],
+      "publishedAt": null,
+      "checkedAt": "2026-07-25T00:00:00.000Z",
+      "sha256": "fixture-transactions",
+      "recordCount": 5
+    },
+    "lastFailure": null,
+    "artifacts": {}
+  },
+  "doorplates": {
+    "schemaVersion": 1,
+    "datasetVersion": "fixture-doorplates",
+    "byCanonicalAddress": {},
+    "byRoad": {},
+    "cells": {}
+  },
+  "transactions": {
+    "schemaVersion": 1,
+    "datasetVersion": "fixture-transactions",
+    "builtAt": "2026-07-25T00:00:00.000Z",
+    "cells": {
+      "5006:24312": [
+        {
+          "id": "tx-1",
+          "transactionDate": "2026-01-25",
+          "sourceVersion": "fixture",
+          "originalAddress": "台北市中正區測試路1號",
+          "location": { "method": "exact-doorplate", "coordinate": { "lat": 25.033964, "lng": 121.564468 }, "normalizedAddress": "台北市中正區測試路1號", "matchedAddress": "台北市中正區測試路1號", "uncertaintyMeters": 0, "confidence": "high", "datasetVersion": "fixture-doorplates" },
+          "district": "中正區", "ownership": "freehold", "buildingType": "midrise", "totalPriceNtd": 28800000, "buildingPriceNtd": 28800000, "buildingAreaPing": 30, "parkingPriceNtd": 0, "parkingAreaPing": 0, "buildingUnitPriceWan": 96, "floor": 5, "totalFloors": 10, "floorGroup": "middle", "completionDate": "2011-01-01", "notes": "", "exclusionFlags": []
+        },
+        {
+          "id": "tx-2",
+          "transactionDate": "2026-01-25",
+          "sourceVersion": "fixture",
+          "originalAddress": "台北市中正區測試路2號",
+          "location": { "method": "exact-doorplate", "coordinate": { "lat": 25.033964, "lng": 121.564468 }, "normalizedAddress": "台北市中正區測試路2號", "matchedAddress": "台北市中正區測試路2號", "uncertaintyMeters": 0, "confidence": "high", "datasetVersion": "fixture-doorplates" },
+          "district": "中正區", "ownership": "freehold", "buildingType": "midrise", "totalPriceNtd": 29100000, "buildingPriceNtd": 29100000, "buildingAreaPing": 30, "parkingPriceNtd": 0, "parkingAreaPing": 0, "buildingUnitPriceWan": 97, "floor": 5, "totalFloors": 10, "floorGroup": "middle", "completionDate": "2011-01-01", "notes": "", "exclusionFlags": []
+        },
+        {
+          "id": "tx-3",
+          "transactionDate": "2026-01-25",
+          "sourceVersion": "fixture",
+          "originalAddress": "台北市中正區測試路3號",
+          "location": { "method": "exact-doorplate", "coordinate": { "lat": 25.033964, "lng": 121.564468 }, "normalizedAddress": "台北市中正區測試路3號", "matchedAddress": "台北市中正區測試路3號", "uncertaintyMeters": 0, "confidence": "high", "datasetVersion": "fixture-doorplates" },
+          "district": "中正區", "ownership": "freehold", "buildingType": "midrise", "totalPriceNtd": 29400000, "buildingPriceNtd": 29400000, "buildingAreaPing": 30, "parkingPriceNtd": 0, "parkingAreaPing": 0, "buildingUnitPriceWan": 98, "floor": 5, "totalFloors": 10, "floorGroup": "middle", "completionDate": "2011-01-01", "notes": "", "exclusionFlags": []
+        },
+        {
+          "id": "tx-4",
+          "transactionDate": "2026-01-25",
+          "sourceVersion": "fixture",
+          "originalAddress": "台北市中正區測試路4號",
+          "location": { "method": "exact-doorplate", "coordinate": { "lat": 25.033964, "lng": 121.564468 }, "normalizedAddress": "台北市中正區測試路4號", "matchedAddress": "台北市中正區測試路4號", "uncertaintyMeters": 0, "confidence": "high", "datasetVersion": "fixture-doorplates" },
+          "district": "中正區", "ownership": "freehold", "buildingType": "midrise", "totalPriceNtd": 29700000, "buildingPriceNtd": 29700000, "buildingAreaPing": 30, "parkingPriceNtd": 0, "parkingAreaPing": 0, "buildingUnitPriceWan": 99, "floor": 5, "totalFloors": 10, "floorGroup": "middle", "completionDate": "2011-01-01", "notes": "", "exclusionFlags": []
+        },
+        {
+          "id": "tx-5",
+          "transactionDate": "2026-01-25",
+          "sourceVersion": "fixture",
+          "originalAddress": "台北市中正區測試路5號",
+          "location": { "method": "exact-doorplate", "coordinate": { "lat": 25.033964, "lng": 121.564468 }, "normalizedAddress": "台北市中正區測試路5號", "matchedAddress": "台北市中正區測試路5號", "uncertaintyMeters": 0, "confidence": "high", "datasetVersion": "fixture-doorplates" },
+          "district": "中正區", "ownership": "freehold", "buildingType": "midrise", "totalPriceNtd": 30000000, "buildingPriceNtd": 30000000, "buildingAreaPing": 30, "parkingPriceNtd": 0, "parkingAreaPing": 0, "buildingUnitPriceWan": 100, "floor": 5, "totalFloors": 10, "floorGroup": "middle", "completionDate": "2011-01-01", "notes": "", "exclusionFlags": []
+        }
+      ]
+    }
+  }
+}

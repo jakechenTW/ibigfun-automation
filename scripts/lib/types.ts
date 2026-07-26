@@ -1,6 +1,6 @@
 import type { Coordinate } from './coords.ts';
 import type { RegionGate } from './region.ts';
-import type { BuildingType } from './market-data/types.ts';
+import type { BuildingType, MarketEstimate } from './market-data/types.ts';
 
 /** One row of iBigFun's 刊登紀錄: this property's appearance on one source/date. */
 export interface ListingHistoryEntry {
@@ -92,8 +92,8 @@ export interface ListingTenure {
 
 /**
  * A listing plus the deterministic fields computed by scripts/enrich.ts.
- * Estimation (market price, rent) and the final recommend/exclude judgment are
- * NOT here — they stay with the agent (docs/reporting-rules.md).
+ * Rent estimation and final recommend/exclude judgment stay with the agent
+ * (docs/reporting-rules.md); market estimates carry local official evidence.
  */
 export interface EnrichedListing extends Listing {
   totalPriceWan: number | null;
@@ -112,7 +112,11 @@ export interface EnrichedListing extends Listing {
   signals: { auctionKeyword: boolean };
   hardExclusion: { excluded: boolean; reasons: string[] };
   tenure: ListingTenure;
+  marketEstimate: MarketEstimate;
 }
+
+/** Internal deterministic enrichment shape before market evidence is attached. */
+export type PreMarketEnrichedListing = Omit<EnrichedListing, 'marketEstimate'>;
 
 /** Output document written to state/runs/<label>/enriched.json and stdout. */
 export interface EnrichResult {
@@ -125,5 +129,9 @@ export interface EnrichResult {
   hardExcludedCount: number;
   outOfRegionCount: number; // regionGate === 'out-of-region'
   inRegionTooFarCount: number; // regionGate === 'in-region-too-far'
+  marketReliable: number;
+  marketReview: number;
+  marketUnavailable: number;
+  marketDataStale: number;
   listings: EnrichedListing[];
 }

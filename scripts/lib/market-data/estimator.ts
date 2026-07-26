@@ -59,6 +59,7 @@ export function estimateMarket(
     return {
       status: 'unavailable',
       confidence: 'low',
+      subjectOwnershipEvidence: subject.ownershipEvidence ?? 'unspecified',
       marketUnitPriceMedian: null,
       marketUnitPriceP25: null,
       marketUnitPriceP75: null,
@@ -99,6 +100,7 @@ export function estimateMarket(
     return {
       status: 'unavailable',
       confidence: 'low',
+      subjectOwnershipEvidence: subject.ownershipEvidence ?? 'unspecified',
       marketUnitPriceMedian: null,
       marketUnitPriceP25: null,
       marketUnitPriceP75: null,
@@ -133,6 +135,7 @@ export function estimateMarket(
   return {
     status,
     confidence,
+    subjectOwnershipEvidence: subject.ownershipEvidence ?? 'unspecified',
     marketUnitPriceMedian: median,
     marketUnitPriceP25: p25,
     marketUnitPriceP75: p75,
