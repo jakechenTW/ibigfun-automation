@@ -373,7 +373,9 @@ function validateManifestPolicy(
     assertCurrentMarketDataIndexPolicy(manifest);
     return;
   }
-  if (manifest.schemaVersion !== 2 && manifest.schemaVersion !== MARKET_SCHEMA_VERSION) {
+  if (manifest.schemaVersion !== 1
+      && manifest.schemaVersion !== 2
+      && manifest.schemaVersion !== MARKET_SCHEMA_VERSION) {
     throw new Error('Market manifest schema version is not restorable');
   }
 }
@@ -399,10 +401,14 @@ async function validateBuild(
   if (!Number.isInteger(manifest.transactions.recordCount) || manifest.transactions.recordCount < minTransactions) {
     throw new Error(`Transaction count below required threshold (${minTransactions})`);
   }
-  validateTransactionBuildDiagnostics(
-    manifest.transactions.normalization,
-    manifest.transactions.recordCount,
-  );
+  // Schema 1 predates these diagnostics and reaches this branch only as
+  // checksum-closed rollback/replacement material in restorable mode.
+  if (manifest.schemaVersion >= 2) {
+    validateTransactionBuildDiagnostics(
+      manifest.transactions.normalization,
+      manifest.transactions.recordCount,
+    );
+  }
   validateIndexes(doorplates, transactions, manifest.schemaVersion);
   const doorplateCount = countIndexEntries(doorplates.cells);
   const transactionCount = countIndexEntries(transactions.cells);

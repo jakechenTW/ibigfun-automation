@@ -5,9 +5,11 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
+import { runMarketDataCommand } from '../../market-data.ts';
 import { ensureTaipeiMarketData, withMarketDataLock } from './update.ts';
 import {
   backtestAcceptancePath,
+  loadMarketData,
   marketDataBacktestAccepted,
   publishStagedBuildWithAcceptance,
   sha256File,
@@ -63,6 +65,47 @@ async function seedValidBuild(root: string): Promise<void> {
     artifacts, lastFailure: null,
   };
   await writeFile(join(root, 'manifest.json'), JSON.stringify(manifest));
+}
+
+async function downgradeAcceptedBuild(
+  root: string,
+  schemaVersion: 1 | 2,
+): Promise<string> {
+  for (const indexFile of ['doorplates-index.json', 'transactions-index.json']) {
+    const index = JSON.parse(await readFile(join(root, indexFile), 'utf8')) as {
+      schemaVersion: number;
+    };
+    index.schemaVersion = schemaVersion;
+    await writeFile(join(root, indexFile), `${JSON.stringify(index)}\n`);
+  }
+  const legacyManifest = JSON.parse(
+    await readFile(join(root, 'manifest.json'), 'utf8'),
+  ) as Record<string, unknown> & {
+    artifacts: MarketDataManifest['artifacts'];
+    transactions: Record<string, unknown>;
+  };
+  legacyManifest.schemaVersion = schemaVersion;
+  delete legacyManifest.estimatorPolicyVersion;
+  if (schemaVersion === 1) delete legacyManifest.transactions.normalization;
+  for (const indexFile of ['doorplates-index.json', 'transactions-index.json']) {
+    legacyManifest.artifacts[indexFile] = {
+      sha256: await sha256File(join(root, indexFile)),
+      bytes: (await readFile(join(root, indexFile))).byteLength,
+    };
+  }
+  await writeFile(join(root, 'manifest.json'), `${JSON.stringify(legacyManifest)}\n`);
+
+  const transactionChecksum =
+    legacyManifest.artifacts['transactions-index.json']!.sha256;
+  const acceptance = JSON.parse(
+    await readFile(backtestAcceptancePath(root), 'utf8'),
+  ) as { transactionArtifactSha256: string };
+  acceptance.transactionArtifactSha256 = transactionChecksum;
+  await writeFile(
+    backtestAcceptancePath(root),
+    `${JSON.stringify(acceptance)}\n`,
+  );
+  return transactionChecksum;
 }
 
 test('updater returns null and journals unavailable when no valid local build can be refreshed', async (t) => {
@@ -303,7 +346,7 @@ test('injected passing gate cannot bootstrap a production-gate failure without a
   assert.equal(publisherCalls, 0);
 });
 
-test('unchanged schema-2 or old-provenance sources force current-semantic schema-3 publication', async (t) => {
+test('unchanged legacy or old-provenance sources force current-semantic schema-3 publication', async (t) => {
   const rootPath = join(await mkdtemp(join(tmpdir(), 'market-update-provenance-')), 'taipei');
   t.after(() => rm(join(rootPath, '..'), { recursive: true, force: true }));
   const doorplateCsv = await readFile(
@@ -352,40 +395,49 @@ test('unchanged schema-2 or old-provenance sources force current-semantic schema
     ),
   };
 
-  for (const indexFile of ['doorplates-index.json', 'transactions-index.json']) {
-    const index = JSON.parse(await readFile(join(rootPath, indexFile), 'utf8')) as {
-      schemaVersion: number;
-    };
-    index.schemaVersion = 2;
-    await writeFile(join(rootPath, indexFile), `${JSON.stringify(index)}\n`);
-  }
-  const legacyManifest = JSON.parse(
-    await readFile(join(rootPath, 'manifest.json'), 'utf8'),
-  ) as Record<string, unknown> & {
-    artifacts: MarketDataManifest['artifacts'];
-  };
-  legacyManifest.schemaVersion = 2;
-  delete legacyManifest.estimatorPolicyVersion;
-  for (const indexFile of ['doorplates-index.json', 'transactions-index.json']) {
-    legacyManifest.artifacts[indexFile] = {
-      sha256: await sha256File(join(rootPath, indexFile)),
-      bytes: (await readFile(join(rootPath, indexFile))).byteLength,
-    };
-  }
-  await writeFile(join(rootPath, 'manifest.json'), `${JSON.stringify(legacyManifest)}\n`);
-  const legacyTransactionChecksum =
-    legacyManifest.artifacts['transactions-index.json']!.sha256;
-  const legacyAcceptance = JSON.parse(
-    await readFile(backtestAcceptancePath(rootPath), 'utf8'),
-  ) as { transactionArtifactSha256: string };
-  legacyAcceptance.transactionArtifactSha256 = legacyTransactionChecksum;
-  await writeFile(
-    backtestAcceptancePath(rootPath),
-    `${JSON.stringify(legacyAcceptance)}\n`,
-  );
-
   let publisherCalls = 0;
-  const migrated = await ensureTaipeiMarketData({
+  const publisher = async (
+    root: string,
+    stage: string,
+    acceptance: Parameters<typeof publishStagedBuildWithAcceptance>[2],
+    options: Parameters<typeof publishStagedBuildWithAcceptance>[3],
+  ) => {
+    publisherCalls += 1;
+    return publishStagedBuildWithAcceptance(root, stage, acceptance, options);
+  };
+
+  const schema1TransactionChecksum = await downgradeAcceptedBuild(rootPath, 1);
+  assert.equal(
+    await loadMarketData(rootPath, { minDoorplates: 1, minTransactions: 1 }),
+    null,
+  );
+  let evaluateCalls = 0;
+  let persistCalls = 0;
+  await assert.rejects(
+    () => runMarketDataCommand(
+      ['backtest', '--city', 'taipei', '--as-of', '2026-07-25'],
+      new Date('2026-07-26T00:30:00.000Z'),
+      {
+        backtest: {
+          root: rootPath,
+          lock: async (_root, operation) => operation(),
+          recover: async () => null,
+          evaluate: () => {
+            evaluateCalls += 1;
+            throw new Error('schema-1 backtest must not evaluate');
+          },
+          persistAcceptance: async () => {
+            persistCalls += 1;
+          },
+        },
+      },
+    ),
+    /index policy provenance.*run update first/i,
+  );
+  assert.equal(evaluateCalls, 0);
+  assert.equal(persistCalls, 0);
+
+  const migratedFromSchema1 = await ensureTaipeiMarketData({
     asOf: '2026-07-25',
     rootPath,
     minDoorplates: 1,
@@ -393,21 +445,44 @@ test('unchanged schema-2 or old-provenance sources force current-semantic schema
     fetch: fetchSameSources,
     openZip: openSameSources,
     clock: () => new Date('2026-07-26T01:00:00.000Z'),
-    publisher: async (root, stage, acceptance, options) => {
-      publisherCalls += 1;
-      return publishStagedBuildWithAcceptance(root, stage, acceptance, options);
-    },
+    publisher,
+  });
+
+  assert.equal(migratedFromSchema1?.refresh?.status, 'updated');
+  assert.equal(publisherCalls, 1);
+  assert.equal(migratedFromSchema1?.manifest.schemaVersion, 3);
+  assert.equal(
+    migratedFromSchema1?.manifest.estimatorPolicyVersion,
+    ESTIMATOR_POLICY_VERSION,
+  );
+  assert.notEqual(migratedFromSchema1?.manifest.buildId, first?.manifest.buildId);
+  assert.notEqual(
+    migratedFromSchema1?.manifest.artifacts['transactions-index.json']?.sha256,
+    schema1TransactionChecksum,
+  );
+  assert.equal(marketDataBacktestAccepted(migratedFromSchema1!), true);
+
+  const legacyTransactionChecksum = await downgradeAcceptedBuild(rootPath, 2);
+  const migrated = await ensureTaipeiMarketData({
+    asOf: '2026-07-25',
+    rootPath,
+    minDoorplates: 1,
+    minTransactions: 1,
+    fetch: fetchSameSources,
+    openZip: openSameSources,
+    clock: () => new Date('2026-07-27T01:00:00.000Z'),
+    publisher,
   });
 
   assert.equal(migrated?.refresh?.status, 'updated');
-  assert.equal(publisherCalls, 1);
+  assert.equal(publisherCalls, 2);
   assert.equal(migrated?.manifest.schemaVersion, 3);
   assert.equal(
     (migrated?.manifest as unknown as { estimatorPolicyVersion?: number })
       .estimatorPolicyVersion,
     ESTIMATOR_POLICY_VERSION,
   );
-  assert.notEqual(migrated?.manifest.buildId, first?.manifest.buildId);
+  assert.notEqual(migrated?.manifest.buildId, migratedFromSchema1?.manifest.buildId);
   assert.notEqual(
     migrated?.manifest.artifacts['transactions-index.json']?.sha256,
     legacyTransactionChecksum,
@@ -442,15 +517,12 @@ test('unchanged schema-2 or old-provenance sources force current-semantic schema
     minTransactions: 1,
     fetch: fetchSameSources,
     openZip: openSameSources,
-    clock: () => new Date('2026-07-27T01:00:00.000Z'),
-    publisher: async (root, stage, acceptance, options) => {
-      publisherCalls += 1;
-      return publishStagedBuildWithAcceptance(root, stage, acceptance, options);
-    },
+    clock: () => new Date('2026-07-28T01:00:00.000Z'),
+    publisher,
   });
 
   assert.equal(rebuiltFromOldProvenance?.refresh?.status, 'updated');
-  assert.equal(publisherCalls, 2);
+  assert.equal(publisherCalls, 3);
   assert.notEqual(rebuiltFromOldProvenance?.manifest.buildId, migrated?.manifest.buildId);
   assert.equal(
     rebuiltFromOldProvenance?.manifest.estimatorPolicyVersion,

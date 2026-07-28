@@ -124,21 +124,26 @@ async function writeBuild(dir: string, buildId: string, count = 1): Promise<void
   await writeFile(join(dir, 'manifest.json'), `${JSON.stringify(value, null, 2)}\n`);
 }
 
-async function downgradeBuildToSchema2(root: string): Promise<void> {
+async function downgradeBuildToLegacySchema(
+  root: string,
+  schemaVersion: 1 | 2,
+): Promise<void> {
   for (const indexFile of ['doorplates-index.json', 'transactions-index.json']) {
     const index = JSON.parse(await readFile(join(root, indexFile), 'utf8')) as {
       schemaVersion: number;
     };
-    index.schemaVersion = 2;
+    index.schemaVersion = schemaVersion;
     await writeFile(join(root, indexFile), `${JSON.stringify(index)}\n`);
   }
   const legacyManifest = JSON.parse(
     await readFile(join(root, 'manifest.json'), 'utf8'),
   ) as Record<string, unknown> & {
     artifacts: MarketDataManifest['artifacts'];
+    transactions: Record<string, unknown>;
   };
-  legacyManifest.schemaVersion = 2;
+  legacyManifest.schemaVersion = schemaVersion;
   delete legacyManifest.estimatorPolicyVersion;
+  if (schemaVersion === 1) delete legacyManifest.transactions.normalization;
   for (const indexFile of ['doorplates-index.json', 'transactions-index.json']) {
     legacyManifest.artifacts[indexFile] = {
       sha256: await sha256File(join(root, indexFile)),
@@ -482,29 +487,40 @@ test('restart recovery yields a validated old or new pair after every publicatio
   }
 });
 
-test('restart recovery restores a schema-2 migration source fail-closed after the first rename', async (t) => {
-  const parent = await mkdtemp(join(tmpdir(), 'market-store-schema2-crash-'));
-  const active = join(parent, 'taipei');
-  const stage = join(parent, '.taipei-staging-next');
-  t.after(() => rm(parent, { recursive: true, force: true }));
-  await writeBuild(active, 'schema2-build');
-  await downgradeBuildToSchema2(active);
-  await writeBuild(stage, 'schema3-build');
+test('restart recovery restores legacy migration sources fail-closed after the first rename', async (t) => {
+  for (const schemaVersion of [1, 2] as const) {
+    await t.test(`schema ${schemaVersion}`, async (t) => {
+      const parent = await mkdtemp(
+        join(tmpdir(), `market-store-schema${schemaVersion}-crash-`),
+      );
+      const active = join(parent, 'taipei');
+      const stage = join(parent, '.taipei-staging-next');
+      t.after(() => rm(parent, { recursive: true, force: true }));
+      await writeBuild(active, `schema${schemaVersion}-build`);
+      await downgradeBuildToLegacySchema(active, schemaVersion);
+      await writeBuild(stage, 'schema3-build');
 
-  await crashPublicationAfterRename(active, stage, await passingAcceptance(stage), 1);
-  const recovered = await recoverInterruptedMarketDataPublication(active, {
-    minDoorplates: 1,
-    minTransactions: 0,
-  });
+      await crashPublicationAfterRename(
+        active,
+        stage,
+        await passingAcceptance(stage),
+        1,
+      );
+      const recovered = await recoverInterruptedMarketDataPublication(active, {
+        minDoorplates: 1,
+        minTransactions: 0,
+      });
 
-  assert.equal(recovered, null);
-  assert.equal(readManifest(active)?.buildId, 'schema2-build');
-  assert.equal(readManifest(active)?.schemaVersion, 2);
-  assert.equal(
-    await loadMarketData(active, { minDoorplates: 1, minTransactions: 0 }),
-    null,
-  );
-  assert.deepEqual(await readdir(parent), ['taipei']);
+      assert.equal(recovered, null);
+      assert.equal(readManifest(active)?.buildId, `schema${schemaVersion}-build`);
+      assert.equal(readManifest(active)?.schemaVersion, schemaVersion);
+      assert.equal(
+        await loadMarketData(active, { minDoorplates: 1, minTransactions: 0 }),
+        null,
+      );
+      assert.deepEqual(await readdir(parent), ['taipei']);
+    });
+  }
 });
 
 test('production backtest recovers an interrupted publication before its locked load', async (t) => {
