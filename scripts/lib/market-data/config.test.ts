@@ -34,7 +34,7 @@ test('approved weights and stale windows are centralized', () => {
 });
 
 test('estimator acceptance uses an intentional policy compatibility version', () => {
-  assert.equal(ESTIMATOR_POLICY_VERSION, 2);
+  assert.equal(ESTIMATOR_POLICY_VERSION, 3);
   assert.equal(MARKET_SCHEMA_VERSION, 2);
 });
 

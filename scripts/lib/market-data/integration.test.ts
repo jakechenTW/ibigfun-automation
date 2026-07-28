@@ -103,9 +103,9 @@ function listing(overrides: Partial<PreMarketEnrichedListing> = {}): PreMarketEn
 test('production estimate stays review before approval and becomes reliable only for matching acceptance', () => {
   const [unapproved] = attachMarketEstimates([listing()], bundle, AS_OF);
   const [mismatched] = attachMarketEstimates([listing()], bundleWithAcceptance('different-dataset'), AS_OF);
-  const policyMismatchBundle = bundleWithAcceptance();
-  policyMismatchBundle.backtestAcceptance!.estimatorPolicyVersion = ESTIMATOR_POLICY_VERSION + 1;
-  const [policyMismatched] = attachMarketEstimates([listing()], policyMismatchBundle, AS_OF);
+  const policyV2Bundle = bundleWithAcceptance();
+  policyV2Bundle.backtestAcceptance!.estimatorPolicyVersion = 2;
+  const [policyV2] = attachMarketEstimates([listing()], policyV2Bundle, AS_OF);
   const staleCoverageBundle = bundleWithAcceptance();
   const cell = Object.keys(staleCoverageBundle.transactions.cells)[0]!;
   staleCoverageBundle.transactions.cells[cell]!.push({
@@ -119,8 +119,8 @@ test('production estimate stays review before approval and becomes reliable only
   assert.equal(unapproved.marketEstimate.status, 'review');
   assert.ok(unapproved.marketEstimate.unavailableReasons.includes('market-backtest-not-approved'));
   assert.equal(mismatched.marketEstimate.status, 'review');
-  assert.equal(policyMismatched.marketEstimate.status, 'review');
-  assert.ok(policyMismatched.marketEstimate.unavailableReasons.includes('market-backtest-not-approved'));
+  assert.equal(policyV2.marketEstimate.status, 'review');
+  assert.ok(policyV2.marketEstimate.unavailableReasons.includes('market-backtest-not-approved'));
   assert.equal(staleCoverage.marketEstimate.status, 'review');
   assert.ok(staleCoverage.marketEstimate.unavailableReasons.includes('market-backtest-not-approved'));
   assert.equal(result.marketEstimate.status, 'reliable');

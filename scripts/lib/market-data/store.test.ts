@@ -281,6 +281,7 @@ test('backtest acceptance loads only for the active transaction artifact checksu
   );
   for (const invalid of [
     { ...acceptance, schemaVersion: 1 },
+    { ...acceptance, estimatorPolicyVersion: 2 },
     { ...acceptance, policyId: '48-month' },
     { ...acceptance, asOf: '2026-02-30', evaluatedThrough: '2026-02-30' },
     { ...acceptance, latestEligibleTransactionDate: '2026-02-30' },

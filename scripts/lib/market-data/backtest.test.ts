@@ -222,7 +222,7 @@ test('passing acceptance records policy identity and complete transaction covera
   const acceptance = backtestAcceptance(passing, 'transactions-checksum', '2026-07-26T01:00:00.000Z');
 
   assert.equal(acceptance.schemaVersion, 2);
-  assert.equal(acceptance.estimatorPolicyVersion, 2);
+  assert.equal(acceptance.estimatorPolicyVersion, 3);
   assert.equal(acceptance.policyId, 'baseline');
   assert.equal(acceptance.evaluatedThrough, '2025-12-01');
   assert.equal(acceptance.latestEligibleTransactionDate, '2025-12-01');
