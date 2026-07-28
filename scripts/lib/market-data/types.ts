@@ -5,6 +5,7 @@ export type FloorGroup = 'first' | 'low' | 'middle' | 'top' | 'high';
 export type LocationMethod = 'exact-doorplate' | 'address-range' | 'nearest-doorplate' | 'unresolved';
 export type EstimateStatus = 'reliable' | 'review' | 'unavailable';
 export type EstimateConfidence = 'high' | 'medium' | 'low';
+export type TransactionEligibility = 'reliable-eligible' | 'review-only';
 export type SubjectOwnershipEvidence =
   | 'profile-default-freehold'
   | 'title-explicit-non-freehold'
@@ -62,6 +63,17 @@ export interface MarketTransaction {
   completionDate: string | null;
   notes: string;
   exclusionFlags: string[];
+  eligibility: TransactionEligibility;
+  eligibilityReasons: string[];
+  primaryUse: 'residential' | 'mixed-residential';
+  transferredBuildingCount: number;
+}
+
+export interface TransactionEligibilityEvidence {
+  eligibility: TransactionEligibility;
+  reasons: string[];
+  primaryUse: 'residential' | 'mixed-residential';
+  transferredBuildingCount: number;
 }
 
 export interface MarketSubject {

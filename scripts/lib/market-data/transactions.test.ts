@@ -43,6 +43,9 @@ const BASE_ROW: Record<string, string> = {
   '車位類別': '坡道平面',
   '車位移轉總面積平方公尺': '20',
   '車位總價元': '3000000',
+  '主要用途': '住家用',
+  '交易筆棟數': '土地1建物1車位1',
+  '電梯': '有',
   '備註': '',
   '編號': 'TX-001',
 };
@@ -65,6 +68,72 @@ test('converts ROC dates and computes building-only unit price', () => {
   assert.equal(tx.transaction.transactionDate, '2026-01-05');
   assert.ok(Math.abs(tx.transaction.buildingAreaPing - 24.2) < 0.1);
   assert.equal(tx.transaction.buildingPriceNtd, 27_000_000);
+});
+
+test('classifies ordinary one-building residential sales as reliable-eligible', () => {
+  const tx = normalizeSaleTransaction(row({
+    '主要用途': '住家用',
+    '交易筆棟數': '土地1建物1車位0',
+  }), context);
+
+  assert.equal(tx.kind, 'included');
+  if (tx.kind !== 'included') return;
+  assert.equal(tx.transaction.eligibility, 'reliable-eligible');
+  assert.deepEqual(tx.transaction.eligibilityReasons, []);
+  assert.equal(tx.transaction.primaryUse, 'residential');
+  assert.equal(tx.transaction.transferredBuildingCount, 1);
+});
+
+test('classifies mixed-residential sales as review-only', () => {
+  const tx = normalizeSaleTransaction(row({
+    '主要用途': '住商用',
+    '交易筆棟數': '土地1建物1車位0',
+  }), context);
+
+  assert.equal(tx.kind, 'included');
+  if (tx.kind !== 'included') return;
+  assert.equal(tx.transaction.eligibility, 'review-only');
+  assert.deepEqual(tx.transaction.eligibilityReasons, ['mixed-residential-use']);
+  assert.equal(tx.transaction.primaryUse, 'mixed-residential');
+  assert.equal(tx.transaction.transferredBuildingCount, 1);
+});
+
+test('classifies multiple transferred buildings as review-only', () => {
+  const tx = normalizeSaleTransaction(row({
+    '主要用途': '住家用',
+    '交易筆棟數': '土地1建物2車位0',
+  }), context);
+
+  assert.equal(tx.kind, 'included');
+  if (tx.kind !== 'included') return;
+  assert.equal(tx.transaction.eligibility, 'review-only');
+  assert.deepEqual(tx.transaction.eligibilityReasons, ['multiple-buildings']);
+  assert.equal(tx.transaction.primaryUse, 'residential');
+  assert.equal(tx.transaction.transferredBuildingCount, 2);
+});
+
+test('excludes non-residential or unavailable primary uses', () => {
+  for (const primaryUse of ['商業用', '工業用', '辦公用', '']) {
+    const tx = normalizeSaleTransaction(row({ '主要用途': primaryUse }), context);
+
+    assert.equal(tx.kind, 'excluded', primaryUse || 'blank primary use');
+    if (tx.kind !== 'excluded') continue;
+    assert.deepEqual(
+      tx.reasons,
+      primaryUse ? ['non-residential-primary-use'] : ['primary-use-unavailable'],
+      primaryUse || 'blank primary use',
+    );
+  }
+});
+
+test('excludes official government sale transactions', () => {
+  const tx = normalizeSaleTransaction(row({ '備註': '政府機關標讓售' }), context);
+
+  assert.deepEqual(tx, {
+    kind: 'excluded',
+    id: 'TX-001',
+    reasons: ['government-sale'],
+  });
 });
 
 test('parking that cannot be fully separated is excluded', () => {
@@ -164,6 +233,18 @@ test('validates official schema before parsing a transaction row', () => {
   assert.throws(
     () => validateSaleTransactionHeaders(Object.keys(missingTotalPrice)),
     /總價元/,
+  );
+
+  const { '主要用途': _primaryUse, ...missingPrimaryUse } = row();
+  assert.throws(
+    () => validateSaleTransactionHeaders(Object.keys(missingPrimaryUse)),
+    /主要用途/,
+  );
+
+  const { '交易筆棟數': _transactionCounts, ...missingTransactionCounts } = row();
+  assert.throws(
+    () => validateSaleTransactionHeaders(Object.keys(missingTransactionCounts)),
+    /交易筆棟數/,
   );
 });
 

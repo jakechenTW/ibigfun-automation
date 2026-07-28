@@ -1,6 +1,10 @@
 import { locateAddress } from './doorplates.ts';
 import { floorGroup, normalizeOfficialBuildingType } from './property.ts';
-import type { DoorplateIndex, MarketTransaction } from './types.ts';
+import type {
+  DoorplateIndex,
+  MarketTransaction,
+  TransactionEligibilityEvidence,
+} from './types.ts';
 
 export type SaleTransactionRow = Record<string, string>;
 
@@ -27,6 +31,9 @@ type FieldName =
   | 'parkingType'
   | 'parkingArea'
   | 'parkingPrice'
+  | 'primaryUse'
+  | 'transactionCounts'
+  | 'elevator'
   | 'notes'
   | 'id';
 
@@ -44,6 +51,9 @@ const HEADER_ALIASES: Record<FieldName, readonly string[]> = {
   parkingType: ['車位類別'],
   parkingArea: ['車位移轉總面積平方公尺'],
   parkingPrice: ['車位總價元'],
+  primaryUse: ['主要用途'],
+  transactionCounts: ['交易筆棟數'],
+  elevator: ['電梯'],
   notes: ['備註', '備註欄'],
   id: ['編號'],
 };
@@ -155,6 +165,50 @@ export function specialTransactionFlags(notes: string): string[] {
   return flags;
 }
 
+function transferredBuildingCount(raw: string): number | null {
+  const match = /(?:^|土地\d+)建物(\d+)車位\d+$/.exec(raw.normalize('NFKC').replace(/\s+/g, ''));
+  return match ? Number(match[1]) : null;
+}
+
+function reliableEligible(transferredBuildingCount: number): TransactionEligibilityEvidence {
+  return {
+    eligibility: 'reliable-eligible',
+    reasons: [],
+    primaryUse: 'residential',
+    transferredBuildingCount,
+  };
+}
+
+function reviewOnly(
+  primaryUse: TransactionEligibilityEvidence['primaryUse'],
+  transferredBuildingCount: number,
+  reasons: string[],
+): TransactionEligibilityEvidence {
+  return { eligibility: 'review-only', reasons, primaryUse, transferredBuildingCount };
+}
+
+export function classifyTransactionEligibility(
+  primaryUseRaw: string,
+  transactionCountsRaw: string,
+  notes: string,
+): TransactionEligibilityEvidence | { excludedReasons: string[] } {
+  const count = transferredBuildingCount(transactionCountsRaw);
+  if (/政府機關.*(?:標讓售|讓售)/u.test(notes)) return { excludedReasons: ['government-sale'] };
+  if (primaryUseRaw === '住家用' && count === 1) return reliableEligible(count);
+  if (primaryUseRaw === '住家用' && count !== null && count > 1) {
+    return reviewOnly('residential', count, ['multiple-buildings']);
+  }
+  if (primaryUseRaw === '住商用' && count !== null) {
+    return reviewOnly(
+      'mixed-residential',
+      count,
+      count > 1 ? ['mixed-residential-use', 'multiple-buildings'] : ['mixed-residential-use'],
+    );
+  }
+  if (!primaryUseRaw) return { excludedReasons: ['primary-use-unavailable'] };
+  return { excludedReasons: ['non-residential-primary-use'] };
+}
+
 /** Detects the official explanatory row without relying on its position in the CSV. */
 export function isSaleTransactionDataRow(row: SaleTransactionRow): boolean {
   try {
@@ -191,6 +245,13 @@ export function normalizeSaleTransaction(
   const notes = aliasValue(values, 'notes');
   const explicitFlags = specialTransactionFlags(`${target}\n${notes}`);
   if (explicitFlags.length > 0) return { kind: 'excluded', id, reasons: explicitFlags };
+
+  const eligibility = classifyTransactionEligibility(
+    aliasValue(values, 'primaryUse'),
+    aliasValue(values, 'transactionCounts'),
+    notes,
+  );
+  if ('excludedReasons' in eligibility) return { kind: 'excluded', id, reasons: eligibility.excludedReasons };
 
   const buildingType = normalizeOfficialBuildingType(aliasValue(values, 'buildingType'));
   if (!buildingType) return excluded(id, 'unsupported-building-type');
@@ -268,6 +329,10 @@ export function normalizeSaleTransaction(
       completionDate,
       notes,
       exclusionFlags: [],
+      eligibility: eligibility.eligibility,
+      eligibilityReasons: eligibility.reasons,
+      primaryUse: eligibility.primaryUse,
+      transferredBuildingCount: eligibility.transferredBuildingCount,
     },
   };
 }
