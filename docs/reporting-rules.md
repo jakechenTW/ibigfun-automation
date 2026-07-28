@@ -76,12 +76,31 @@ exclusion.
 `unavailable`，以及中位數、P25–P75、信心、可比筆數、選用階段與官方資料日期/新鮮度。
 通知只顯示這個摘要；完整可比成交及其排除理由留在 git-ignored 的 `enriched.json`，不可整份貼進通知。
 
+- 門牌索引與交易查找共用結構化的 base-doorplate key（市／區／路、選填段巷弄、號與子號），
+  樓層或戶別尾碼不參與 key；原始地址、完整正規化地址、配對門牌、方法與不確定範圍仍完整保留在
+  本機 evidence。不可用模糊文字補猜缺失的市、區、路或號。
+- 官方交易先分成三類：一般市場的單一建物 `住家用` 且通過所有硬性品質檢查者為
+  `reliable-eligible`；`住商用` 或一次移轉多棟建物者為 `review-only`；非住宅／空白用途、
+  政府標讓售、特殊交易、無法定位、無法分離車位或其他硬性衝突者為 `excluded`。
+  `review-only` evidence 可留供人工查核，但不得補足 reliable 所需的三筆可比，也不得產生
+  median/P25/P75；只剩這類 evidence 時估值必須為 `review`。
 - 投資分桶的開價溢價以 **P25 保守行情** 計算/覆核；中位數溢價只能用於說明，不能單獨使物件進入推薦。
 - 只有當本機 backtest acceptance 的 `transactions-index.json` checksum、`ESTIMATOR_POLICY_VERSION`、
-  以及完整有效交易索引的最新日期覆蓋均與目前執行環境完全相符時，估值才可為 `reliable`；缺少
-  acceptance、backtest 未完成/未達標、歷史 `--as-of` 未涵蓋完整索引、估值政策已變更或資料集已更新時
-  一律降為 `review`，不得自動推薦。任何 selector、weight、outlier、confidence、status 或 backtest
-  語意變更都必須提高 `ESTIMATOR_POLICY_VERSION` 並重新通過完整 backtest。
+  active policy id、schema-2 acceptance，以及完整有效交易索引的最新日期覆蓋均與目前執行環境完全
+  相符時，估值才可為 `reliable`。Acceptance 必須同時證明：所有 `reliable-eligible` held-out 交易
+  中至少 70% 可估價、`reliable` cohort 的 median APE ≤12% 且 P75 APE ≤20%、high／medium
+  各至少 20 筆，且 high median APE 至少比 medium 低一個絕對百分點。Coverage denominator
+  只含符合 production eligibility 的 held-out 交易；`review-only` 與硬性排除項均不在分母。
+  缺少 acceptance、backtest 未完成/未達標、歷史 `--as-of` 未涵蓋完整索引、估值政策已變更或資料集
+  已更新時一律降為 `review`，不得自動推薦。任何 eligibility、selector、weight、outlier、
+  confidence、status、coverage 或 backtest 語意變更都必須提高 `ESTIMATOR_POLICY_VERSION`
+  並重新通過完整 backtest。
+- 市場資料 refresh 先在 staging 建 candidate index 並完成 gate，只有 candidate build 與 checksum
+  綁定 acceptance 皆通過才一起發佈。失敗時保留 last-known-good active build／acceptance，不得把
+  失敗 candidate 或錯配 acceptance 用於 `reliable`。
+- Coverage 不足只能依序評估 baseline → 48-month → 1000-meter；只有前一政策「單純 coverage
+  <70%」時才可擴張，任何 accuracy／confidence calibration failure 都必須停止。Fallback 必須全面
+  通過相同門檻、提高 policy compatibility 版本並以正常 update 發佈；不得降低門檻或混用建物型態。
 - `status: reliable` 且兩個官方來源均未過期，才可能進入推薦；`low` 信心、`review`、`unavailable`，或只靠中位數才符合門檻者，最多是待人工覆核的候選。
 - 車位價格/面積無法與建物分離（含 `listing-parking-not-separable`）時，不得自動推薦。
 - 任一官方來源過期時，受影響物件不得推薦，快速摘要必須寫明資料偏舊，整則通知一律使用 `warn`。

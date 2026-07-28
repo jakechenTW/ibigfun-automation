@@ -55,6 +55,40 @@ diagnostics or other ad-hoc files there, because an undeclared file invalidates
 the active build. Do not paste raw transactions or a listing's full comparable
 set into notifications.
 
+### Address evidence and transaction eligibility
+
+Doorplate construction and official transaction lookup use the same
+`baseDoorplateKey`: city, district, road, optional section/lane/alley, main
+number, and optional sub-number. A structurally parsed floor or unit suffix is
+not part of the key, so an official address such as `...1號四樓之12` can match
+the `...1號` base doorplate. This is matching normalization, not evidence
+destruction: every indexed transaction retains the original address and the
+full `LocationEvidence` (`normalizedAddress`, `matchedAddress`, method,
+coordinate, uncertainty, confidence, and dataset version). Missing structural
+address parts are never inferred from marketing prose.
+
+Normalization assigns each usable official row one production class before
+selection:
+
+- `reliable-eligible`: `住家用`, exactly one transferred building, and all
+  existing general-market, building-type, freehold, floor/area/price/date,
+  location, unit-price, and separable-parking checks pass. Only this class can
+  count toward a reliable estimate or the held-out coverage denominator.
+- `review-only`: `住商用` or a transaction containing multiple transferred
+  buildings. The row remains in the local index as explicit audit evidence but
+  never fills the three-comparable reliable minimum. If these are the only
+  otherwise matching rows, the estimate is `review` with no computed
+  median/P25/P75.
+- `excluded`: blank or non-residential primary use, government sale, explicit
+  special/non-freehold transaction, unsupported type, unresolved location,
+  invalid or contradictory required values, inseparable parking, and other
+  hard failures. Excluded rows do not enter the transaction index.
+
+The schema-2 manifest publishes only aggregate normalization totals:
+`rawRows`, `reliableEligible`, `reviewOnly`, `excluded`, and
+`excludedByReason`. Full rows and addresses remain only in git-ignored local
+evidence.
+
 Run an explicit initial build (or a manual refresh) with network access:
 
 ```bash
@@ -62,9 +96,12 @@ npm run market-data -- update --city taipei
 ```
 
 The command prints the published build ID, source check timestamps, publication
-metadata when available, record counts, and freshness. A production build is published only after index,
-coordinate, checksum, and minimum-count validation. The active directory is
-replaced atomically only after the staging directory validates.
+metadata when available, record counts, and freshness. A production build is
+published only after index, coordinate, checksum, minimum-count, complete
+backtest, and acceptance validation. The candidate directory and its
+checksum-bound schema-2 acceptance are promoted transactionally; the published
+pair therefore has the same transaction-index checksum, active policy id,
+estimator policy version, and latest eligible transaction-date coverage.
 
 Enrichment also calls the same updater once per run before estimates are
 attached. It performs a lightweight online source check without credentials:
@@ -79,11 +116,12 @@ data is published. A valid active build remains the last-known-good build; if
 none exists, enrichment continues with independent fields and sets
 `marketEstimate.status` to `unavailable`. The active manifest describes the
 last successful build, not an error log. Pipeline enrichment journals the
-current refresh outcome. The standalone `market-data update` CLI currently has
-no logger: when it retains an existing build after a refresh failure, it prints
-that old build and exits successfully without the failure reason. Treat a
-standalone update's output as build identity/freshness only; use a pipeline
-enrichment journal to inspect a retained-refresh failure.
+current refresh outcome. When the standalone `market-data update` retains an
+existing build after a refresh failure, it prints a redacted warning with the
+retained build identity and exits `3`; it must not be interpreted as a fresh
+publication. The active build and its previously matching acceptance remain
+unchanged. If no active build exists, the command fails and enrichment keeps
+market evidence unavailable rather than publishing an unaccepted candidate.
 
 Freshness is measured from successful source checks at the report's target
 date: transaction data is stale after 30 days and doorplate data after 60 days.
@@ -137,18 +175,60 @@ write the required `valuation-review.json` when it changes a report bucket.
 
 ## Backtesting
 
-Backtesting reads the active validated local build only; it never refreshes
-sources or exposes a held-out sale to its estimator. Supply a historical date
-when reproducing a baseline:
+The production refresh evaluates a freshly staged candidate before publication.
+For an explicit fresh-data calibration, run the non-publishing `candidate`
+command and capture its JSON only under the git-ignored diagnostics directory:
+
+```bash
+mkdir -p state/market-data/backtests/taipei
+npm run market-data -- candidate --city taipei --policy baseline \
+  > state/market-data/backtests/taipei/2026-07-28-baseline.json
+```
+
+`candidate` downloads or reuses public official sources, builds and validates
+new indexes in staging, runs the complete backtest, emits aggregate
+normalization diagnostics plus the held-out report, then removes staging. It
+never changes the active build or acceptance. Its initial output can contain
+held-out `cases`; after reading the gate, rewrite the local diagnostic to retain
+only aggregate diagnostics, report slices, and gate results. Never retain or
+commit cases, transaction/address rows, or listing details.
+
+The policy decision is deliberately sequential:
+
+1. Evaluate `baseline` (the five production stages) first.
+2. Evaluate `48-month` only if baseline's sole acceptance problem is eligible
+   estimate coverage below 70%.
+3. Evaluate `1000-meter` only if an otherwise acceptable 48-month policy still
+   misses that same coverage target.
+
+Any accuracy, confidence-slice, confidence-ordering, or completeness failure
+stops expansion. A fallback becomes active only when all gates pass; changing
+the active policy requires an `ESTIMATOR_POLICY_VERSION` compatibility bump,
+tests, and the normal `update` command so the accepted candidate is published
+transactionally. Thresholds are never lowered. If no policy passes, retain the
+last-known-good active pair.
+
+The 2026-07-28 official-data calibration selected `baseline`: eligible coverage
+was 93.09%, reliable-cohort median/P75 APE were 7.65%/14.05%, high/medium
+confidence had 5,139/12,830 scored cases, and high median APE was 1.52 absolute
+percentage points lower than medium. The gate passed without reasons, so the
+48-month and 1,000-meter policies were not evaluated, the active policy stayed
+baseline, and compatibility version 3 was retained.
+
+The `backtest` command reads the active validated local build only; it never
+refreshes sources or exposes a held-out sale to its estimator. Supply a
+historical date when reproducing an active-build baseline:
 
 ```bash
 npm run market-data -- backtest --city taipei --as-of 2026-07-26
 ```
 
-The JSON report contains overall metrics plus slices by building type and
-confidence. Interpret them as follows:
+The JSON report contains overall metrics plus slices by building type,
+confidence, and status. Interpret them as follows:
 
-- `estimateCoverage` is the share of eligible held-out sales that received a score; it must not be increased by relaxing safety rules without evidence.
+- `estimateCoverage` is the share of `reliable-eligible` held-out sales that
+  received a score. `review-only` and excluded transactions are outside the
+  denominator; a policy cannot improve coverage by reclassifying hard failures.
 - `medianApe` and `p75Ape` are absolute percentage errors; lower is better.
 - `bias` is signed `(estimate - actual) / actual`; a persistent positive or negative value signals calibration drift.
 - `intervalCoverage` is the fraction of actual prices inside the P25--P75 interval.
@@ -162,8 +242,9 @@ subject-date predicate determines both case population and
 `latestEligibleTransactionDate`, so coverage cannot count a transaction that
 the backtest would exclude.
 
-The quality gate targets median APE at or below 12% and P75 APE at or below
-20%. It also requires at least 20 scored high-confidence cases and 20 scored
+The quality gate targets the `reliable` cohort's median APE at or below 12% and
+P75 APE at or below 20%, plus overall eligible estimate coverage of at least
+70%. It also requires at least 20 scored high-confidence cases and 20 scored
 medium-confidence cases. With those sufficient slices, high-confidence median
 APE must be at least one absolute percentage point lower than medium-confidence
 median APE. This fixed margin prevents tiny floating-point differences from
@@ -174,21 +255,22 @@ missing, either confidence slice lacks its 20 scored cases, or `--as-of`
 precedes the complete index's `latestEligibleTransactionDate`. Historical
 cutoffs remain useful with `--no-gate`, but they cannot approve a newer active
 index. A completed run also exits non-zero when any accuracy/calibration target
-fails. Only a completed passing gated run atomically writes
+fails. Only a completed passing active-policy gated run atomically writes
 `state/market-data/taipei-backtest-acceptance.json`. That aggregate-only artifact
-records the exact `transactions-index.json` SHA-256, estimator policy version,
-`evaluatedThrough`, `latestEligibleTransactionDate`, thresholds, slice counts,
-and summary metrics. Enrichment treats estimates as review-only until this
-artifact matches the active transaction checksum, runtime estimator policy, and
-complete index's latest eligible date. Publishing a different transaction
-index or adding a newer eligible transaction therefore invalidates prior
-acceptance automatically.
+uses schema 2 and records the exact `transactions-index.json` SHA-256, active
+policy id, estimator policy version, `evaluatedThrough`,
+`latestEligibleTransactionDate`, thresholds, slice counts, and reliable-cohort
+summary metrics. Enrichment treats estimates as review-only until this artifact
+matches the active transaction checksum, runtime estimator policy, and complete
+index's latest eligible date. Publishing a different transaction index or
+adding a newer eligible transaction therefore invalidates prior acceptance
+automatically.
 
 `ESTIMATOR_POLICY_VERSION` is the intentional valuation compatibility
-contract. Any change to comparable selection stages, weights, outlier handling,
-confidence, estimate status, or backtest semantics must bump it and obtain a
-new passing acceptance. The market-data schema version is not a substitute for
-this policy bump.
+contract. Any change to transaction eligibility, comparable selection stages,
+weights, outlier handling, confidence, estimate status, coverage, or backtest
+semantics must bump it and obtain a new passing acceptance. The market-data
+schema version is not a substitute for this policy bump.
 
 The acceptance artifact's `asOf`, `evaluatedThrough`, and
 `latestEligibleTransactionDate` values must be real, zero-padded calendar dates;

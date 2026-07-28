@@ -96,9 +96,21 @@ evaluation, and writing the report.
 - `npm run market-data -- update --city taipei` — refreshes the local, validated
   Taipei official-data build without credentials. It obtains the Taipei City
   doorplate dataset and Ministry of the Interior real-price transaction ZIPs,
-  stages and validates them, then atomically publishes
-  `state/market-data/taipei/`. A failed refresh retains the last-known-good
-  build; this git-ignored local state is never committed.
+  stages and validates them, classifies transactions as reliable-eligible,
+  review-only, or excluded, then runs the complete quality gate before
+  atomically publishing the candidate build and its matching schema-2
+  acceptance. A failed refresh retains the last-known-good build plus its
+  matching acceptance; this git-ignored local state is never committed.
+- `npm run market-data -- candidate --city taipei --policy
+  <baseline|48-month|1000-meter>` — builds and backtests a fresh candidate
+  without publishing it. The command can emit held-out cases; capture it only
+  under `state/market-data/backtests/taipei/`, then retain only aggregate
+  diagnostics, report slices, and gate results—never cases, rows, or addresses.
+  Never commit it. Evaluate `baseline` first. Try `48-month` only when baseline
+  misses the 70% eligible-coverage target and has no accuracy/calibration
+  failure; try `1000-meter` only under the same condition after the 48-month
+  policy. A fallback becomes active only after every gate passes, with an
+  `ESTIMATOR_POLICY_VERSION` bump and a normal `update` publication.
 - `npm run market-data -- backtest --city taipei [--as-of YYYY-MM-DD] [--no-gate]`
   — evaluates the active local build without refreshing it. It prints aggregate,
   non-identifying accuracy and interval metrics; it needs no credentials. A
@@ -215,8 +227,9 @@ ai-notify --tool <codex|claude> --status <ok|warn|fail> \
   source files, indexes, manifest/checksums, and no credentials. It is
   checksum-closed, so undeclared files invalidate it. Its sibling
   `state/market-data/taipei-backtest-acceptance.json` contains only aggregate
-  acceptance metrics keyed to the active transaction-index checksum, estimator
-  policy version, and complete eligible transaction-date coverage. Optional
+  schema-2 acceptance metrics keyed to the active transaction-index checksum,
+  active policy id, estimator policy version, and complete eligible
+  transaction-date coverage. Publication promotes this pair together. Optional
   per-case diagnostic reports belong under
   `state/market-data/backtests/taipei/`, outside the active build.
 - `prompts/daily-run.md`: the committed headless worker prompt for the daily
