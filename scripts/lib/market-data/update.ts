@@ -21,8 +21,10 @@ import {
 import { extractTaipeiSalesCsv, downloadConditional, moiSeasonUrl, quartersForLookback, resolveTaipeiDoorplateSource, TAIPEI_DOORPLATE_DETAIL_URL, type FetchLike, type ZipEntry, zipEntriesFromFile } from './sources.ts';
 import {
   compareStableText,
+  countIndexEntries,
   loadMarketData,
   publishStagedBuildWithAcceptance,
+  recoverInterruptedMarketDataPublication,
   sha256File,
   validateStagedBuild,
   writeStableJson,
@@ -268,6 +270,10 @@ async function ensureTaipeiMarketDataUnlocked(
   const fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
   const clock = options.clock ?? (() => new Date());
   const openZip = options.openZip ?? zipEntriesFromFile;
+  await recoverInterruptedMarketDataPublication(root, {
+    minDoorplates: options.minDoorplates,
+    minTransactions: options.minTransactions,
+  });
   const existing = await loadMarketData(root, {
     minDoorplates: options.minDoorplates,
     minTransactions: options.minTransactions,
@@ -403,7 +409,7 @@ async function ensureTaipeiMarketDataUnlocked(
       builtAt,
       doorplates: {
         sourceUrl: doorplateSource.url, publishedAt: doorplateSource.publishedAt, checkedAt: builtAt,
-        sha256: doorplateSha, recordCount: Object.values(doorplates.cells).flat().length,
+        sha256: doorplateSha, recordCount: countIndexEntries(doorplates.cells),
         etag: doorplate.kind === 'downloaded' ? doorplate.etag : oldDoorplate?.etag ?? null,
         lastModified: doorplate.kind === 'downloaded' ? doorplate.lastModified : oldDoorplate?.lastModified ?? null,
       },

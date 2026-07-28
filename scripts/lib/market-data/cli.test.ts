@@ -5,6 +5,7 @@ import {
   estimatorPolicyById,
 } from './config.ts';
 import {
+  type MarketDataCommandDependencies,
   parseMarketDataArgs,
   runMarketDataCommand,
   shouldPersistBacktestAcceptance,
@@ -264,6 +265,7 @@ test('backtest acceptance writer cannot race a locked update into a stale final 
   let writerReached!: () => void;
   const writerCanFinish = new Promise<void>((resolve) => { releaseWriter = resolve; });
   const writerStarted = new Promise<void>((resolve) => { writerReached = resolve; });
+  let recoveryRan = false;
 
   const backtestRun = runMarketDataCommand(
     ['backtest', '--city', 'taipei'],
@@ -271,8 +273,13 @@ test('backtest acceptance writer cannot race a locked update into a stale final 
     {
       backtest: {
         lock,
+        recover: async () => {
+          assert.equal(criticalSectionDepth, 1);
+          recoveryRan = true;
+        },
         load: async () => {
           assert.equal(criticalSectionDepth, 1);
+          assert.equal(recoveryRan, true);
           return oldBundle;
         },
         evaluate: () => {
@@ -288,7 +295,7 @@ test('backtest acceptance writer cannot race a locked update into a stale final 
             acceptanceChecksum: acceptance.transactionArtifactSha256,
           };
         },
-      },
+      } as unknown as NonNullable<MarketDataCommandDependencies['backtest']>,
     },
   );
   await writerStarted;
@@ -303,4 +310,5 @@ test('backtest acceptance writer cannot race a locked update into a stale final 
     buildChecksum: 'new-checksum',
     acceptanceChecksum: 'new-checksum',
   });
+  assert.equal(recoveryRan, true);
 });

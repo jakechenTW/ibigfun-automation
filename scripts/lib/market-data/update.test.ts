@@ -161,6 +161,39 @@ test('candidate manifest records aggregate normalization diagnostics without row
   });
 });
 
+test('candidate doorplate count does not materialize a flattened full-index copy', async (t) => {
+  const rootPath = join(await mkdtemp(join(tmpdir(), 'market-update-count-')), 'taipei');
+  t.after(() => rm(join(rootPath, '..'), { recursive: true, force: true }));
+  const doorplateCsv = await readFile(fileURLToPath(new URL('./fixtures/doorplates.csv', import.meta.url)));
+  const transactionCsv = await readFile(fileURLToPath(new URL('./fixtures/transactions.csv', import.meta.url)));
+  const passingTransactionCsv = productionPassingTransactionCsv(transactionCsv);
+  const nonDataOnlyCsv = Buffer.from(transactionCsv.toString('utf8').split('\n').slice(0, 2).join('\n'));
+  const detail = '<a href="https://example.test/resource.download?rid=one&amp;fileName=doorplates.csv">doorplates.csv</a>';
+  const flatDescriptor = Object.getOwnPropertyDescriptor(Array.prototype, 'flat');
+  assert.ok(flatDescriptor);
+  Object.defineProperty(Array.prototype, 'flat', {
+    ...flatDescriptor,
+    value: () => { throw new Error('full-index flat materialization is forbidden'); },
+  });
+  try {
+    const bundle = await ensureTaipeiMarketData({
+      asOf: '2026-07-25', rootPath, minDoorplates: 1, minTransactions: 1,
+      fetch: async (input) => String(input).includes('dataset/detail')
+        ? new Response(detail)
+        : String(input).includes('resource.download')
+          ? new Response(doorplateCsv)
+          : new Response('synthetic zip'),
+      openZip: async (file) => [{
+        path: 'a_lvr_land_a.csv',
+        stream: () => Readable.from(file.endsWith('/115S2.zip') ? passingTransactionCsv : nonDataOnlyCsv),
+      }],
+    });
+    assert.equal(bundle?.refresh?.status, 'updated');
+  } finally {
+    Object.defineProperty(Array.prototype, 'flat', flatDescriptor);
+  }
+});
+
 test('candidate gate failure retains the seeded active manifest and returns last-known-good', async (t) => {
   const rootPath = join(await mkdtemp(join(tmpdir(), 'market-update-')), 'taipei');
   t.after(() => rm(join(rootPath, '..'), { recursive: true, force: true }));

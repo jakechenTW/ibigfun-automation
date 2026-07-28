@@ -108,9 +108,10 @@ function structuredAddress(row: DoorplateCsvRow): string | null {
   if (!city || !district || !road || !number) return null;
 
   const subNumber = field(row, SUB_NUMBER_FIELDS);
+  const normalizedNumber = number.includes('號') ? number : `${number}號`;
   return `${city}${district}${road}${withSuffix(field(row, SECTION_FIELDS), '段')}` +
     `${withSuffix(field(row, LANE_FIELDS), '巷')}${withSuffix(field(row, ALLEY_FIELDS), '弄')}` +
-    `${withSuffix(number, '號')}${subNumber ? `之${subNumber.replace(/^之/, '')}` : ''}`;
+    `${normalizedNumber}${subNumber ? `之${subNumber.replace(/^之/, '')}` : ''}`;
 }
 
 function finiteNumber(value: string | null): number | null {
@@ -137,7 +138,7 @@ export function mapDoorplateRow(row: DoorplateCsvRow): DoorplatePoint | null {
   const address = normalizeTaiwanAddress(inputAddress);
   const indexedRoadKey = roadKey(address);
   const canonicalAddress = baseDoorplateKey(address);
-  if (!address.district || !indexedRoadKey || !canonicalAddress) return null;
+  if (!address.district || address.number === null || !indexedRoadKey || !canonicalAddress) return null;
 
   try {
     return {
@@ -249,8 +250,12 @@ export function locateAddress(index: DoorplateIndex, input: string): LocationEvi
   }
 
   const baseKey = baseDoorplateKey(address);
-  const point = baseKey ? index.byCanonicalAddress[baseKey]?.[0] : undefined;
-  if (!point) return unresolved(index, address.canonical);
+  const points = baseKey ? index.byCanonicalAddress[baseKey] : undefined;
+  const point = points?.[0];
+  if (!point || points.some((candidate) =>
+    candidate.coordinate.lat !== point.coordinate.lat || candidate.coordinate.lng !== point.coordinate.lng)) {
+    return unresolved(index, address.canonical);
+  }
   return {
     method: 'exact-doorplate',
     coordinate: point.coordinate,

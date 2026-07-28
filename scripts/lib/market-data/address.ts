@@ -9,6 +9,8 @@ export interface NormalizedAddress {
   number: number | null;
   subNumber: number | null;
   numberRange: { min: number; max: number } | null;
+  suffix: string;
+  suffixValid: boolean;
 }
 
 const CHINESE_DIGITS: Record<string, number> = {
@@ -42,10 +44,28 @@ function parseChineseNumber(token: string): number | null {
 
 function normalizeText(input: string): string {
   const normalized = input.normalize('NFKC').replaceAll('臺', '台').replace(/\s+/g, '');
-  return normalized.replace(/([零〇○一二三四五六七八九十百千兩]+)(?=(?:段|巷|弄|號|之|[~～至]))/g, (token) => {
+  const structural = normalized.replace(/([零〇○一二三四五六七八九十百千兩]+)(?=(?:段|巷|弄|號|之|[~～至]))/g, (token) => {
     const parsed = parseChineseNumber(token);
     return parsed === null ? token : String(parsed);
   });
+  return structural.replace(/(?<=之)([零〇○一二三四五六七八九十百千兩]+)$/g, (token) => {
+    const parsed = parseChineseNumber(token);
+    return parsed === null ? token : String(parsed);
+  });
+}
+
+function normalizeDoorplateSuffix(value: string): string {
+  return value.replace(/[零〇○一二三四五六七八九十百千兩]+/g, (token) => {
+    const parsed = parseChineseNumber(token);
+    return parsed === null ? token : String(parsed);
+  });
+}
+
+function validDoorplateSuffix(value: string): boolean {
+  if (value === '') return true;
+  const positive = '[1-9]\\d*';
+  return new RegExp(`^(?:地下)?${positive}樓(?:(?:之${positive})(?:室)?|${positive}室)?$`).test(value) ||
+    new RegExp(`^${positive}室$`).test(value);
 }
 
 function parsePositiveNumber(value: string | undefined): number | null {
@@ -67,7 +87,9 @@ export function parseDoorNumberRange(token: string): { min: number; max: number 
 
 /** Returns the index key for a complete doorplate, excluding floor and unit suffixes. */
 export function baseDoorplateKey(address: NormalizedAddress): string | null {
-  if (!address.city || !address.district || !address.road || address.number === null) return null;
+  if (!address.city || !address.district || !address.road || address.number === null || !address.suffixValid) {
+    return null;
+  }
   return `${address.city}${address.district}${address.road}` +
     `${address.section === null ? '' : `${address.section}段`}` +
     `${address.lane === null ? '' : `${address.lane}巷`}` +
@@ -112,6 +134,10 @@ export function normalizeTaiwanAddress(input: string): NormalizedAddress {
   const numberMatch = numberRange ? null : /^(\d+)(?:號(?:之(\d+))?|之(\d+)號)/.exec(remainder);
   const number = parsePositiveNumber(numberMatch?.[1]);
   const subNumber = parsePositiveNumber(numberMatch?.[2] ?? numberMatch?.[3]);
+  const suffix = normalizeDoorplateSuffix(
+    numberRange ? '' : numberMatch ? remainder.slice(numberMatch[0].length) : remainder,
+  );
+  const suffixValid = validDoorplateSuffix(suffix);
 
   return {
     canonical,
@@ -124,5 +150,7 @@ export function normalizeTaiwanAddress(input: string): NormalizedAddress {
     number,
     subNumber,
     numberRange,
+    suffix,
+    suffixValid,
   };
 }

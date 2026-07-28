@@ -75,6 +75,9 @@ test('exact lookup uses a base doorplate key while retaining the normalized list
     '台北市萬盛街89號之6',
     '台北市文山區萬盛街89號',
     '台北市文山區萬盛街1巷89號之6',
+    '台北市文山區萬盛街89號之6附近',
+    '台北市文山區萬盛街89號之6隔壁巷',
+    '台北市文山區萬盛街89號之6七樓之12附近',
   ]) {
     assert.equal(locateAddress(index, input).method, 'unresolved', input);
   }
@@ -163,6 +166,27 @@ test('collapses floor-specific official rows into one base doorplate point', asy
   assert.equal(index.byCanonicalAddress['台北市松山區三民路91號']?.length, 1);
   assert.equal(index.byRoad['台北市松山區三民路']?.length, 1);
   assert.equal(Object.values(index.cells).flat().length, 1);
+});
+
+test('exact lookup fails closed for coordinate-conflicting base keys regardless of row order', async () => {
+  const header = '完整地址,坐標X,坐標Y';
+  const records = [
+    '台北市文山區萬盛街89號之6,306940,2769625',
+    '台北市文山區萬盛街89號之6七樓,306960,2769625',
+  ];
+  const indexes = await Promise.all([
+    buildDoorplateIndex(Readable.from(`${header}\n${records.join('\n')}\n`), 'conflicting-points'),
+    buildDoorplateIndex(Readable.from(`${header}\n${[...records].reverse().join('\n')}\n`), 'conflicting-points'),
+  ]);
+
+  assert.equal(JSON.stringify(indexes[0]), JSON.stringify(indexes[1]));
+  for (const index of indexes) {
+    assert.equal(index.byCanonicalAddress['台北市文山區萬盛街89號之6']?.length, 2);
+    const result = locateAddress(index, '台北市文山區萬盛街89號之6');
+    assert.equal(result.method, 'unresolved');
+    assert.equal(result.coordinate, null);
+    assert.equal(result.confidence, 'low');
+  }
 });
 
 test('serializes the same index when the source rows arrive in a different order', async () => {

@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { runMarketDataCommand } from '../../market-data.ts';
 import {
   ACTIVE_ESTIMATOR_POLICY,
   ESTIMATOR_POLICY_VERSION,
@@ -17,11 +19,13 @@ import {
   publishStagedBuildWithAcceptance,
   readBacktestAcceptance,
   readManifest,
+  recoverInterruptedMarketDataPublication,
   sha256File,
   stableJson,
   transactionArtifactChecksum,
   writeBacktestAcceptance,
 } from './store.ts';
+import { ensureTaipeiMarketData } from './update.ts';
 import type { BacktestAcceptance, DoorplateIndex, MarketDataManifest, TransactionIndex } from './types.ts';
 
 function manifest(buildId: string, recordCount = 1): MarketDataManifest {
@@ -149,6 +153,49 @@ async function passingAcceptance(root: string): Promise<BacktestAcceptance> {
       mediumConfidenceMedianApe: 0.09,
     },
   };
+}
+
+async function crashPublicationAfterRename(
+  active: string,
+  stage: string,
+  acceptance: BacktestAcceptance,
+  checkpoint: 1 | 2 | 3,
+): Promise<void> {
+  const storeUrl = new URL('./store.ts', import.meta.url).href;
+  const script = `
+    import { rename } from 'node:fs/promises';
+    import { publishStagedBuildWithAcceptance } from ${JSON.stringify(storeUrl)};
+    const [active, stage, acceptanceJson, checkpointText] = process.argv.slice(1);
+    let completedRenames = 0;
+    await publishStagedBuildWithAcceptance(active, stage, JSON.parse(acceptanceJson), {
+      minDoorplates: 1,
+      minTransactions: 0,
+      publicationFileOps: {
+        rename: async (from, to) => {
+          await rename(from, to);
+          completedRenames += 1;
+          if (completedRenames === Number(checkpointText)) process.exit(86);
+        },
+      },
+    });
+  `;
+  const child = spawn(process.execPath, [
+    '--import', 'tsx',
+    '--input-type=module',
+    '--eval', script,
+    active,
+    stage,
+    JSON.stringify(acceptance),
+    String(checkpoint),
+  ], { stdio: ['ignore', 'ignore', 'pipe'] });
+  let stderr = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk: string) => { stderr += chunk; });
+  const exitCode = await new Promise<number | null>((resolve, reject) => {
+    child.once('error', reject);
+    child.once('exit', resolve);
+  });
+  assert.equal(exitCode, 86, stderr);
 }
 
 test('failed validation preserves last-known-good manifest and indexes', async (t) => {
@@ -379,6 +426,121 @@ test('backup cleanup failure preserves the committed new accepted pair', async (
   assert.equal((await readdir(parent)).some((entry) => entry.startsWith('.taipei-backup-')), true);
 });
 
+test('restart recovery yields a validated old or new pair after every publication rename', async (t) => {
+  for (const checkpoint of [1, 2, 3] as const) {
+    await t.test(`rename checkpoint ${checkpoint}`, async (t) => {
+      const parent = await mkdtemp(join(tmpdir(), 'market-store-crash-'));
+      const active = join(parent, 'taipei');
+      const stage = join(parent, '.taipei-staging-next');
+      t.after(() => rm(parent, { recursive: true, force: true }));
+      await writeBuild(active, 'good-build');
+      await writeBacktestAcceptance(active, await passingAcceptance(active));
+      await writeBuild(stage, 'next-build');
+
+      await crashPublicationAfterRename(active, stage, await passingAcceptance(stage), checkpoint);
+      const recovered = await ensureTaipeiMarketData({
+        asOf: '2026-07-25',
+        rootPath: active,
+        minDoorplates: 1,
+        minTransactions: 0,
+        fetch: async () => { throw new Error('offline after restart'); },
+      });
+
+      const expectedBuildId = checkpoint === 1 ? 'good-build' : 'next-build';
+      assert.equal(recovered?.manifest.buildId, expectedBuildId);
+      assert.equal(marketDataBacktestAccepted(recovered!), true);
+      assert.deepEqual(
+        (await readdir(parent)).sort(),
+        ['taipei', 'taipei-backtest-acceptance.json'],
+      );
+    });
+  }
+});
+
+test('production backtest recovers an interrupted publication before its locked load', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-backtest-crash-'));
+  const active = join(parent, 'taipei');
+  const stage = join(parent, '.taipei-staging-next');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(active, 'good-build');
+  await writeBacktestAcceptance(active, await passingAcceptance(active));
+  await writeBuild(stage, 'next-build');
+  await crashPublicationAfterRename(active, stage, await passingAcceptance(stage), 1);
+
+  const exitCode = await runMarketDataCommand(
+    ['backtest', '--city', 'taipei', '--as-of', '2026-07-25'],
+    new Date('2026-07-26T01:00:00.000Z'),
+    {
+      backtest: {
+        root: active,
+        recover: (root) => recoverInterruptedMarketDataPublication(root, {
+          minDoorplates: 1,
+          minTransactions: 0,
+        }),
+        load: (root) => loadMarketData(root, {
+          minDoorplates: 1,
+          minTransactions: 0,
+        }),
+      },
+    },
+  );
+  const recovered = await loadMarketData(active, { minDoorplates: 1, minTransactions: 0 });
+
+  assert.equal(exitCode, 1);
+  assert.equal(recovered?.manifest.buildId, 'good-build');
+  assert.equal(marketDataBacktestAccepted(recovered!), true);
+});
+
+test('recovery rejects malformed journal phase, id, and stage basename before network work', async (t) => {
+  const malformed = [
+    { phase: 'unknown' },
+    { publicationId: '../escape' },
+    { stageBasename: '../outside-stage' },
+  ];
+  for (const [index, override] of malformed.entries()) {
+    await t.test(`malformed journal ${index + 1}`, async (t) => {
+      const parent = await mkdtemp(join(tmpdir(), 'market-store-journal-'));
+      const active = join(parent, 'taipei');
+      const sentinel = join(parent, 'outside-stage');
+      const journal = join(parent, '.taipei-publication-journal.json');
+      t.after(() => rm(parent, { recursive: true, force: true }));
+      await writeBuild(active, 'good-build');
+      await writeBacktestAcceptance(active, await passingAcceptance(active));
+      await writeFile(sentinel, 'do not touch');
+      await writeFile(journal, JSON.stringify({
+        schemaVersion: 1,
+        phase: 'prepared',
+        publicationId: '11111111-1111-4111-8111-111111111111',
+        activeBasename: 'taipei',
+        stageBasename: '.taipei-staging-next',
+        stagedBuildId: 'next-build',
+        oldBuildId: 'good-build',
+        oldAcceptancePresent: true,
+        candidateAcceptanceSha256: '0'.repeat(64),
+        oldAcceptanceSha256: '1'.repeat(64),
+        ...override,
+      }));
+      let fetchCalls = 0;
+
+      const retained = await ensureTaipeiMarketData({
+        asOf: '2026-07-25',
+        rootPath: active,
+        minDoorplates: 1,
+        minTransactions: 0,
+        fetch: async () => {
+          fetchCalls += 1;
+          throw new Error('network must not run before journal validation');
+        },
+      });
+
+      assert.equal(fetchCalls, 0);
+      assert.equal(retained?.manifest.buildId, 'good-build');
+      assert.match(retained?.refresh?.failure ?? '', /publication journal/i);
+      assert.equal(await readFile(sentinel, 'utf8'), 'do not touch');
+    });
+  }
+});
+
 test('load rejects unsorted cells, out-of-bounds points, and checksum drift', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'market-store-'));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -397,6 +559,24 @@ test('load rejects a manifest count that does not equal its checked index', asyn
   value.doorplates.recordCount = 2;
   await writeFile(join(root, 'manifest.json'), JSON.stringify(value));
   assert.equal(await loadMarketData(root, { minDoorplates: 0, minTransactions: 0 }), null);
+});
+
+test('validated index counts do not materialize flattened cell copies', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'market-store-count-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeBuild(root, 'counted-build');
+  const flatDescriptor = Object.getOwnPropertyDescriptor(Array.prototype, 'flat');
+  assert.ok(flatDescriptor);
+  Object.defineProperty(Array.prototype, 'flat', {
+    ...flatDescriptor,
+    value: () => { throw new Error('full-index flat materialization is forbidden'); },
+  });
+  try {
+    const loaded = await loadMarketData(root, { minDoorplates: 1, minTransactions: 0 });
+    assert.equal(loaded?.manifest.buildId, 'counted-build');
+  } finally {
+    Object.defineProperty(Array.prototype, 'flat', flatDescriptor);
+  }
 });
 
 test('load rejects inconsistent or unstably ordered normalization diagnostics', async (t) => {
@@ -605,6 +785,25 @@ test('backtest acceptance loads only for the active transaction artifact checksu
     assert.equal(readBacktestAcceptance(root), null);
   }
   await writeBacktestAcceptance(root, { ...acceptance, transactionArtifactSha256: 'different-dataset' });
+  assert.equal(
+    (await loadMarketData(root, { minDoorplates: 1, minTransactions: 0 }))?.backtestAcceptance,
+    undefined,
+  );
+});
+
+test('prior policy-v3 acceptance fails closed after location eligibility changes', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-'));
+  const root = join(parent, 'taipei');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(root, 'policy-v4-build');
+  const priorAcceptance = {
+    ...await passingAcceptance(root),
+    estimatorPolicyVersion: 3,
+  };
+
+  await writeFile(backtestAcceptancePath(root), JSON.stringify(priorAcceptance));
+
+  assert.equal(readBacktestAcceptance(root), null);
   assert.equal(
     (await loadMarketData(root, { minDoorplates: 1, minTransactions: 0 }))?.backtestAcceptance,
     undefined,

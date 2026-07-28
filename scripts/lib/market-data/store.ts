@@ -30,7 +30,6 @@ interface PublicationFileOps {
   rename(from: string, to: string): Promise<void>;
   rm(file: string, options?: { recursive?: boolean; force?: boolean }): Promise<void>;
   readFile(file: string): Promise<Buffer>;
-  writeFile(file: string, data: Uint8Array): Promise<void>;
 }
 
 export interface PublishOptions {
@@ -46,7 +45,6 @@ const publicationFileOps: PublicationFileOps = {
   rename: (from, to) => fsp.rename(from, to),
   rm: (file, options) => fsp.rm(file, options),
   readFile: (file) => fsp.readFile(file),
-  writeFile: (file, data) => fsp.writeFile(file, data),
 };
 
 /** Byte/code-unit ordering is locale-independent and therefore checksum-safe. */
@@ -77,6 +75,13 @@ export function stableJson(value: unknown): string {
 export async function writeStableJson(file: string, value: unknown): Promise<void> {
   await fsp.mkdir(path.dirname(file), { recursive: true });
   await fsp.writeFile(file, `${stableJson(value)}\n`);
+}
+
+/** Counts cell entries without allocating a full-index flattened copy. */
+export function countIndexEntries(cells: Record<string, readonly unknown[]>): number {
+  let count = 0;
+  for (const entries of Object.values(cells)) count += entries.length;
+  return count;
 }
 
 function readJson<T>(file: string): T | null {
@@ -353,8 +358,8 @@ async function validateBuild(root: string, options: PublishOptions): Promise<Mar
     manifest.transactions.recordCount,
   );
   validateIndexes(doorplates, transactions);
-  const doorplateCount = Object.values(doorplates.cells).flat().length;
-  const transactionCount = Object.values(transactions.cells).flat().length;
+  const doorplateCount = countIndexEntries(doorplates.cells);
+  const transactionCount = countIndexEntries(transactions.cells);
   if (manifest.doorplates.recordCount !== doorplateCount || manifest.transactions.recordCount !== transactionCount) {
     throw new Error('Manifest record counts do not match validated indexes');
   }
@@ -422,6 +427,166 @@ function stagingPathError(activeRoot: string, stageRoot: string): Error | null {
     : null;
 }
 
+type PublicationPhase = 'prepared';
+
+interface PublicationJournal {
+  schemaVersion: 1;
+  phase: PublicationPhase;
+  publicationId: string;
+  activeBasename: string;
+  stageBasename: string;
+  stagedBuildId: string;
+  oldBuildId: string | null;
+  oldAcceptancePresent: boolean;
+  candidateAcceptanceSha256: string;
+  oldAcceptanceSha256: string | null;
+}
+
+interface PublicationPaths {
+  parent: string;
+  activeRoot: string;
+  stageRoot: string;
+  backupRoot: string;
+  acceptanceTarget: string;
+  acceptanceCandidate: string;
+  acceptanceBackup: string;
+  journal: string;
+}
+
+function publicationJournalPath(activeRoot: string): string {
+  return path.join(
+    path.dirname(activeRoot),
+    `.${path.basename(activeRoot)}-publication-journal.json`,
+  );
+}
+
+function publicationPaths(activeRoot: string, journal: PublicationJournal): PublicationPaths {
+  const parent = path.dirname(activeRoot);
+  const basename = path.basename(activeRoot);
+  const acceptanceTarget = backtestAcceptancePath(activeRoot);
+  return {
+    parent,
+    activeRoot,
+    stageRoot: path.join(parent, journal.stageBasename),
+    backupRoot: path.join(parent, `.${basename}-backup-${journal.publicationId}`),
+    acceptanceTarget,
+    acceptanceCandidate: `${acceptanceTarget}.candidate-${journal.publicationId}`,
+    acceptanceBackup: `${acceptanceTarget}.backup-${journal.publicationId}`,
+    journal: publicationJournalPath(activeRoot),
+  };
+}
+
+function sha256Bytes(bytes: Uint8Array): string {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+async function syncDirectory(directory: string): Promise<void> {
+  const handle = await fsp.open(directory, 'r');
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+async function writeDurableUnique(file: string, data: Uint8Array): Promise<void> {
+  const handle = await fsp.open(file, 'wx', 0o600);
+  try {
+    await handle.writeFile(data);
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  await syncDirectory(path.dirname(file));
+}
+
+async function writeDurableJournal(file: string, journal: PublicationJournal): Promise<void> {
+  const temporary = `${file}.tmp-${journal.publicationId}`;
+  try {
+    await writeDurableUnique(temporary, Buffer.from(`${stableJson(journal)}\n`));
+    await fsp.rename(temporary, file);
+    await syncDirectory(path.dirname(file));
+  } catch (error) {
+    try { await fsp.rm(temporary, { force: true }); } catch { /* best-effort pre-publication cleanup */ }
+    throw error;
+  }
+}
+
+function validPublicationJournal(value: unknown, activeRoot: string): value is PublicationJournal {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const journal = value as Partial<PublicationJournal> & Record<string, unknown>;
+  const allowedKeys = [
+    'schemaVersion',
+    'phase',
+    'publicationId',
+    'activeBasename',
+    'stageBasename',
+    'stagedBuildId',
+    'oldBuildId',
+    'oldAcceptancePresent',
+    'candidateAcceptanceSha256',
+    'oldAcceptanceSha256',
+  ];
+  const keys = Object.keys(journal);
+  if (keys.length !== allowedKeys.length || keys.some((key) => !allowedKeys.includes(key))) return false;
+  const basename = path.basename(activeRoot);
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const buildId = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,199}$/;
+  const checksum = /^[0-9a-f]{64}$/;
+  const stagePrefix = `.${basename}-staging-`;
+  const safeStage = typeof journal.stageBasename === 'string'
+    && path.basename(journal.stageBasename) === journal.stageBasename
+    && journal.stageBasename.startsWith(stagePrefix)
+    && /^[a-zA-Z0-9._-]+$/.test(journal.stageBasename);
+  return journal.schemaVersion === 1
+    && journal.phase === 'prepared'
+    && typeof journal.publicationId === 'string'
+    && uuid.test(journal.publicationId)
+    && journal.activeBasename === basename
+    && path.basename(journal.activeBasename) === journal.activeBasename
+    && safeStage
+    && typeof journal.stagedBuildId === 'string'
+    && buildId.test(journal.stagedBuildId)
+    && (journal.oldBuildId === null
+      || (typeof journal.oldBuildId === 'string' && buildId.test(journal.oldBuildId)))
+    && typeof journal.oldAcceptancePresent === 'boolean'
+    && typeof journal.candidateAcceptanceSha256 === 'string'
+    && checksum.test(journal.candidateAcceptanceSha256)
+    && (journal.oldAcceptancePresent
+      ? typeof journal.oldAcceptanceSha256 === 'string' && checksum.test(journal.oldAcceptanceSha256)
+      : journal.oldAcceptanceSha256 === null);
+}
+
+async function readPublicationJournal(activeRoot: string): Promise<PublicationJournal | null> {
+  const file = publicationJournalPath(activeRoot);
+  let bytes: Buffer;
+  try {
+    const stat = await fsp.lstat(file);
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      throw new Error('Market-data publication journal must be a regular sibling file');
+    }
+    bytes = await fsp.readFile(file);
+  } catch (error) {
+    if (isMissingFile(error)) return null;
+    if (error instanceof Error && /publication journal/i.test(error.message)) throw error;
+    throw new Error(
+      `Invalid market-data publication journal: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bytes.toString('utf8'));
+  } catch {
+    throw new Error('Invalid market-data publication journal JSON');
+  }
+  if (!validPublicationJournal(parsed, activeRoot)) {
+    throw new Error('Invalid market-data publication journal fields');
+  }
+  return parsed;
+}
+
 function validateAcceptanceForBundle(
   acceptance: BacktestAcceptance,
   bundle: MarketDataBundle,
@@ -456,6 +621,225 @@ async function readOptionalFile(ops: PublicationFileOps, file: string): Promise<
   }
 }
 
+function acceptanceFromBytes(bytes: Buffer): BacktestAcceptance | null {
+  try {
+    return JSON.parse(bytes.toString('utf8')) as BacktestAcceptance;
+  } catch {
+    return null;
+  }
+}
+
+async function validatedAcceptanceFile(
+  ops: PublicationFileOps,
+  file: string,
+  bundle: MarketDataBundle,
+  expectedSha256: string | null,
+): Promise<{ acceptance: BacktestAcceptance; bytes: Buffer } | null> {
+  const bytes = await readOptionalFile(ops, file);
+  if (!bytes || (expectedSha256 !== null && sha256Bytes(bytes) !== expectedSha256)) return null;
+  const acceptance = acceptanceFromBytes(bytes);
+  if (!acceptance) return null;
+  try {
+    validateAcceptanceForBundle(acceptance, bundle);
+  } catch {
+    return null;
+  }
+  return { acceptance, bytes };
+}
+
+async function tryValidatedBuild(
+  root: string,
+  expectedBuildId: string,
+  options: PublishOptions,
+): Promise<MarketDataBundle | null> {
+  try {
+    const bundle = await validateBuild(root, options);
+    return bundle.manifest.buildId === expectedBuildId ? bundle : null;
+  } catch {
+    return null;
+  }
+}
+
+async function renameAndSync(
+  ops: PublicationFileOps,
+  from: string,
+  to: string,
+  parent: string,
+): Promise<void> {
+  await ops.rename(from, to);
+  await syncDirectory(parent);
+}
+
+async function cleanupPublication(paths: PublicationPaths, ops: PublicationFileOps): Promise<void> {
+  const targets: Array<[string, { recursive?: boolean; force?: boolean }]> = [
+    [paths.stageRoot, { recursive: true, force: true }],
+    [paths.backupRoot, { recursive: true, force: false }],
+    [paths.acceptanceCandidate, { force: true }],
+    [paths.acceptanceBackup, { force: true }],
+  ];
+  for (const [target, options] of targets) {
+    try { await ops.rm(target, options); } catch { /* committed pair remains authoritative */ }
+  }
+  try { await ops.rm(paths.journal, { force: true }); } catch { /* next locked entry retries recovery */ }
+  try { await syncDirectory(paths.parent); } catch { /* pair was already validated */ }
+}
+
+async function loadCommittedNewPair(
+  paths: PublicationPaths,
+  journal: PublicationJournal,
+  options: PublishOptions,
+  ops: PublicationFileOps,
+): Promise<MarketDataBundle | null> {
+  let active = await tryValidatedBuild(paths.activeRoot, journal.stagedBuildId, options);
+  if (!active && journal.oldBuildId === null) {
+    const staged = await tryValidatedBuild(paths.stageRoot, journal.stagedBuildId, options);
+    const candidate = staged && await validatedAcceptanceFile(
+      ops,
+      paths.acceptanceCandidate,
+      staged,
+      journal.candidateAcceptanceSha256,
+    );
+    if (staged && candidate) {
+      await renameAndSync(ops, paths.stageRoot, paths.activeRoot, paths.parent);
+      active = await tryValidatedBuild(paths.activeRoot, journal.stagedBuildId, options);
+    }
+  }
+  if (!active) return null;
+
+  let activeAcceptance = await validatedAcceptanceFile(
+    ops,
+    paths.acceptanceTarget,
+    active,
+    journal.candidateAcceptanceSha256,
+  );
+  if (!activeAcceptance) {
+    const candidate = await validatedAcceptanceFile(
+      ops,
+      paths.acceptanceCandidate,
+      active,
+      journal.candidateAcceptanceSha256,
+    );
+    if (!candidate) return null;
+    await renameAndSync(ops, paths.acceptanceCandidate, paths.acceptanceTarget, paths.parent);
+    activeAcceptance = await validatedAcceptanceFile(
+      ops,
+      paths.acceptanceTarget,
+      active,
+      journal.candidateAcceptanceSha256,
+    );
+  }
+  if (!activeAcceptance) return null;
+  const loaded = await loadMarketData(paths.activeRoot, options);
+  return loaded
+    && loaded.manifest.buildId === journal.stagedBuildId
+    && loaded.backtestAcceptance
+    && marketDataBacktestAccepted(loaded)
+    ? loaded
+    : null;
+}
+
+async function restoreOldPair(
+  paths: PublicationPaths,
+  journal: PublicationJournal,
+  options: PublishOptions,
+  ops: PublicationFileOps,
+): Promise<MarketDataBundle | null> {
+  if (journal.oldBuildId === null) {
+    const active = await tryValidatedBuild(paths.activeRoot, journal.stagedBuildId, options);
+    if (active) await ops.rm(paths.activeRoot, { recursive: true, force: true });
+    await ops.rm(paths.acceptanceTarget, { force: true });
+    await syncDirectory(paths.parent);
+    return null;
+  }
+
+  let old = await tryValidatedBuild(paths.activeRoot, journal.oldBuildId, options);
+  if (!old) {
+    const backup = await tryValidatedBuild(paths.backupRoot, journal.oldBuildId, options);
+    if (!backup) throw new Error('Publication journal has no validated old build to restore');
+    if (fs.existsSync(paths.activeRoot)) {
+      const activeManifest = readManifest(paths.activeRoot);
+      if (activeManifest?.buildId !== journal.stagedBuildId) {
+        throw new Error('Publication journal refuses to replace an unrelated active build');
+      }
+      await ops.rm(paths.activeRoot, { recursive: true, force: true });
+      await syncDirectory(paths.parent);
+    }
+    await renameAndSync(ops, paths.backupRoot, paths.activeRoot, paths.parent);
+    old = await tryValidatedBuild(paths.activeRoot, journal.oldBuildId, options);
+    if (!old) throw new Error('Restored old market-data build failed validation');
+  }
+
+  if (journal.oldAcceptancePresent) {
+    let restored = await validatedAcceptanceFile(
+      ops,
+      paths.acceptanceTarget,
+      old,
+      journal.oldAcceptanceSha256,
+    );
+    if (!restored) {
+      const backup = await validatedAcceptanceFile(
+        ops,
+        paths.acceptanceBackup,
+        old,
+        journal.oldAcceptanceSha256,
+      );
+      if (!backup) throw new Error('Publication journal has no validated old acceptance to restore');
+      await renameAndSync(ops, paths.acceptanceBackup, paths.acceptanceTarget, paths.parent);
+      restored = await validatedAcceptanceFile(
+        ops,
+        paths.acceptanceTarget,
+        old,
+        journal.oldAcceptanceSha256,
+      );
+    }
+    if (!restored) throw new Error('Restored old market-data acceptance failed validation');
+  } else {
+    await ops.rm(paths.acceptanceTarget, { force: true });
+    await syncDirectory(paths.parent);
+  }
+
+  const loaded = await loadMarketData(paths.activeRoot, options);
+  if (!loaded || loaded.manifest.buildId !== journal.oldBuildId
+      || (journal.oldAcceptancePresent
+        && (!loaded.backtestAcceptance || !marketDataBacktestAccepted(loaded)))) {
+    throw new Error('Restored old market-data pair failed validation');
+  }
+  return loaded;
+}
+
+async function recoverPublication(
+  activeRoot: string,
+  journal: PublicationJournal,
+  options: PublishOptions,
+  ops: PublicationFileOps,
+  preference: 'restart' | 'old',
+): Promise<MarketDataBundle | null> {
+  const paths = publicationPaths(activeRoot, journal);
+  if (preference === 'restart') {
+    const committed = await loadCommittedNewPair(paths, journal, options, ops);
+    if (committed) {
+      await cleanupPublication(paths, ops);
+      return committed;
+    }
+  }
+  const restored = await restoreOldPair(paths, journal, options, ops);
+  await cleanupPublication(paths, ops);
+  return restored;
+}
+
+/**
+ * Completes or rolls back an interrupted accepted-build publication. Callers
+ * must hold the market-data refresh lock for the active root.
+ */
+export async function recoverInterruptedMarketDataPublication(
+  activeRoot: string,
+  options: PublishOptions = {},
+): Promise<MarketDataBundle | null> {
+  const journal = await readPublicationJournal(activeRoot);
+  if (!journal) return null;
+  return recoverPublication(activeRoot, journal, options, publicationFileOps, 'restart');
+}
+
 async function publishAcceptedBuild(
   activeRoot: string,
   stageRoot: string,
@@ -465,6 +849,8 @@ async function publishAcceptedBuild(
 ): Promise<MarketDataBundle> {
   const invalidStage = stagingPathError(activeRoot, stageRoot);
   if (invalidStage) throw invalidStage;
+  const interrupted = await readPublicationJournal(activeRoot);
+  if (interrupted) await recoverPublication(activeRoot, interrupted, options, ops, 'restart');
   const staged = await validateBuild(stageRoot, options);
   validateAcceptanceForBundle(acceptance, staged);
 
@@ -472,26 +858,51 @@ async function publishAcceptedBuild(
   const basename = path.basename(activeRoot);
   const publicationId = randomUUID();
   const acceptanceTarget = backtestAcceptancePath(activeRoot);
-  const acceptanceCandidate = `${acceptanceTarget}.candidate-${publicationId}`;
-  const backupRoot = path.join(parent, `.${basename}-backup-${publicationId}`);
-  const failedRoot = path.join(parent, `.${basename}-failed-${publicationId}`);
-  let oldAcceptance: Buffer | null = null;
-  let movedActive = false;
-  let activatedStage = false;
+  let oldBuild: MarketDataBundle | null = null;
+  if (fs.existsSync(activeRoot)) oldBuild = await validateBuild(activeRoot, options);
+  const oldAcceptanceBytes = await readOptionalFile(ops, acceptanceTarget);
+  const matchingOldAcceptance = oldBuild && oldAcceptanceBytes
+    ? await validatedAcceptanceFile(ops, acceptanceTarget, oldBuild, null)
+    : null;
+  const candidateBytes = Buffer.from(`${stableJson(acceptance)}\n`);
+  const journal: PublicationJournal = {
+    schemaVersion: 1,
+    phase: 'prepared',
+    publicationId,
+    activeBasename: basename,
+    stageBasename: path.basename(stageRoot),
+    stagedBuildId: staged.manifest.buildId,
+    oldBuildId: oldBuild?.manifest.buildId ?? null,
+    oldAcceptancePresent: matchingOldAcceptance !== null,
+    candidateAcceptanceSha256: sha256Bytes(candidateBytes),
+    oldAcceptanceSha256: matchingOldAcceptance ? sha256Bytes(matchingOldAcceptance.bytes) : null,
+  };
+  const paths = publicationPaths(activeRoot, journal);
+  for (const target of [
+    paths.journal,
+    paths.backupRoot,
+    paths.acceptanceCandidate,
+    paths.acceptanceBackup,
+  ]) {
+    if (fs.existsSync(target)) throw new Error(`Refusing to overwrite market-data publication recovery path: ${target}`);
+  }
+  let journalPrepared = false;
   let published!: MarketDataBundle;
 
   try {
-    await ops.writeFile(acceptanceCandidate, Buffer.from(`${stableJson(acceptance)}\n`));
-    oldAcceptance = await readOptionalFile(ops, acceptanceTarget);
+    await writeDurableUnique(paths.acceptanceCandidate, candidateBytes);
+    if (matchingOldAcceptance) {
+      await writeDurableUnique(paths.acceptanceBackup, matchingOldAcceptance.bytes);
+    }
+    await writeDurableJournal(paths.journal, journal);
+    journalPrepared = true;
     try {
-      await ops.rename(activeRoot, backupRoot);
-      movedActive = true;
+      await renameAndSync(ops, activeRoot, paths.backupRoot, parent);
     } catch (error) {
       if (!isMissingFile(error)) throw error;
     }
-    await ops.rename(stageRoot, activeRoot);
-    activatedStage = true;
-    await ops.rename(acceptanceCandidate, acceptanceTarget);
+    await renameAndSync(ops, stageRoot, activeRoot, parent);
+    await renameAndSync(ops, paths.acceptanceCandidate, acceptanceTarget, parent);
 
     const loaded = await loadMarketData(activeRoot, options);
     if (!loaded
@@ -503,14 +914,11 @@ async function publishAcceptedBuild(
     published = loaded;
   } catch (publicationError) {
     try {
-      if (activatedStage) await ops.rename(activeRoot, failedRoot);
-      if (movedActive) await ops.rename(backupRoot, activeRoot);
-      if (movedActive || activatedStage) {
-        if (oldAcceptance !== null) await ops.writeFile(acceptanceTarget, oldAcceptance);
-        else await ops.rm(acceptanceTarget, { force: true });
+      if (journalPrepared) {
+        await recoverPublication(activeRoot, journal, options, ops, 'old');
+      } else {
+        await cleanupPublication(paths, ops);
       }
-      if (activatedStage) await ops.rm(failedRoot, { recursive: true, force: true });
-      await ops.rm(acceptanceCandidate, { force: true });
     } catch (rollbackError) {
       throw new AggregateError(
         [publicationError, rollbackError],
@@ -522,11 +930,9 @@ async function publishAcceptedBuild(
     throw publicationError;
   }
 
-  // Pair validation is the commit point. Cleanup must never turn a committed
-  // new pair into a rollback from a partially removed recovery backup.
-  if (movedActive) {
-    try { await ops.rm(backupRoot, { recursive: true, force: false }); } catch { /* recoverable backup retained */ }
-  }
+  // Pair validation is the commit point. Cleanup failure leaves the validated
+  // new pair authoritative and is retried from the durable journal if needed.
+  await cleanupPublication(paths, ops);
   return published;
 }
 
