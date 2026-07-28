@@ -155,6 +155,14 @@ export interface TransactionIndex {
   cells: Record<string, MarketTransaction[]>;
 }
 
+export interface TransactionBuildDiagnostics {
+  rawRows: number;
+  reliableEligible: number;
+  reviewOnly: number;
+  excluded: number;
+  excludedByReason: Record<string, number>;
+}
+
 export interface SelectionResult {
   selectedStage: number | null;
   included: ComparableEvidence[];
@@ -182,6 +190,7 @@ export interface MarketDataManifest {
     checkedAt: string;
     sha256: string;
     recordCount: number;
+    normalization: TransactionBuildDiagnostics;
   };
   lastFailure: { at: string; reason: string } | null;
   /** Checksums cover every raw and derived file in a published build. */

@@ -28,7 +28,20 @@ function manifest(buildId: string, recordCount = 1): MarketDataManifest {
     buildId,
     builtAt: '2026-07-25T00:00:00.000Z',
     doorplates: { sourceUrl: 'https://example.test/doorplates.csv', publishedAt: '2026-07-02T09:47:33+08:00', checkedAt: '2026-07-25T00:00:00.000Z', sha256: 'doorplates', recordCount },
-    transactions: { sourceUrls: ['https://example.test/115S3.zip'], publishedAt: null, checkedAt: '2026-07-25T00:00:00.000Z', sha256: 'transactions', recordCount },
+    transactions: {
+      sourceUrls: ['https://example.test/115S3.zip'],
+      publishedAt: null,
+      checkedAt: '2026-07-25T00:00:00.000Z',
+      sha256: 'transactions',
+      recordCount,
+      normalization: {
+        rawRows: recordCount,
+        reliableEligible: recordCount,
+        reviewOnly: 0,
+        excluded: 0,
+        excludedByReason: {},
+      },
+    },
     lastFailure: null,
     artifacts: {},
   };
@@ -139,6 +152,35 @@ test('load rejects a manifest count that does not equal its checked index', asyn
   value.doorplates.recordCount = 2;
   await writeFile(join(root, 'manifest.json'), JSON.stringify(value));
   assert.equal(await loadMarketData(root, { minDoorplates: 0, minTransactions: 0 }), null);
+});
+
+test('load rejects inconsistent or unstably ordered normalization diagnostics', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-'));
+  t.after(() => rm(parent, { recursive: true, force: true }));
+
+  const inconsistent = join(parent, 'inconsistent');
+  await writeBuild(inconsistent, 'inconsistent-diagnostics');
+  const inconsistentManifest = JSON.parse(
+    await readFile(join(inconsistent, 'manifest.json'), 'utf8'),
+  ) as MarketDataManifest;
+  inconsistentManifest.transactions.normalization.rawRows = 99;
+  await writeFile(join(inconsistent, 'manifest.json'), JSON.stringify(inconsistentManifest));
+  assert.equal(await loadMarketData(inconsistent, { minDoorplates: 0, minTransactions: 0 }), null);
+
+  const unsorted = join(parent, 'unsorted');
+  await writeBuild(unsorted, 'unsorted-diagnostics');
+  const unsortedManifest = JSON.parse(
+    await readFile(join(unsorted, 'manifest.json'), 'utf8'),
+  ) as MarketDataManifest;
+  unsortedManifest.transactions.normalization = {
+    rawRows: 3,
+    reliableEligible: 1,
+    reviewOnly: 0,
+    excluded: 2,
+    excludedByReason: { zeta: 1, alpha: 1 },
+  };
+  await writeFile(join(unsorted, 'manifest.json'), JSON.stringify(unsortedManifest));
+  assert.equal(await loadMarketData(unsorted, { minDoorplates: 0, minTransactions: 0 }), null);
 });
 
 test('external diagnostics leave the active build valid while undeclared internal files fail closed', async (t) => {

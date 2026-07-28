@@ -38,6 +38,31 @@ test('doorplate detail parser resolves exactly one CSV resource', () => {
   assert.equal(source.publishedAt, '2026-07-02T09:47:33+08:00');
 });
 
+test('doorplate detail parser accepts the current download attribute when the link label omits CSV', () => {
+  const currentDetail = `<!doctype html><body>
+    <table>
+      <tr>
+        <td>臺北市門牌位置數值資料</td>
+        <td><span>CSV</span></td>
+        <td><span>2026-07-02 09:47:33</span></td>
+        <td>
+          <a
+            href="https://data.taipei/api/frontstage/tpeod/dataset/resource.download?rid=ce76ca0c-7f94-4935-ab47-1d2a41ca2abb"
+            download="Open Data.csv"
+          ><span>下載</span></a>
+        </td>
+      </tr>
+    </table>
+  </body>`;
+
+  const source = resolveTaipeiDoorplateSource(currentDetail);
+
+  assert.equal(
+    source.url,
+    'https://data.taipei/api/frontstage/tpeod/dataset/resource.download?rid=ce76ca0c-7f94-4935-ab47-1d2a41ca2abb',
+  );
+});
+
 test('doorplate source parser rejects missing or ambiguous CSV resources', () => {
   assert.throws(() => resolveTaipeiDoorplateSource('<html></html>'), /exactly one/i);
   assert.throws(

@@ -22,14 +22,26 @@ import {
   transactionArtifactChecksum,
   writeBacktestAcceptance,
 } from './lib/market-data/store.ts';
-import { ensureTaipeiMarketData } from './lib/market-data/update.ts';
+import {
+  ensureTaipeiMarketData,
+  evaluateTaipeiMarketDataCandidate,
+  type CandidateEvaluation,
+  type EvaluateTaipeiMarketDataCandidateOptions,
+} from './lib/market-data/update.ts';
 
 const SUPPORTED_CITY = 'taipei';
 export class CliInputError extends Error {}
 
 export type MarketDataCommand =
   | { command: 'update'; city: typeof SUPPORTED_CITY; asOf: string }
+  | { command: 'candidate'; city: typeof SUPPORTED_CITY; asOf: string; policyId: PolicyId }
   | { command: 'backtest'; city: typeof SUPPORTED_CITY; asOf: string; noGate: boolean; policyId: PolicyId };
+
+export interface MarketDataCommandDependencies {
+  candidateEvaluator?: (
+    options: EvaluateTaipeiMarketDataCandidateOptions,
+  ) => Promise<CandidateEvaluation>;
+}
 
 function readFlagValue(args: readonly string[], index: number, flag: string): [string, number] {
   const value = args[index + 1];
@@ -40,9 +52,9 @@ function readFlagValue(args: readonly string[], index: number, flag: string): [s
 /** Strictly parses the small public CLI surface before any filesystem or network work. */
 export function parseMarketDataArgs(args: readonly string[], now: Date = new Date()): MarketDataCommand {
   const command = args[0];
-  if (command !== 'update' && command !== 'backtest') {
+  if (command !== 'update' && command !== 'candidate' && command !== 'backtest') {
     throw new CliInputError(
-      'usage: market-data <update|backtest> --city taipei [--as-of YYYY-MM-DD] [--no-gate] [--policy <baseline|48-month|1000-meter>]',
+      'usage: market-data <update|candidate|backtest> --city taipei [--as-of YYYY-MM-DD] [--no-gate] [--policy <baseline|48-month|1000-meter>]',
     );
   }
 
@@ -71,7 +83,7 @@ export function parseMarketDataArgs(args: readonly string[], now: Date = new Dat
       if (noGate) throw new CliInputError('--no-gate may be supplied only once');
       noGate = true;
     } else if (argument === '--policy' || argument.startsWith('--policy=')) {
-      if (command !== 'backtest') throw new CliInputError('--policy is supported only by backtest');
+      if (command === 'update') throw new CliInputError('--policy is supported only by candidate or backtest');
       if (policyId !== undefined) throw new CliInputError('--policy may be supplied only once');
       const value = argument === '--policy'
         ? readFlagValue(args, index, '--policy')
@@ -93,6 +105,7 @@ export function parseMarketDataArgs(args: readonly string[], now: Date = new Dat
   const resolvedAsOf = asOf ?? taipeiDateString(now);
   if (!isValidDateString(resolvedAsOf)) throw new CliInputError('--as-of must be a valid YYYY-MM-DD date');
   if (command === 'update') return { command, city, asOf: resolvedAsOf };
+  if (command === 'candidate') return { command, city, asOf: resolvedAsOf, policyId: policyId ?? ACTIVE_ESTIMATOR_POLICY.id };
   return { command, city, asOf: resolvedAsOf, noGate, policyId: policyId ?? ACTIVE_ESTIMATOR_POLICY.id };
 }
 
@@ -160,10 +173,39 @@ async function backtest(command: Extract<MarketDataCommand, { command: 'backtest
   return exitCode;
 }
 
-export async function runMarketDataCommand(args: readonly string[], now: Date = new Date()): Promise<number> {
+async function candidate(
+  command: Extract<MarketDataCommand, { command: 'candidate' }>,
+  evaluator: NonNullable<MarketDataCommandDependencies['candidateEvaluator']>,
+): Promise<number> {
+  const evaluation = await evaluator({
+    asOf: command.asOf,
+    policy: estimatorPolicyById(command.policyId),
+    publish: false,
+  });
+  process.stdout.write(`${JSON.stringify({
+    diagnostics: evaluation.diagnostics,
+    report: evaluation.report,
+    acceptanceGate: evaluation.gate,
+  }, null, 2)}\n`);
+  process.stderr.write(
+    `candidate rows=${evaluation.diagnostics.rawRows} reliable=${evaluation.diagnostics.reliableEligible} ` +
+    `review=${evaluation.diagnostics.reviewOnly} excluded=${evaluation.diagnostics.excluded} ` +
+    `policy=${evaluation.report.policyId} gate=${evaluation.gate.passed ? 'passed' : `failed(${evaluation.gate.reasons.join(',')})`}\n`,
+  );
+  return evaluation.gate.passed ? 0 : 1;
+}
+
+export async function runMarketDataCommand(
+  args: readonly string[],
+  now: Date = new Date(),
+  dependencies: MarketDataCommandDependencies = {},
+): Promise<number> {
   const command = parseMarketDataArgs(args, now);
   if (command.command === 'update') {
     return update(command.asOf);
+  }
+  if (command.command === 'candidate') {
+    return candidate(command, dependencies.candidateEvaluator ?? evaluateTaipeiMarketDataCandidate);
   }
   return backtest(command, now);
 }

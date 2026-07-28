@@ -20,6 +20,7 @@ import type {
   MarketDataBundle,
   MarketDataManifest,
   SourceFreshness,
+  TransactionBuildDiagnostics,
   TransactionIndex,
 } from './types.ts';
 
@@ -82,6 +83,32 @@ export function transactionArtifactChecksum(manifest: MarketDataManifest): strin
 
 function finiteRatio(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+function validateTransactionBuildDiagnostics(
+  value: TransactionBuildDiagnostics,
+  recordCount: number,
+): void {
+  if (!value || typeof value !== 'object') throw new Error('Manifest lacks transaction normalization diagnostics');
+  const counts = [value.rawRows, value.reliableEligible, value.reviewOnly, value.excluded];
+  if (!counts.every((count) => Number.isSafeInteger(count) && count >= 0)) {
+    throw new Error('Transaction normalization diagnostics contain invalid counts');
+  }
+  if (value.rawRows !== value.reliableEligible + value.reviewOnly + value.excluded
+    || recordCount !== value.reliableEligible + value.reviewOnly) {
+    throw new Error('Transaction normalization diagnostics do not match manifest counts');
+  }
+  if (!value.excludedByReason || typeof value.excludedByReason !== 'object'
+    || Array.isArray(value.excludedByReason)) {
+    throw new Error('Transaction normalization diagnostics lack exclusion reasons');
+  }
+  const reasons = Object.keys(value.excludedByReason);
+  if (reasons.some((reason) => !reason
+      || !Number.isSafeInteger(value.excludedByReason[reason])
+      || value.excludedByReason[reason]! <= 0)
+    || reasons.join('\n') !== [...reasons].sort(compareStableText).join('\n')) {
+    throw new Error('Transaction normalization exclusion reasons are invalid or unstable');
+  }
 }
 
 function approvedBacktestThresholds(thresholds: BacktestAcceptance['thresholds']): boolean {
@@ -300,6 +327,10 @@ async function validateBuild(root: string, options: PublishOptions): Promise<Mar
   if (!Number.isInteger(manifest.transactions.recordCount) || manifest.transactions.recordCount < minTransactions) {
     throw new Error(`Transaction count below required threshold (${minTransactions})`);
   }
+  validateTransactionBuildDiagnostics(
+    manifest.transactions.normalization,
+    manifest.transactions.recordCount,
+  );
   validateIndexes(doorplates, transactions);
   const doorplateCount = Object.values(doorplates.cells).flat().length;
   const transactionCount = Object.values(transactions.cells).flat().length;
@@ -308,6 +339,14 @@ async function validateBuild(root: string, options: PublishOptions): Promise<Mar
   }
   await validateArtifacts(root, manifest);
   return { manifest, doorplates, transactions };
+}
+
+/** Validates an isolated build without attaching or mutating active acceptance state. */
+export async function validateStagedBuild(
+  stageRoot: string,
+  options: PublishOptions = {},
+): Promise<MarketDataBundle> {
+  return validateBuild(stageRoot, options);
 }
 
 /** Loads only a fully validated active build; malformed partial data is never exposed. */

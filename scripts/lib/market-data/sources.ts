@@ -75,8 +75,10 @@ export function resolveTaipeiDoorplateSource(html: string): TaipeiDoorplateSourc
   for (const match of html.matchAll(anchor)) {
     const attributes = match[1] ?? '';
     const href = /\bhref\s*=\s*["']([^"']+)["']/i.exec(attributes)?.[1];
+    const download = /\bdownload\s*=\s*["']([^"']+)["']/i.exec(attributes)?.[1];
     const text = (match[2] ?? '').replace(/<[^>]+>/g, ' ');
-    const describesCsv = /\.csv\b/i.test(text) || /\.csv\b/i.test(href ?? '') || /(?:format|type)=csv\b/i.test(href ?? '');
+    const describesCsv = /\.csv\b/i.test(text) || /\.csv\b/i.test(href ?? '') ||
+      /\.csv\b/i.test(download ?? '') || /(?:format|type)=csv\b/i.test(href ?? '');
     if (!href || !/resource\.download\?[^"']*\brid=/i.test(href) || !describesCsv) continue;
     const anchorIndex = match.index ?? 0;
     const surrounding = html.slice(Math.max(0, anchorIndex - 500), anchorIndex + match[0].length + 800);

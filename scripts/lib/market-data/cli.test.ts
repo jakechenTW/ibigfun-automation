@@ -6,6 +6,7 @@ import {
 } from './config.ts';
 import {
   parseMarketDataArgs,
+  runMarketDataCommand,
   shouldPersistBacktestAcceptance,
 } from '../../market-data.ts';
 import { backtestTransactions } from './backtest.ts';
@@ -18,6 +19,47 @@ test('backtest CLI accepts each explicit estimator policy', () => {
     assert.equal(parsed.policyId, policy);
     assert.equal(estimatorPolicyById(policy).id, policy);
   }
+});
+
+test('candidate CLI accepts each explicit diagnostic estimator policy', () => {
+  for (const policy of ['baseline', '48-month', '1000-meter'] as const) {
+    const parsed = parseMarketDataArgs(['candidate', '--city', 'taipei', '--policy', policy]);
+    assert.equal(parsed.command, 'candidate');
+    assert.equal(parsed.policyId, policy);
+  }
+});
+
+test('candidate CLI evaluates 48-month policy diagnostically without requesting publication', async () => {
+  const emptyIndex: TransactionIndex = {
+    schemaVersion: 2,
+    datasetVersion: 'fixture',
+    builtAt: '2026-07-25T00:00:00.000Z',
+    cells: {},
+  };
+  let requestedPublish: boolean | null = null;
+  let requestedPolicy: string | null = null;
+  const exitCode = await runMarketDataCommand(
+    ['candidate', '--city', 'taipei', '--policy', '48-month'],
+    new Date('2026-07-25T00:00:00.000Z'),
+    {
+      candidateEvaluator: async (options) => {
+        requestedPublish = options.publish;
+        requestedPolicy = options.policy.id;
+        return {
+          report: backtestTransactions(emptyIndex, { asOf: options.asOf, policy: options.policy }),
+          gate: { passed: true, complete: true, reasons: [] },
+          acceptance: null,
+          diagnostics: {
+            rawRows: 0, reliableEligible: 0, reviewOnly: 0, excluded: 0, excludedByReason: {},
+          },
+        };
+      },
+    },
+  );
+
+  assert.equal(exitCode, 0);
+  assert.equal(requestedPolicy, '48-month');
+  assert.equal(requestedPublish, false);
 });
 
 test('backtest CLI rejects unknown and duplicate policy flags', () => {
@@ -36,7 +78,7 @@ test('backtest CLI rejects unknown and duplicate policy flags', () => {
 test('update rejects the diagnostic policy selector', () => {
   assert.throws(
     () => parseMarketDataArgs(['update', '--city', 'taipei', '--policy', 'baseline']),
-    /--policy is supported only by backtest/,
+    /--policy is supported only by candidate or backtest/,
   );
 });
 
