@@ -132,7 +132,11 @@ evaluation, and writing the report.
   `ESTIMATOR_POLICY_VERSION` whenever selector, weighting, outlier, confidence,
   status, or backtest semantics change. When that bump changes transaction
   normalization or eligibility, use `update` to rebuild and publish the index;
-  never use `backtest` to mint new acceptance for a pre-change index.
+  never use `backtest` to mint new acceptance for a pre-change index. The
+  schema-3 build manifest records the policy version that created its indexes;
+  standalone backtest (including `--no-gate`) rejects missing or mismatched
+  provenance before evaluating cases, and the acceptance writer revalidates
+  that provenance plus the active transaction checksum before persistence.
 - `npm run route -- --lat <> --lng <>` — deterministic nearest-walk exit for one
   coordinate (shared ORS cache). Used during triage (step 5) to get a trustworthy
   walking distance after re-locating a listing from its address.

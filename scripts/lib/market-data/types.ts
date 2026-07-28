@@ -173,6 +173,8 @@ export interface SelectionResult {
 
 export interface MarketDataManifest {
   schemaVersion: number;
+  /** Normalization/eligibility semantics used to build the persisted indexes. */
+  estimatorPolicyVersion: number;
   buildId: string;
   builtAt: string;
   doorplates: {

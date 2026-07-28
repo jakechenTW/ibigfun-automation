@@ -1,4 +1,4 @@
-export const MARKET_SCHEMA_VERSION = 2;
+export const MARKET_SCHEMA_VERSION = 3;
 /**
  * Intentional acceptance compatibility contract. Bump whenever selector,
  * weighting, outlier, confidence, status, or backtest semantics change.

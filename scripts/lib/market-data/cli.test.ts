@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   ACTIVE_ESTIMATOR_POLICY,
+  ESTIMATOR_POLICY_VERSION,
+  MARKET_SCHEMA_VERSION,
   estimatorPolicyById,
 } from './config.ts';
 import {
@@ -82,7 +84,7 @@ test('candidate CLI accepts each explicit diagnostic estimator policy', () => {
 
 test('candidate CLI evaluates 48-month policy diagnostically without requesting publication', async () => {
   const emptyIndex: TransactionIndex = {
-    schemaVersion: 2,
+    schemaVersion: MARKET_SCHEMA_VERSION,
     datasetVersion: 'fixture',
     builtAt: '2026-07-25T00:00:00.000Z',
     cells: {},
@@ -156,7 +158,7 @@ test('implicit CLI dates use the Taipei calendar at the 00:00–07:59 window and
 
 test('non-active diagnostic policy cannot persist canonical acceptance', () => {
   const emptyIndex: TransactionIndex = {
-    schemaVersion: 2,
+    schemaVersion: MARKET_SCHEMA_VERSION,
     datasetVersion: 'fixture',
     builtAt: '2026-07-25T00:00:00.000Z',
     cells: {},
@@ -202,16 +204,135 @@ test('non-active diagnostic policy cannot persist canonical acceptance', () => {
   assert.equal(shouldPersistBacktestAcceptance(passingDiagnostic, false), false);
 });
 
+function injectedBundleWithProvenance(
+  schemaVersion: number,
+  estimatorPolicyVersion?: number,
+): MarketDataBundle {
+  const index: TransactionIndex = {
+    schemaVersion,
+    datasetVersion: 'legacy-transactions',
+    builtAt: '2026-07-25T00:00:00.000Z',
+    cells: {},
+  };
+  return {
+    manifest: {
+      schemaVersion,
+      ...(estimatorPolicyVersion === undefined ? {} : { estimatorPolicyVersion }),
+      buildId: 'legacy-build',
+      builtAt: '2026-07-25T00:00:00.000Z',
+      doorplates: {
+        sourceUrl: 'https://example.test/doorplates.csv',
+        publishedAt: null,
+        checkedAt: '2026-07-25T00:00:00.000Z',
+        sha256: 'legacy-doorplates',
+        recordCount: 0,
+      },
+      transactions: {
+        sourceUrls: ['https://example.test/transactions.zip'],
+        publishedAt: null,
+        checkedAt: '2026-07-25T00:00:00.000Z',
+        sha256: 'legacy-transactions',
+        recordCount: 0,
+        normalization: {
+          rawRows: 0,
+          reliableEligible: 0,
+          reviewOnly: 0,
+          excluded: 0,
+          excludedByReason: {},
+        },
+      },
+      lastFailure: null,
+      artifacts: {
+        'transactions-index.json': { sha256: 'legacy-checksum', bytes: 1 },
+      },
+    },
+    doorplates: {
+      schemaVersion,
+      datasetVersion: 'legacy-doorplates',
+      byCanonicalAddress: {},
+      byRoad: {},
+      cells: {},
+    },
+    transactions: index,
+  } as unknown as MarketDataBundle;
+}
+
+test('production backtest rejects schema-2 provenance before evaluation or acceptance persistence', async () => {
+  const legacyBundle = injectedBundleWithProvenance(2);
+  let evaluateCalls = 0;
+  let persistCalls = 0;
+
+  await assert.rejects(
+    () => runMarketDataCommand(
+      ['backtest', '--city', 'taipei'],
+      new Date('2026-07-26T01:00:00.000Z'),
+      {
+        backtest: {
+          lock: async (_root, operation) => operation(),
+          recover: async () => null,
+          load: async () => legacyBundle,
+          evaluate: () => {
+            evaluateCalls += 1;
+            return passingBacktestReport(legacyBundle.transactions);
+          },
+          persistAcceptance: async () => {
+            persistCalls += 1;
+          },
+        },
+      },
+    ),
+    /index policy provenance.*run update first/i,
+  );
+
+  assert.equal(evaluateCalls, 0);
+  assert.equal(persistCalls, 0);
+});
+
+test('--no-gate cannot evaluate a current-schema build with old policy provenance', async () => {
+  const oldPolicyBundle = injectedBundleWithProvenance(
+    MARKET_SCHEMA_VERSION,
+    ESTIMATOR_POLICY_VERSION - 1,
+  );
+  let evaluateCalls = 0;
+  let persistCalls = 0;
+
+  await assert.rejects(
+    () => runMarketDataCommand(
+      ['backtest', '--city', 'taipei', '--no-gate'],
+      new Date('2026-07-26T01:00:00.000Z'),
+      {
+        backtest: {
+          lock: async (_root, operation) => operation(),
+          recover: async () => null,
+          load: async () => oldPolicyBundle,
+          evaluate: () => {
+            evaluateCalls += 1;
+            return passingBacktestReport(oldPolicyBundle.transactions);
+          },
+          persistAcceptance: async () => {
+            persistCalls += 1;
+          },
+        },
+      },
+    ),
+    /index policy provenance.*run update first/i,
+  );
+
+  assert.equal(evaluateCalls, 0);
+  assert.equal(persistCalls, 0);
+});
+
 test('backtest acceptance writer cannot race a locked update into a stale final pair', async () => {
   const emptyIndex: TransactionIndex = {
-    schemaVersion: 2,
+    schemaVersion: MARKET_SCHEMA_VERSION,
     datasetVersion: 'old-transactions',
     builtAt: '2026-07-25T00:00:00.000Z',
     cells: {},
   };
   const oldBundle: MarketDataBundle = {
     manifest: {
-      schemaVersion: 2,
+      schemaVersion: MARKET_SCHEMA_VERSION,
+      estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
       buildId: 'old-build',
       builtAt: '2026-07-25T00:00:00.000Z',
       doorplates: {
@@ -241,7 +362,7 @@ test('backtest acceptance writer cannot race a locked update into a stale final 
       },
     },
     doorplates: {
-      schemaVersion: 2,
+      schemaVersion: MARKET_SCHEMA_VERSION,
       datasetVersion: 'old-doorplates',
       byCanonicalAddress: {},
       byRoad: {},

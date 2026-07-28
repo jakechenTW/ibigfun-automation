@@ -102,6 +102,23 @@ export function transactionArtifactChecksum(manifest: MarketDataManifest): strin
   return typeof checksum === 'string' && checksum.length > 0 ? checksum : null;
 }
 
+export function marketDataManifestHasCurrentPolicyProvenance(
+  manifest: MarketDataManifest,
+): boolean {
+  return manifest.schemaVersion === MARKET_SCHEMA_VERSION
+    && manifest.estimatorPolicyVersion === ESTIMATOR_POLICY_VERSION;
+}
+
+export function assertCurrentMarketDataIndexPolicy(
+  manifest: MarketDataManifest,
+): void {
+  if (!marketDataManifestHasCurrentPolicyProvenance(manifest)) {
+    throw new Error(
+      'Active market-data index policy provenance does not match the runtime policy; run update first',
+    );
+  }
+}
+
 function finiteRatio(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
@@ -185,6 +202,10 @@ export function readBacktestAcceptance(root: string): BacktestAcceptance | null 
 
 /** Atomically replaces the aggregate-only local acceptance artifact. */
 export async function writeBacktestAcceptance(root: string, acceptance: BacktestAcceptance): Promise<void> {
+  const active = await validateBuild(root, {
+    minDoorplates: 0,
+    minTransactions: 0,
+  });
   if (acceptance.estimatorPolicyVersion !== ESTIMATOR_POLICY_VERSION) {
     throw new Error('Backtest acceptance estimator policy does not match the runtime policy');
   }
@@ -194,13 +215,12 @@ export async function writeBacktestAcceptance(root: string, acceptance: Backtest
   if (!approvedBacktestThresholds(acceptance.thresholds)) {
     throw new Error('Backtest acceptance must use the approved quality thresholds');
   }
-  const transactions = readJson<TransactionIndex>(path.join(root, 'transactions-index.json'));
-  const latest = transactions && latestEligibleTransactionDate(transactions);
+  const latest = latestEligibleTransactionDate(active.transactions);
   if (!latest || acceptance.latestEligibleTransactionDate !== latest
-    || acceptance.evaluatedThrough < latest) {
+      || acceptance.evaluatedThrough < latest) {
     throw new Error('Backtest acceptance must cover the complete active transaction index');
   }
-  if (!validBacktestAcceptance(acceptance)) throw new Error('Refusing to persist a non-passing backtest acceptance');
+  validateAcceptanceForBundle(acceptance, active);
   const target = backtestAcceptancePath(root);
   const temporary = `${target}.tmp-${randomUUID()}`;
   await writeStableJson(temporary, acceptance);
@@ -223,6 +243,7 @@ export function marketDataBacktestAcceptanceDecision(
   if (diagnostics) diagnostics.eligibleTransactionScans += 1;
   const latest = latestEligibleTransactionDate(bundle.transactions);
   const accepted = acceptance !== undefined
+    && marketDataManifestHasCurrentPolicyProvenance(bundle.manifest)
     && validBacktestAcceptance(acceptance)
     && acceptance.transactionArtifactSha256 === transactionArtifactChecksum(bundle.manifest)
     && latest !== null
@@ -290,8 +311,13 @@ function validateCells(
   }
 }
 
-function validateIndexes(doorplates: DoorplateIndex, transactions: TransactionIndex): void {
-  if (doorplates.schemaVersion !== MARKET_SCHEMA_VERSION || transactions.schemaVersion !== MARKET_SCHEMA_VERSION) {
+function validateIndexes(
+  doorplates: DoorplateIndex,
+  transactions: TransactionIndex,
+  expectedSchemaVersion: number,
+): void {
+  if (doorplates.schemaVersion !== expectedSchemaVersion
+      || transactions.schemaVersion !== expectedSchemaVersion) {
     throw new Error('Market index schema version mismatch');
   }
   if (!sortedKeys(doorplates.byCanonicalAddress) || !sortedKeys(doorplates.byRoad)) {
@@ -337,14 +363,34 @@ async function validateArtifacts(root: string, manifest: MarketDataManifest): Pr
   }
 }
 
-async function validateBuild(root: string, options: PublishOptions): Promise<MarketDataBundle> {
+type BuildValidationMode = 'current' | 'restorable';
+
+function validateManifestPolicy(
+  manifest: MarketDataManifest,
+  mode: BuildValidationMode,
+): void {
+  if (mode === 'current') {
+    assertCurrentMarketDataIndexPolicy(manifest);
+    return;
+  }
+  if (manifest.schemaVersion !== 2 && manifest.schemaVersion !== MARKET_SCHEMA_VERSION) {
+    throw new Error('Market manifest schema version is not restorable');
+  }
+}
+
+async function validateBuild(
+  root: string,
+  options: PublishOptions,
+  mode: BuildValidationMode = 'current',
+): Promise<MarketDataBundle> {
   const manifest = readManifest(root);
   const doorplates = readJson<DoorplateIndex>(path.join(root, 'doorplates-index.json'));
   const transactions = readJson<TransactionIndex>(path.join(root, 'transactions-index.json'));
   if (!manifest || !doorplates || !transactions) throw new Error('Market build is missing manifest or indexes');
-  if (manifest.schemaVersion !== MARKET_SCHEMA_VERSION || !manifest.buildId || !manifest.builtAt) {
+  if (!manifest.buildId || !manifest.builtAt) {
     throw new Error('Market manifest schema version mismatch');
   }
+  validateManifestPolicy(manifest, mode);
   const minDoorplates = options.minDoorplates ?? MIN_PRODUCTION_DOORPLATES;
   const minTransactions = options.minTransactions ?? MIN_PRODUCTION_TRANSACTIONS;
   if (!Number.isInteger(manifest.doorplates.recordCount) || manifest.doorplates.recordCount < minDoorplates) {
@@ -357,7 +403,7 @@ async function validateBuild(root: string, options: PublishOptions): Promise<Mar
     manifest.transactions.normalization,
     manifest.transactions.recordCount,
   );
-  validateIndexes(doorplates, transactions);
+  validateIndexes(doorplates, transactions, manifest.schemaVersion);
   const doorplateCount = countIndexEntries(doorplates.cells);
   const transactionCount = countIndexEntries(transactions.cells);
   if (manifest.doorplates.recordCount !== doorplateCount || manifest.transactions.recordCount !== transactionCount) {
@@ -591,12 +637,10 @@ function validateAcceptanceForBundle(
   acceptance: BacktestAcceptance,
   bundle: MarketDataBundle,
 ): void {
+  assertCurrentMarketDataIndexPolicy(bundle.manifest);
   if (acceptance.estimatorPolicyVersion !== ESTIMATOR_POLICY_VERSION
       || acceptance.policyId !== ACTIVE_ESTIMATOR_POLICY.id) {
     throw new Error('Backtest acceptance does not match the active estimator policy');
-  }
-  if (!validBacktestAcceptance(acceptance)) {
-    throw new Error('Refusing to publish a non-passing backtest acceptance');
   }
   if (acceptance.transactionArtifactSha256 !== transactionArtifactChecksum(bundle.manifest)) {
     throw new Error('Backtest acceptance transaction artifact checksum does not match the staged build');
@@ -605,6 +649,9 @@ function validateAcceptanceForBundle(
   if (!latest || acceptance.latestEligibleTransactionDate !== latest
       || acceptance.evaluatedThrough < latest) {
     throw new Error('Backtest acceptance must cover the complete staged transaction index');
+  }
+  if (!validBacktestAcceptance(acceptance)) {
+    throw new Error('Refusing to publish a non-passing backtest acceptance');
   }
 }
 
@@ -651,9 +698,10 @@ async function tryValidatedBuild(
   root: string,
   expectedBuildId: string,
   options: PublishOptions,
+  mode: BuildValidationMode = 'current',
 ): Promise<MarketDataBundle | null> {
   try {
-    const bundle = await validateBuild(root, options);
+    const bundle = await validateBuild(root, options, mode);
     return bundle.manifest.buildId === expectedBuildId ? bundle : null;
   } catch {
     return null;
@@ -752,9 +800,19 @@ async function restoreOldPair(
     return null;
   }
 
-  let old = await tryValidatedBuild(paths.activeRoot, journal.oldBuildId, options);
+  let old = await tryValidatedBuild(
+    paths.activeRoot,
+    journal.oldBuildId,
+    options,
+    'restorable',
+  );
   if (!old) {
-    const backup = await tryValidatedBuild(paths.backupRoot, journal.oldBuildId, options);
+    const backup = await tryValidatedBuild(
+      paths.backupRoot,
+      journal.oldBuildId,
+      options,
+      'restorable',
+    );
     if (!backup) throw new Error('Publication journal has no validated old build to restore');
     if (fs.existsSync(paths.activeRoot)) {
       const activeManifest = readManifest(paths.activeRoot);
@@ -765,7 +823,12 @@ async function restoreOldPair(
       await syncDirectory(paths.parent);
     }
     await renameAndSync(ops, paths.backupRoot, paths.activeRoot, paths.parent);
-    old = await tryValidatedBuild(paths.activeRoot, journal.oldBuildId, options);
+    old = await tryValidatedBuild(
+      paths.activeRoot,
+      journal.oldBuildId,
+      options,
+      'restorable',
+    );
     if (!old) throw new Error('Restored old market-data build failed validation');
   }
 
@@ -799,6 +862,10 @@ async function restoreOldPair(
   }
 
   const loaded = await loadMarketData(paths.activeRoot, options);
+  if (!loaded && !journal.oldAcceptancePresent
+      && !marketDataManifestHasCurrentPolicyProvenance(old.manifest)) {
+    return null;
+  }
   if (!loaded || loaded.manifest.buildId !== journal.oldBuildId
       || (journal.oldAcceptancePresent
         && (!loaded.backtestAcceptance || !marketDataBacktestAccepted(loaded)))) {
@@ -859,7 +926,9 @@ async function publishAcceptedBuild(
   const publicationId = randomUUID();
   const acceptanceTarget = backtestAcceptancePath(activeRoot);
   let oldBuild: MarketDataBundle | null = null;
-  if (fs.existsSync(activeRoot)) oldBuild = await validateBuild(activeRoot, options);
+  if (fs.existsSync(activeRoot)) {
+    oldBuild = await validateBuild(activeRoot, options, 'restorable');
+  }
   const oldAcceptanceBytes = await readOptionalFile(ops, acceptanceTarget);
   const matchingOldAcceptance = oldBuild && oldAcceptanceBytes
     ? await validatedAcceptanceFile(ops, acceptanceTarget, oldBuild, null)

@@ -88,8 +88,9 @@ exclusion.
   median/P25/P75；只剩這類 evidence 時估值必須為 `review`。
 - 投資分桶的開價溢價以 **P25 保守行情** 計算/覆核；中位數溢價只能用於說明，不能單獨使物件進入推薦。
 - 只有當本機 backtest acceptance 的 `transactions-index.json` checksum、`ESTIMATOR_POLICY_VERSION`、
-  active policy id、schema-2 acceptance，以及完整有效交易索引的最新日期覆蓋均與目前執行環境完全
-  相符時，估值才可為 `reliable`。Acceptance 必須同時證明：所有 `reliable-eligible` held-out 交易
+  active policy id、schema-3 manifest 的 index-policy provenance、schema-2 acceptance，以及完整有效
+  交易索引的最新日期覆蓋均與目前執行環境完全相符時，估值才可為 `reliable`。Acceptance 必須同時
+  證明：所有 `reliable-eligible` held-out 交易
   中至少 70% 可估價、`reliable` cohort 的 median APE ≤12% 且 P75 APE ≤20%、high／medium
   各至少 20 筆，且 high median APE 至少比 medium 低一個絕對百分點。Coverage denominator
   只含符合 production eligibility 的 held-out 交易；`review-only` 與硬性排除項均不在分母。
@@ -102,7 +103,11 @@ exclusion.
   失敗 candidate 或錯配 acceptance 用於 `reliable`。來源 byte 未變時，也只有目前 active build
   已有相符的現行 policy acceptance 才可走 `not-modified` 快路徑；policy／eligibility 變更造成舊
   acceptance 失效時必須重建 index、重新 gate 並交易式發佈。發佈 rename 中斷後，由同一 writer
-  lock 下的 durable journal／old-acceptance backup 恢復成驗證過的舊 pair 或新 pair。
+  lock 下的 durable journal／old-acceptance backup 恢復成驗證過的舊 pair 或新 pair。schema-2
+  build 或缺少／錯配 policy provenance 的 schema-3 build 一律 fail closed；正常 `update` 必須以
+  現行語義重建並發佈，不得只改 manifest metadata 或補簽 acceptance。Standalone `backtest`（包含
+  `--no-gate`）須在輸出 case evidence 前拒絕錯配 provenance，writer 落盤前再比對 active manifest、
+  transaction checksum 與 acceptance policy/version。
 - Coverage 不足只能依序評估 baseline → 48-month → 1000-meter；只有前一政策「單純 coverage
   <70%」時才可擴張，任何 accuracy／confidence calibration failure 都必須停止。Fallback 必須全面
   通過相同門檻、提高 policy compatibility 版本並以正常 update 發佈；不得降低門檻或混用建物型態。

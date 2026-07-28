@@ -31,6 +31,7 @@ import type { BacktestAcceptance, DoorplateIndex, MarketDataManifest, Transactio
 function manifest(buildId: string, recordCount = 1): MarketDataManifest {
   return {
     schemaVersion: MARKET_SCHEMA_VERSION,
+    estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
     buildId,
     builtAt: '2026-07-25T00:00:00.000Z',
     doorplates: { sourceUrl: 'https://example.test/doorplates.csv', publishedAt: '2026-07-02T09:47:33+08:00', checkedAt: '2026-07-25T00:00:00.000Z', sha256: 'doorplates', recordCount },
@@ -121,6 +122,30 @@ async function writeBuild(dir: string, buildId: string, count = 1): Promise<void
     value.artifacts[file] = { sha256: await sha256File(join(dir, file)), bytes: (await readFile(join(dir, file))).byteLength };
   }
   await writeFile(join(dir, 'manifest.json'), `${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function downgradeBuildToSchema2(root: string): Promise<void> {
+  for (const indexFile of ['doorplates-index.json', 'transactions-index.json']) {
+    const index = JSON.parse(await readFile(join(root, indexFile), 'utf8')) as {
+      schemaVersion: number;
+    };
+    index.schemaVersion = 2;
+    await writeFile(join(root, indexFile), `${JSON.stringify(index)}\n`);
+  }
+  const legacyManifest = JSON.parse(
+    await readFile(join(root, 'manifest.json'), 'utf8'),
+  ) as Record<string, unknown> & {
+    artifacts: MarketDataManifest['artifacts'];
+  };
+  legacyManifest.schemaVersion = 2;
+  delete legacyManifest.estimatorPolicyVersion;
+  for (const indexFile of ['doorplates-index.json', 'transactions-index.json']) {
+    legacyManifest.artifacts[indexFile] = {
+      sha256: await sha256File(join(root, indexFile)),
+      bytes: (await readFile(join(root, indexFile))).byteLength,
+    };
+  }
+  await writeFile(join(root, 'manifest.json'), `${JSON.stringify(legacyManifest)}\n`);
 }
 
 async function passingAcceptance(root: string): Promise<BacktestAcceptance> {
@@ -457,6 +482,31 @@ test('restart recovery yields a validated old or new pair after every publicatio
   }
 });
 
+test('restart recovery restores a schema-2 migration source fail-closed after the first rename', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-schema2-crash-'));
+  const active = join(parent, 'taipei');
+  const stage = join(parent, '.taipei-staging-next');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(active, 'schema2-build');
+  await downgradeBuildToSchema2(active);
+  await writeBuild(stage, 'schema3-build');
+
+  await crashPublicationAfterRename(active, stage, await passingAcceptance(stage), 1);
+  const recovered = await recoverInterruptedMarketDataPublication(active, {
+    minDoorplates: 1,
+    minTransactions: 0,
+  });
+
+  assert.equal(recovered, null);
+  assert.equal(readManifest(active)?.buildId, 'schema2-build');
+  assert.equal(readManifest(active)?.schemaVersion, 2);
+  assert.equal(
+    await loadMarketData(active, { minDoorplates: 1, minTransactions: 0 }),
+    null,
+  );
+  assert.deepEqual(await readdir(parent), ['taipei']);
+});
+
 test('production backtest recovers an interrupted publication before its locked load', async (t) => {
   const parent = await mkdtemp(join(tmpdir(), 'market-store-backtest-crash-'));
   const active = join(parent, 'taipei');
@@ -716,6 +766,35 @@ test('reader retries the bounded active-directory rename window and still valida
   assert.equal(bundle?.manifest.buildId, 'reader-build');
 });
 
+test('load rejects missing or mismatched index policy provenance', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-provenance-'));
+  t.after(() => rm(parent, { recursive: true, force: true }));
+
+  const missing = join(parent, 'missing');
+  await writeBuild(missing, 'missing-provenance');
+  const missingManifest = JSON.parse(
+    await readFile(join(missing, 'manifest.json'), 'utf8'),
+  ) as Record<string, unknown>;
+  delete missingManifest.estimatorPolicyVersion;
+  await writeFile(join(missing, 'manifest.json'), JSON.stringify(missingManifest));
+  assert.equal(
+    await loadMarketData(missing, { minDoorplates: 1, minTransactions: 0 }),
+    null,
+  );
+
+  const mismatched = join(parent, 'mismatched');
+  await writeBuild(mismatched, 'mismatched-provenance');
+  const mismatchedManifest = JSON.parse(
+    await readFile(join(mismatched, 'manifest.json'), 'utf8'),
+  ) as Record<string, unknown>;
+  mismatchedManifest.estimatorPolicyVersion = ESTIMATOR_POLICY_VERSION - 1;
+  await writeFile(join(mismatched, 'manifest.json'), JSON.stringify(mismatchedManifest));
+  assert.equal(
+    await loadMarketData(mismatched, { minDoorplates: 1, minTransactions: 0 }),
+    null,
+  );
+});
+
 test('backtest acceptance loads only for the active transaction artifact checksum', async (t) => {
   const parent = await mkdtemp(join(tmpdir(), 'market-store-'));
   const root = join(parent, 'taipei');
@@ -784,11 +863,32 @@ test('backtest acceptance loads only for the active transaction artifact checksu
     await writeFile(backtestAcceptancePath(root), JSON.stringify(invalid));
     assert.equal(readBacktestAcceptance(root), null);
   }
-  await writeBacktestAcceptance(root, { ...acceptance, transactionArtifactSha256: 'different-dataset' });
-  assert.equal(
-    (await loadMarketData(root, { minDoorplates: 1, minTransactions: 0 }))?.backtestAcceptance,
-    undefined,
+  await assert.rejects(
+    () => writeBacktestAcceptance(root, {
+      ...acceptance,
+      transactionArtifactSha256: 'different-dataset',
+    }),
+    /transaction.*checksum/i,
   );
+});
+
+test('acceptance writer rejects old active index provenance before creating an artifact', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-writer-provenance-'));
+  const root = join(parent, 'taipei');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(root, 'old-policy-index');
+  const acceptance = await passingAcceptance(root);
+  const activeManifest = JSON.parse(
+    await readFile(join(root, 'manifest.json'), 'utf8'),
+  ) as Record<string, unknown>;
+  activeManifest.estimatorPolicyVersion = ESTIMATOR_POLICY_VERSION - 1;
+  await writeFile(join(root, 'manifest.json'), JSON.stringify(activeManifest));
+
+  await assert.rejects(
+    () => writeBacktestAcceptance(root, acceptance),
+    /index policy provenance.*run update first/i,
+  );
+  await assert.rejects(() => readFile(backtestAcceptancePath(root)), { code: 'ENOENT' });
 });
 
 test('prior policy-v3 acceptance fails closed after location eligibility changes', async (t) => {

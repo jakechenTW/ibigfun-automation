@@ -92,10 +92,11 @@ selection:
   invalid or contradictory required values, inseparable parking, and other
   hard failures. Excluded rows do not enter the transaction index.
 
-The schema-2 manifest publishes only aggregate normalization totals:
+The schema-3 manifest publishes only aggregate normalization totals:
 `rawRows`, `reliableEligible`, `reviewOnly`, `excluded`, and
-`excludedByReason`. Full rows and addresses remain only in git-ignored local
-evidence.
+`excludedByReason`, plus the required `estimatorPolicyVersion` provenance that
+identifies the normalization/eligibility semantics used to build both indexes.
+Full rows and addresses remain only in git-ignored local evidence.
 
 Run an explicit initial build (or a manual refresh) with network access:
 
@@ -109,7 +110,11 @@ published only after index, coordinate, checksum, minimum-count, complete
 backtest, and acceptance validation. The candidate directory and its
 checksum-bound schema-2 acceptance are promoted transactionally; the published
 pair therefore has the same transaction-index checksum, active policy id,
-estimator policy version, and latest eligible transaction-date coverage.
+estimator policy version, and latest eligible transaction-date coverage. A
+schema-2 build, or a schema-3 manifest with missing/mismatched policy
+provenance, is never active-compatible: `update` must rebuild its indexes with
+current semantics, rerun the complete gate, and publish a new pair rather than
+upgrading metadata or writing only a new acceptance.
 Unchanged source checks may use the lightweight `not-modified` path only when
 the active build already has matching current-policy acceptance. Missing,
 outdated, or otherwise invalid acceptance forces a full rebuild and gate even
@@ -249,9 +254,11 @@ Eligible held-out coverage was 93.09%; reliable-cohort median/P75 APE were
 7.66%/14.03%; high/medium confidence had 5,105/12,729 scored cases; and high
 median APE was 1.56 absolute percentage points lower than medium. The gate
 passed without reasons, so the 48-month and 1,000-meter policies were not
-evaluated. The active policy stayed baseline, schema stayed 2, and compatibility
-version advanced from 3 to 4 for the stricter address/location eligibility
-semantics.
+evaluated. That initial rollout kept the baseline policy, used manifest/index
+schema 2, and advanced the compatibility version from 3 to 4 for the stricter
+address/location eligibility semantics. The subsequent provenance migration
+rebuilt those same policy-v4 semantics into manifest/index schema 3; the
+independent acceptance artifact remains schema 2.
 
 That full candidate measured a peak resident set of 2,781,609,984 bytes
 (2.59 GiB). Count validation no longer creates `.flat()` copies of complete
@@ -307,10 +314,17 @@ uses schema 2 and records the exact `transactions-index.json` SHA-256, active
 policy id, estimator policy version, `evaluatedThrough`,
 `latestEligibleTransactionDate`, thresholds, slice counts, and reliable-cohort
 summary metrics. Enrichment treats estimates as review-only until this artifact
-matches the active transaction checksum, runtime estimator policy, and complete
-index's latest eligible date. Publishing a different transaction index or
-adding a newer eligible transaction therefore invalidates prior acceptance
-automatically.
+matches the active transaction checksum, runtime estimator policy, manifest's
+index-policy provenance, and complete index's latest eligible date. Publishing
+a different transaction index or adding a newer eligible transaction therefore
+invalidates prior acceptance automatically.
+
+Standalone `backtest` checks the active manifest's schema-3 policy provenance
+before held-out evaluation or case output; `--no-gate` cannot bypass this
+compatibility check. The acceptance writer repeats the active manifest,
+transaction-artifact checksum, acceptance policy/version, and complete-index
+coverage checks immediately before its atomic write. A provenance failure says
+to run `update` first and never creates or replaces acceptance.
 
 `ESTIMATOR_POLICY_VERSION` is the intentional valuation compatibility
 contract. Any change to transaction eligibility, comparable selection stages,

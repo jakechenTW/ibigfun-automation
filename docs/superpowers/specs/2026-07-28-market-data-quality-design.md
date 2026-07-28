@@ -95,6 +95,23 @@ No candidate build becomes active before its acceptance decision completes.
 The active transaction index and acceptance therefore cannot represent
 different policies or checksums.
 
+### Index-policy provenance
+
+The persisted build manifest records the exact estimator policy version whose
+normalization and eligibility semantics created the doorplate and transaction
+indexes. Manifest/index schema 3 requires this provenance; the aggregate
+acceptance artifact remains its independent schema-2 contract. Missing or
+mismatched provenance makes an active build unusable even when its source bytes
+and transaction checksum are unchanged.
+
+Standalone backtest checks provenance before evaluating held-out cases, and
+`--no-gate` cannot bypass it. The acceptance writer independently revalidates
+the active manifest provenance, transaction-artifact checksum, acceptance
+policy/version, and complete-index date binding. Update must rebuild a
+schema-2 or provenance-mismatched build under current semantics, gate it, and
+publish the new pair transactionally; it must never upgrade only metadata or
+attach a fresh acceptance to an old index.
+
 ## Address Normalization
 
 ### Shared base key
@@ -400,4 +417,3 @@ Cover:
 - Adding an opaque regression model before deterministic data quality and
   coverage are repaired.
 - Expanding beyond Taipei City in this change.
-

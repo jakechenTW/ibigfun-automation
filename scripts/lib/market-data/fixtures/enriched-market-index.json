@@ -1,6 +1,7 @@
 {
   "manifest": {
-    "schemaVersion": 1,
+    "schemaVersion": 3,
+    "estimatorPolicyVersion": 4,
     "buildId": "fixture-enriched-market",
     "builtAt": "2026-07-25T00:00:00.000Z",
     "doorplates": {
@@ -15,13 +16,20 @@
       "publishedAt": null,
       "checkedAt": "2026-07-25T00:00:00.000Z",
       "sha256": "fixture-transactions",
-      "recordCount": 5
+      "recordCount": 5,
+      "normalization": {
+        "rawRows": 5,
+        "reliableEligible": 5,
+        "reviewOnly": 0,
+        "excluded": 0,
+        "excludedByReason": {}
+      }
     },
     "lastFailure": null,
     "artifacts": {}
   },
   "doorplates": {
-    "schemaVersion": 1,
+    "schemaVersion": 3,
     "datasetVersion": "fixture-doorplates",
     "byCanonicalAddress": {
       "台北市中正區另一街99號": [
@@ -54,7 +62,7 @@
     }
   },
   "transactions": {
-    "schemaVersion": 1,
+    "schemaVersion": 3,
     "datasetVersion": "fixture-transactions",
     "builtAt": "2026-07-25T00:00:00.000Z",
     "cells": {

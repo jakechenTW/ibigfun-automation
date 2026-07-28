@@ -8,6 +8,14 @@
 
 **Tech Stack:** TypeScript, Node.js 26, `node:test`, `tsx`, `csv-parse`, local JSON indexes, Ministry of the Interior real-price CSVs, Taipei doorplate CSV.
 
+> **Residual provenance amendment (2026-07-29):** The original tasks below
+> introduced manifest/index schema 2. A final safety review superseded that
+> manifest decision: current manifest/index schema is 3 with required
+> `estimatorPolicyVersion` build provenance, while the independent acceptance
+> artifact remains schema 2 and `ESTIMATOR_POLICY_VERSION` remains 4. Schema-2
+> or missing/mismatched-provenance builds must be rebuilt, gated, and published;
+> standalone backtest and every acceptance-writer entry fail closed.
+
 ## Global Constraints
 
 - Treat the existing uncommitted doorplate/source/update work as an in-scope

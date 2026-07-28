@@ -17,8 +17,10 @@ import {
   type PolicyId,
 } from './lib/market-data/config.ts';
 import {
+  assertCurrentMarketDataIndexPolicy,
   loadMarketData,
   marketDataFreshness,
+  readManifest,
   recoverInterruptedMarketDataPublication,
   transactionArtifactChecksum,
   writeBacktestAcceptance,
@@ -49,6 +51,7 @@ export interface MarketDataCommandDependencies {
     lock?: typeof withMarketDataLock;
     recover?: typeof recoverInterruptedMarketDataPublication;
     load?: typeof loadMarketData;
+    readManifest?: typeof readManifest;
     evaluate?: typeof backtestTransactions;
     persistAcceptance?: typeof writeBacktestAcceptance;
   };
@@ -172,7 +175,12 @@ async function backtest(
     // Read-only diagnostic backtests still share the refresh lock but never persist.
     await (dependencies.recover ?? recoverInterruptedMarketDataPublication)(root);
     const bundle = await (dependencies.load ?? loadMarketData)(root);
-    if (!bundle) throw new Error(`No validated Taipei market-data build at ${root}; run update first`);
+    if (!bundle) {
+      const manifest = (dependencies.readManifest ?? readManifest)(root);
+      if (manifest) assertCurrentMarketDataIndexPolicy(manifest);
+      throw new Error(`No validated Taipei market-data build at ${root}; run update first`);
+    }
+    assertCurrentMarketDataIndexPolicy(bundle.manifest);
     const policy = estimatorPolicyById(command.policyId);
     const report = (dependencies.evaluate ?? backtestTransactions)(
       bundle.transactions,

@@ -14,6 +14,7 @@ import { buildDoorplateIndex } from './doorplates.ts';
 import { gridKey } from './grid.ts';
 import {
   ACTIVE_ESTIMATOR_POLICY,
+  ESTIMATOR_POLICY_VERSION,
   MARKET_DATA_ROOT,
   MARKET_SCHEMA_VERSION,
   type EstimatorPolicy,
@@ -407,6 +408,7 @@ async function ensureTaipeiMarketDataUnlocked(
     await writeStableJson(path.join(stage, 'transactions-index.json'), transactions);
     const manifest: MarketDataManifest = {
       schemaVersion: MARKET_SCHEMA_VERSION,
+      estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
       buildId: `taipei-${builtAt.replace(/[^0-9]/g, '')}-${randomUUID().slice(0, 8)}`,
       builtAt,
       doorplates: {

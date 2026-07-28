@@ -12,7 +12,7 @@ import {
   publishStagedBuildWithAcceptance,
   sha256File,
 } from './store.ts';
-import { ESTIMATOR_POLICY_VERSION } from './config.ts';
+import { ESTIMATOR_POLICY_VERSION, MARKET_SCHEMA_VERSION } from './config.ts';
 import type { BacktestGateResult } from './backtest.ts';
 import type { MarketDataManifest } from './types.ts';
 
@@ -38,14 +38,17 @@ function productionPassingTransactionCsv(base: Buffer): Buffer {
 async function seedValidBuild(root: string): Promise<void> {
   await mkdir(join(root, 'raw'), { recursive: true });
   await writeFile(join(root, 'raw', 'source.csv'), 'fixture\n');
-  await writeFile(join(root, 'doorplates-index.json'), JSON.stringify({ schemaVersion: 2, datasetVersion: 'd', byCanonicalAddress: {}, byRoad: {}, cells: { cell: [{ canonicalAddress: '台北市中正區測試路1號', coordinate: { lat: 25, lng: 121.5 }, district: '中正區', roadKey: 'r', mainNumber: 1, subNumber: null }] } }));
-  await writeFile(join(root, 'transactions-index.json'), JSON.stringify({ schemaVersion: 2, datasetVersion: 't', builtAt: '2026-07-01T00:00:00.000Z', cells: { cell: [{ id: 'tx-1', location: { coordinate: { lat: 25, lng: 121.5 } } }] } }));
+  await writeFile(join(root, 'doorplates-index.json'), JSON.stringify({ schemaVersion: MARKET_SCHEMA_VERSION, datasetVersion: 'd', byCanonicalAddress: {}, byRoad: {}, cells: { cell: [{ canonicalAddress: '台北市中正區測試路1號', coordinate: { lat: 25, lng: 121.5 }, district: '中正區', roadKey: 'r', mainNumber: 1, subNumber: null }] } }));
+  await writeFile(join(root, 'transactions-index.json'), JSON.stringify({ schemaVersion: MARKET_SCHEMA_VERSION, datasetVersion: 't', builtAt: '2026-07-01T00:00:00.000Z', cells: { cell: [{ id: 'tx-1', location: { coordinate: { lat: 25, lng: 121.5 } } }] } }));
   const artifacts: MarketDataManifest['artifacts'] = {};
   for (const file of ['raw/source.csv', 'doorplates-index.json', 'transactions-index.json']) {
     artifacts[file] = { sha256: await sha256File(join(root, file)), bytes: (await readFile(join(root, file))).byteLength };
   }
   const manifest: MarketDataManifest = {
-    schemaVersion: 2, buildId: 'known-good', builtAt: '2026-07-01T00:00:00.000Z',
+    schemaVersion: MARKET_SCHEMA_VERSION,
+    estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
+    buildId: 'known-good',
+    builtAt: '2026-07-01T00:00:00.000Z',
     doorplates: { sourceUrl: 'https://example.test/d.csv', publishedAt: null, checkedAt: '2026-07-01T00:00:00.000Z', sha256: 'd', recordCount: 1 },
     transactions: {
       sourceUrls: [],
@@ -298,6 +301,163 @@ test('injected passing gate cannot bootstrap a production-gate failure without a
 
   assert.equal(bundle, null);
   assert.equal(publisherCalls, 0);
+});
+
+test('unchanged schema-2 or old-provenance sources force current-semantic schema-3 publication', async (t) => {
+  const rootPath = join(await mkdtemp(join(tmpdir(), 'market-update-provenance-')), 'taipei');
+  t.after(() => rm(join(rootPath, '..'), { recursive: true, force: true }));
+  const doorplateCsv = await readFile(
+    fileURLToPath(new URL('./fixtures/doorplates.csv', import.meta.url)),
+  );
+  const transactionCsv = await readFile(
+    fileURLToPath(new URL('./fixtures/transactions.csv', import.meta.url)),
+  );
+  const passingTransactionCsv = productionPassingTransactionCsv(transactionCsv);
+  const nonDataOnlyCsv = Buffer.from(
+    transactionCsv.toString('utf8').split('\n').slice(0, 2).join('\n'),
+  );
+  const detail =
+    '<a href="https://example.test/resource.download?rid=one&amp;fileName=doorplates.csv">doorplates.csv</a>';
+  const fetchSameSources = async (input: string | URL): Promise<Response> => {
+    const url = String(input);
+    if (url.includes('dataset/detail')) return new Response(detail);
+    if (url.includes('resource.download')) {
+      return new Response(doorplateCsv, { headers: { etag: '"doorplates"' } });
+    }
+    const season = new URL(url).searchParams.get('season');
+    return new Response('synthetic zip', { headers: { etag: `"${season}"` } });
+  };
+  const openSameSources = async (file: string) => [{
+    path: 'a_lvr_land_a.csv',
+    stream: () => Readable.from(
+      file.endsWith('/115S2.zip') ? passingTransactionCsv : nonDataOnlyCsv,
+    ),
+  }];
+
+  const first = await ensureTaipeiMarketData({
+    asOf: '2026-07-25',
+    rootPath,
+    minDoorplates: 1,
+    minTransactions: 1,
+    fetch: fetchSameSources,
+    openZip: openSameSources,
+    clock: () => new Date('2026-07-25T01:00:00.000Z'),
+  });
+  assert.equal(first?.refresh?.status, 'updated');
+  const sourceChecksums = {
+    doorplates: first!.manifest.doorplates.sha256,
+    transactions: Object.fromEntries(
+      Object.entries(first!.manifest.transactionSources ?? {})
+        .map(([season, source]) => [season, source.sha256]),
+    ),
+  };
+
+  for (const indexFile of ['doorplates-index.json', 'transactions-index.json']) {
+    const index = JSON.parse(await readFile(join(rootPath, indexFile), 'utf8')) as {
+      schemaVersion: number;
+    };
+    index.schemaVersion = 2;
+    await writeFile(join(rootPath, indexFile), `${JSON.stringify(index)}\n`);
+  }
+  const legacyManifest = JSON.parse(
+    await readFile(join(rootPath, 'manifest.json'), 'utf8'),
+  ) as Record<string, unknown> & {
+    artifacts: MarketDataManifest['artifacts'];
+  };
+  legacyManifest.schemaVersion = 2;
+  delete legacyManifest.estimatorPolicyVersion;
+  for (const indexFile of ['doorplates-index.json', 'transactions-index.json']) {
+    legacyManifest.artifacts[indexFile] = {
+      sha256: await sha256File(join(rootPath, indexFile)),
+      bytes: (await readFile(join(rootPath, indexFile))).byteLength,
+    };
+  }
+  await writeFile(join(rootPath, 'manifest.json'), `${JSON.stringify(legacyManifest)}\n`);
+  const legacyTransactionChecksum =
+    legacyManifest.artifacts['transactions-index.json']!.sha256;
+  const legacyAcceptance = JSON.parse(
+    await readFile(backtestAcceptancePath(rootPath), 'utf8'),
+  ) as { transactionArtifactSha256: string };
+  legacyAcceptance.transactionArtifactSha256 = legacyTransactionChecksum;
+  await writeFile(
+    backtestAcceptancePath(rootPath),
+    `${JSON.stringify(legacyAcceptance)}\n`,
+  );
+
+  let publisherCalls = 0;
+  const migrated = await ensureTaipeiMarketData({
+    asOf: '2026-07-25',
+    rootPath,
+    minDoorplates: 1,
+    minTransactions: 1,
+    fetch: fetchSameSources,
+    openZip: openSameSources,
+    clock: () => new Date('2026-07-26T01:00:00.000Z'),
+    publisher: async (root, stage, acceptance, options) => {
+      publisherCalls += 1;
+      return publishStagedBuildWithAcceptance(root, stage, acceptance, options);
+    },
+  });
+
+  assert.equal(migrated?.refresh?.status, 'updated');
+  assert.equal(publisherCalls, 1);
+  assert.equal(migrated?.manifest.schemaVersion, 3);
+  assert.equal(
+    (migrated?.manifest as unknown as { estimatorPolicyVersion?: number })
+      .estimatorPolicyVersion,
+    ESTIMATOR_POLICY_VERSION,
+  );
+  assert.notEqual(migrated?.manifest.buildId, first?.manifest.buildId);
+  assert.notEqual(
+    migrated?.manifest.artifacts['transactions-index.json']?.sha256,
+    legacyTransactionChecksum,
+  );
+  assert.deepEqual({
+    doorplates: migrated?.manifest.doorplates.sha256,
+    transactions: Object.fromEntries(
+      Object.entries(migrated?.manifest.transactionSources ?? {})
+        .map(([season, source]) => [season, source.sha256]),
+    ),
+  }, sourceChecksums);
+  assert.equal(
+    migrated?.backtestAcceptance?.transactionArtifactSha256,
+    migrated?.manifest.artifacts['transactions-index.json']?.sha256,
+  );
+  assert.equal(migrated?.backtestAcceptance?.schemaVersion, 2);
+  assert.equal(migrated?.backtestAcceptance?.estimatorPolicyVersion, ESTIMATOR_POLICY_VERSION);
+  assert.equal(marketDataBacktestAccepted(migrated!), true);
+
+  const oldProvenanceManifest = JSON.parse(
+    await readFile(join(rootPath, 'manifest.json'), 'utf8'),
+  ) as Record<string, unknown>;
+  oldProvenanceManifest.estimatorPolicyVersion = ESTIMATOR_POLICY_VERSION - 1;
+  await writeFile(
+    join(rootPath, 'manifest.json'),
+    `${JSON.stringify(oldProvenanceManifest)}\n`,
+  );
+  const rebuiltFromOldProvenance = await ensureTaipeiMarketData({
+    asOf: '2026-07-25',
+    rootPath,
+    minDoorplates: 1,
+    minTransactions: 1,
+    fetch: fetchSameSources,
+    openZip: openSameSources,
+    clock: () => new Date('2026-07-27T01:00:00.000Z'),
+    publisher: async (root, stage, acceptance, options) => {
+      publisherCalls += 1;
+      return publishStagedBuildWithAcceptance(root, stage, acceptance, options);
+    },
+  });
+
+  assert.equal(rebuiltFromOldProvenance?.refresh?.status, 'updated');
+  assert.equal(publisherCalls, 2);
+  assert.notEqual(rebuiltFromOldProvenance?.manifest.buildId, migrated?.manifest.buildId);
+  assert.equal(
+    rebuiltFromOldProvenance?.manifest.estimatorPolicyVersion,
+    ESTIMATOR_POLICY_VERSION,
+  );
+  assert.equal(rebuiltFromOldProvenance?.manifest.schemaVersion, 3);
+  assert.equal(marketDataBacktestAccepted(rebuiltFromOldProvenance!), true);
 });
 
 test('unchanged conditional refresh skips an accepted build but rebuilds an invalid-policy build', async (t) => {
