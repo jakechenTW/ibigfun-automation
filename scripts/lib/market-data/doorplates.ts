@@ -1,7 +1,7 @@
 import { parse } from 'csv-parse';
 import type { Readable } from 'node:stream';
 import type { Coordinate } from '../coords.ts';
-import { normalizeTaiwanAddress, type NormalizedAddress } from './address.ts';
+import { baseDoorplateKey, normalizeTaiwanAddress, type NormalizedAddress } from './address.ts';
 import { MARKET_SCHEMA_VERSION } from './config.ts';
 import { gridKey, neighborGridKeys } from './grid.ts';
 import { twd97ToWgs84 } from './projection.ts';
@@ -11,15 +11,36 @@ export type DoorplateCsvRow = Record<string, string>;
 
 const ADDRESS_FIELDS = ['門牌地址', '完整地址', '地址'];
 const CITY_FIELDS = ['縣市別', '縣市名稱', '縣市', '市'];
+const CITY_CODE_FIELDS = ['省市縣市代碼'];
 const DISTRICT_FIELDS = ['鄉鎮市區', '行政區', '區'];
-const ROAD_FIELDS = ['路街', '路街名稱', '路名', '街道'];
+const DISTRICT_CODE_FIELDS = ['鄉鎮市區代碼'];
+const ROAD_FIELDS = ['路街', '路街名稱', '路名', '街道', '街路段'];
 const SECTION_FIELDS = ['段'];
 const LANE_FIELDS = ['巷'];
 const ALLEY_FIELDS = ['弄'];
 const NUMBER_FIELDS = ['號', '門牌號碼'];
 const SUB_NUMBER_FIELDS = ['之', '附號'];
-const X_FIELDS = ['坐標X', 'X坐標', '橫坐標', 'TWD97X', 'X'];
-const Y_FIELDS = ['坐標Y', 'Y坐標', '縱坐標', 'TWD97Y', 'Y'];
+const X_FIELDS = ['坐標X', 'X坐標', '橫坐標', '橫座標', 'TWD97X', 'X'];
+const Y_FIELDS = ['坐標Y', 'Y坐標', '縱坐標', '縱座標', 'TWD97Y', 'Y'];
+
+const CITY_CODES: Record<string, string> = {
+  '63000': '台北市',
+};
+
+const TAIPEI_DISTRICT_CODES: Record<string, string> = {
+  '63000010': '松山區',
+  '63000020': '信義區',
+  '63000030': '大安區',
+  '63000040': '中山區',
+  '63000050': '中正區',
+  '63000060': '大同區',
+  '63000070': '萬華區',
+  '63000080': '文山區',
+  '63000090': '南港區',
+  '63000100': '內湖區',
+  '63000110': '士林區',
+  '63000120': '北投區',
+};
 
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
@@ -59,8 +80,11 @@ function hasHeader(headers: Set<string>, names: readonly string[]): boolean {
 export function validateDoorplateHeaders(headers: Iterable<string>): void {
   const available = new Set([...headers].map((header) => header.normalize('NFKC').trim()));
   const hasAddress = hasHeader(available, ADDRESS_FIELDS);
-  const hasStructuredAddress = [CITY_FIELDS, DISTRICT_FIELDS, ROAD_FIELDS, NUMBER_FIELDS]
-    .every((names) => hasHeader(available, names));
+  const hasStructuredAddress =
+    (hasHeader(available, CITY_FIELDS) || hasHeader(available, CITY_CODE_FIELDS)) &&
+    (hasHeader(available, DISTRICT_FIELDS) || hasHeader(available, DISTRICT_CODE_FIELDS)) &&
+    hasHeader(available, ROAD_FIELDS) &&
+    hasHeader(available, NUMBER_FIELDS);
   const hasCoordinates = hasHeader(available, X_FIELDS) && hasHeader(available, Y_FIELDS);
   if ((!hasAddress && !hasStructuredAddress) || !hasCoordinates) {
     throw new Error('Missing required doorplate headers');
@@ -76,8 +100,9 @@ function structuredAddress(row: DoorplateCsvRow): string | null {
   const exact = field(row, ADDRESS_FIELDS);
   if (exact) return exact;
 
-  const city = field(row, CITY_FIELDS);
-  const district = field(row, DISTRICT_FIELDS);
+  const city = field(row, CITY_FIELDS) ?? CITY_CODES[field(row, CITY_CODE_FIELDS) ?? ''];
+  const district = field(row, DISTRICT_FIELDS) ??
+    TAIPEI_DISTRICT_CODES[field(row, DISTRICT_CODE_FIELDS) ?? ''];
   const road = field(row, ROAD_FIELDS);
   const number = field(row, NUMBER_FIELDS);
   if (!city || !district || !road || !number) return null;
@@ -111,11 +136,12 @@ export function mapDoorplateRow(row: DoorplateCsvRow): DoorplatePoint | null {
 
   const address = normalizeTaiwanAddress(inputAddress);
   const indexedRoadKey = roadKey(address);
-  if (!address.district || address.number === null || !indexedRoadKey) return null;
+  const canonicalAddress = baseDoorplateKey(address);
+  if (!address.district || !indexedRoadKey || !canonicalAddress) return null;
 
   try {
     return {
-      canonicalAddress: address.canonical,
+      canonicalAddress,
       coordinate: twd97ToWgs84(x, y),
       district: address.district,
       roadKey: indexedRoadKey,
@@ -136,6 +162,7 @@ export async function buildDoorplateIndex(
   const byCanonicalAddress: Record<string, DoorplatePoint[]> = {};
   const byRoad: Record<string, DoorplatePoint[]> = {};
   const cells: Record<string, DoorplatePoint[]> = {};
+  const seen = new Set<string>();
   const parser = source.pipe(parse({
     bom: true,
     columns: (headers: string[]) => {
@@ -149,6 +176,9 @@ export async function buildDoorplateIndex(
   for await (const record of parser as AsyncIterable<DoorplateCsvRow>) {
     const point = mapDoorplateRow(record);
     if (!point) continue;
+    const pointKey = `${point.canonicalAddress}\0${point.coordinate.lat}\0${point.coordinate.lng}`;
+    if (seen.has(pointKey)) continue;
+    seen.add(pointKey);
 
     (byCanonicalAddress[point.canonicalAddress] ??= []).push(point);
     (byRoad[point.roadKey] ??= []).push(point);
@@ -218,7 +248,8 @@ export function locateAddress(index: DoorplateIndex, input: string): LocationEvi
     };
   }
 
-  const point = index.byCanonicalAddress[address.canonical]?.[0];
+  const baseKey = baseDoorplateKey(address);
+  const point = baseKey ? index.byCanonicalAddress[baseKey]?.[0] : undefined;
   if (!point) return unresolved(index, address.canonical);
   return {
     method: 'exact-doorplate',

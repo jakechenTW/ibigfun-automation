@@ -53,6 +53,33 @@ test('exact address resolves to one doorplate', async () => {
   assert.equal(result.confidence, 'high');
 });
 
+test('exact lookup uses a base doorplate key while retaining the normalized listing address', async () => {
+  const csv = [
+    '完整地址,坐標X,坐標Y',
+    '台北市文山區萬盛街89號之6,306940,2769625',
+  ].join('\n');
+  const index = await buildDoorplateIndex(Readable.from(`${csv}\n`), 'base-doorplate-key');
+
+  for (const input of [
+    '臺北市文山區萬盛街８９號之６七樓',
+    '臺北市文山區萬盛街８９之６號七樓',
+    '台北市文山區萬盛街89號之6',
+  ]) {
+    const result = locateAddress(index, input);
+    assert.equal(result.method, 'exact-doorplate', input);
+    assert.equal(result.matchedAddress, '台北市文山區萬盛街89號之6', input);
+    assert.equal(result.normalizedAddress, input.normalize('NFKC').replaceAll('臺', '台'), input);
+  }
+
+  for (const input of [
+    '台北市萬盛街89號之6',
+    '台北市文山區萬盛街89號',
+    '台北市文山區萬盛街1巷89號之6',
+  ]) {
+    assert.equal(locateAddress(index, input).method, 'unresolved', input);
+  }
+});
+
 test('masked range returns centroid and covering uncertainty', async () => {
   const index = await fixtureIndex();
   const result = locateAddress(index, '台北市中正區測試路1段1~30號');
@@ -86,6 +113,56 @@ test('row mapping retains only structurally complete TWD97 doorplates', async ()
       '台北市中正區測試路1段9號',
     ],
   );
+});
+
+test('maps the current official code-based doorplate schema to Taipei district names', async () => {
+  const districts = [
+    ['63000010', '松山區'],
+    ['63000020', '信義區'],
+    ['63000030', '大安區'],
+    ['63000040', '中山區'],
+    ['63000050', '中正區'],
+    ['63000060', '大同區'],
+    ['63000070', '萬華區'],
+    ['63000080', '文山區'],
+    ['63000090', '南港區'],
+    ['63000100', '內湖區'],
+    ['63000110', '士林區'],
+    ['63000120', '北投區'],
+  ];
+  const csv = [
+    '省市縣市代碼,鄉鎮市區代碼,村里,鄰,街路段,地區,巷,弄,號,橫座標,縱座標',
+    ...districts.map(([code], index) =>
+      `63000,${code},測試里,001,測試路,,,,${index + 1}號,306940,2769625`),
+  ].join('\n');
+
+  const index = await buildDoorplateIndex(Readable.from(`${csv}\n`), 'official-code-schema');
+
+  assert.deepEqual(
+    Object.values(index.byRoad).flat().map((point) => point.district).sort(),
+    districts.map(([, district]) => district).sort(),
+  );
+  assert.equal(
+    index.byCanonicalAddress['台北市松山區測試路1號']?.[0]?.district,
+    '松山區',
+  );
+});
+
+test('collapses floor-specific official rows into one base doorplate point', async () => {
+  const csv = [
+    '省市縣市代碼,鄉鎮市區代碼,村里,鄰,街路段,地區,巷,弄,號,橫座標,縱座標',
+    '63000,63000010,三民里,002,三民路,,,,９１號,306847.966,2772208.374',
+    '63000,63000010,三民里,002,三民路,,,,９１號二樓,306847.966,2772208.374',
+    '63000,63000010,三民里,002,三民路,,,,９１號三樓,306847.966,2772208.374',
+    '63000,63000010,三民里,002,三民路,,,,９１號四樓,306847.966,2772208.374',
+  ].join('\n');
+
+  const index = await buildDoorplateIndex(Readable.from(`${csv}\n`), 'floor-duplicates');
+
+  assert.deepEqual(Object.keys(index.byCanonicalAddress), ['台北市松山區三民路91號']);
+  assert.equal(index.byCanonicalAddress['台北市松山區三民路91號']?.length, 1);
+  assert.equal(index.byRoad['台北市松山區三民路']?.length, 1);
+  assert.equal(Object.values(index.cells).flat().length, 1);
 });
 
 test('serializes the same index when the source rows arrive in a different order', async () => {

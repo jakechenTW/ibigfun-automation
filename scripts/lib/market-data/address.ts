@@ -65,6 +65,17 @@ export function parseDoorNumberRange(token: string): { min: number; max: number 
   return min !== null && max !== null && min <= max ? { min, max } : null;
 }
 
+/** Returns the index key for a complete doorplate, excluding floor and unit suffixes. */
+export function baseDoorplateKey(address: NormalizedAddress): string | null {
+  if (!address.city || !address.district || !address.road || address.number === null) return null;
+  return `${address.city}${address.district}${address.road}` +
+    `${address.section === null ? '' : `${address.section}段`}` +
+    `${address.lane === null ? '' : `${address.lane}巷`}` +
+    `${address.alley === null ? '' : `${address.alley}弄`}` +
+    `${address.number}號` +
+    `${address.subNumber === null ? '' : `之${address.subNumber}`}`;
+}
+
 /**
  * Normalizes the address components used by the Taipei doorplate index without
  * guessing components from arbitrary marketing text.
@@ -98,9 +109,9 @@ export function normalizeTaiwanAddress(input: string): NormalizedAddress {
   if (alleyMatch) remainder = remainder.slice(alleyMatch[0].length);
 
   const numberRange = parseDoorNumberRange(remainder);
-  const numberMatch = numberRange ? null : /^(\d+)號(?:之(\d+))?/.exec(remainder);
+  const numberMatch = numberRange ? null : /^(\d+)(?:號(?:之(\d+))?|之(\d+)號)/.exec(remainder);
   const number = parsePositiveNumber(numberMatch?.[1]);
-  const subNumber = parsePositiveNumber(numberMatch?.[2]);
+  const subNumber = parsePositiveNumber(numberMatch?.[2] ?? numberMatch?.[3]);
 
   return {
     canonical,
