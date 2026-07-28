@@ -27,6 +27,7 @@ import {
   evaluateTaipeiMarketDataCandidate,
   type CandidateEvaluation,
   type EvaluateTaipeiMarketDataCandidateOptions,
+  withMarketDataLock,
 } from './lib/market-data/update.ts';
 
 const SUPPORTED_CITY = 'taipei';
@@ -41,6 +42,14 @@ export interface MarketDataCommandDependencies {
   candidateEvaluator?: (
     options: EvaluateTaipeiMarketDataCandidateOptions,
   ) => Promise<CandidateEvaluation>;
+  /** Narrow test seam for deterministic backtest/update lock sequencing. */
+  backtest?: {
+    root?: string;
+    lock?: typeof withMarketDataLock;
+    load?: typeof loadMarketData;
+    evaluate?: typeof backtestTransactions;
+    persistAcceptance?: typeof writeBacktestAcceptance;
+  };
 }
 
 function readFlagValue(args: readonly string[], index: number, flag: string): [string, number] {
@@ -150,19 +159,35 @@ async function update(asOf: string): Promise<number> {
   return marketUpdateExitCode(bundle.refresh?.status);
 }
 
-async function backtest(command: Extract<MarketDataCommand, { command: 'backtest' }>, now: Date): Promise<number> {
-  // Deliberately load-only: a backtest must not refresh, publish, or otherwise mutate the active build.
-  const bundle = await loadMarketData(MARKET_DATA_ROOT);
-  if (!bundle) throw new Error(`No validated Taipei market-data build at ${MARKET_DATA_ROOT}; run update first`);
-  const policy = estimatorPolicyById(command.policyId);
-  const report = backtestTransactions(bundle.transactions, { asOf: command.asOf, policy });
-  const gate = evaluateBacktestGate(report);
-  const exitCode = backtestExitCode(report, command.noGate);
-  if (shouldPersistBacktestAcceptance(report, command.noGate)) {
-    const checksum = transactionArtifactChecksum(bundle.manifest);
-    if (!checksum) throw new Error('Active build lacks transactions-index.json checksum');
-    await writeBacktestAcceptance(MARKET_DATA_ROOT, backtestAcceptance(report, checksum, now.toISOString()));
-  }
+async function backtest(
+  command: Extract<MarketDataCommand, { command: 'backtest' }>,
+  now: Date,
+  dependencies: NonNullable<MarketDataCommandDependencies['backtest']> = {},
+): Promise<number> {
+  const root = dependencies.root ?? MARKET_DATA_ROOT;
+  const lock = dependencies.lock ?? withMarketDataLock;
+  const result = await lock(root, async () => {
+    // Read-only diagnostic backtests still share the refresh lock but never persist.
+    const bundle = await (dependencies.load ?? loadMarketData)(root);
+    if (!bundle) throw new Error(`No validated Taipei market-data build at ${root}; run update first`);
+    const policy = estimatorPolicyById(command.policyId);
+    const report = (dependencies.evaluate ?? backtestTransactions)(
+      bundle.transactions,
+      { asOf: command.asOf, policy },
+    );
+    const gate = evaluateBacktestGate(report);
+    const exitCode = backtestExitCode(report, command.noGate);
+    if (shouldPersistBacktestAcceptance(report, command.noGate)) {
+      const checksum = transactionArtifactChecksum(bundle.manifest);
+      if (!checksum) throw new Error('Active build lacks transactions-index.json checksum');
+      await (dependencies.persistAcceptance ?? writeBacktestAcceptance)(
+        root,
+        backtestAcceptance(report, checksum, now.toISOString()),
+      );
+    }
+    return { report, gate, exitCode };
+  });
+  const { report, gate, exitCode } = result;
   process.stdout.write(`${JSON.stringify({ ...report, acceptanceGate: gate }, null, 2)}\n`);
   process.stderr.write(
     `backtest cases=${report.overall.caseCount} coverage=${percent(report.overall.estimateCoverage)} ` +
@@ -207,7 +232,7 @@ export async function runMarketDataCommand(
   if (command.command === 'candidate') {
     return candidate(command, dependencies.candidateEvaluator ?? evaluateTaipeiMarketDataCandidate);
   }
-  return backtest(command, now);
+  return backtest(command, now, dependencies.backtest);
 }
 
 async function main(): Promise<void> {

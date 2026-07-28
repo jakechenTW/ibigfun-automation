@@ -236,6 +236,37 @@ test('acceptance publication failure restores the old build and acceptance pair'
   assert.equal(marketDataBacktestAccepted(restored!), true);
 });
 
+test('acceptance publication failure restores an absent old acceptance', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-'));
+  const active = join(parent, 'taipei');
+  const stage = join(parent, '.taipei-staging-next');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(active, 'good-build');
+  await writeBuild(stage, 'next-build');
+  const acceptancePath = backtestAcceptancePath(active);
+
+  await assert.rejects(
+    async () => publishStagedBuildWithAcceptance(active, stage, await passingAcceptance(stage), {
+      minDoorplates: 1,
+      minTransactions: 0,
+      publicationFileOps: {
+        rename: async (from, to) => {
+          if (to === acceptancePath && from !== stage) {
+            throw new Error('injected acceptance publication failure');
+          }
+          await rename(from, to);
+        },
+      },
+    }),
+    /injected acceptance publication failure/,
+  );
+
+  const restored = await loadMarketData(active, { minDoorplates: 1, minTransactions: 0 });
+  assert.equal(restored?.manifest.buildId, 'good-build');
+  assert.equal(restored?.backtestAcceptance, undefined);
+  await assert.rejects(() => readFile(acceptancePath), { code: 'ENOENT' });
+});
+
 test('transaction checksum mismatch is rejected before any publication rename', async (t) => {
   const parent = await mkdtemp(join(tmpdir(), 'market-store-'));
   const active = join(parent, 'taipei');
@@ -314,6 +345,38 @@ test('successful transactional publication removes candidate and backup paths', 
     (await readdir(parent)).sort(),
     ['taipei', 'taipei-backtest-acceptance.json'],
   );
+});
+
+test('backup cleanup failure preserves the committed new accepted pair', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-'));
+  const active = join(parent, 'taipei');
+  const stage = join(parent, '.taipei-staging-next');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(active, 'good-build');
+  await writeBacktestAcceptance(active, await passingAcceptance(active));
+  await writeBuild(stage, 'next-build');
+
+  const published = await publishStagedBuildWithAcceptance(
+    active,
+    stage,
+    await passingAcceptance(stage),
+    {
+      minDoorplates: 1,
+      minTransactions: 0,
+      publicationFileOps: {
+        rm: async (file, options) => {
+          if (file.includes('.taipei-backup-')) throw new Error('injected backup cleanup failure');
+          await rm(file, options);
+        },
+      },
+    },
+  );
+
+  const loaded = await loadMarketData(active, { minDoorplates: 1, minTransactions: 0 });
+  assert.equal(published.manifest.buildId, 'next-build');
+  assert.equal(loaded?.manifest.buildId, 'next-build');
+  assert.equal(marketDataBacktestAccepted(loaded!), true);
+  assert.equal((await readdir(parent)).some((entry) => entry.startsWith('.taipei-backup-')), true);
 });
 
 test('load rejects unsorted cells, out-of-bounds points, and checksum drift', async (t) => {

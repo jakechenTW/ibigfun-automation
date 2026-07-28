@@ -9,8 +9,58 @@ import {
   runMarketDataCommand,
   shouldPersistBacktestAcceptance,
 } from '../../market-data.ts';
-import { backtestTransactions } from './backtest.ts';
-import type { TransactionIndex } from './types.ts';
+import { backtestTransactions, type BacktestReport } from './backtest.ts';
+import type { BacktestAcceptance, MarketDataBundle, TransactionIndex } from './types.ts';
+
+function passingBacktestReport(index: TransactionIndex): BacktestReport {
+  const report = backtestTransactions(index, { asOf: '2026-07-25' });
+  const metric = (values: Partial<BacktestReport['overall']> = {}): BacktestReport['overall'] => ({
+    caseCount: 25,
+    estimatedCount: 20,
+    estimateCoverage: 0.8,
+    medianApe: 0.08,
+    p75Ape: 0.16,
+    bias: 0,
+    intervalCoverage: 0.5,
+    ...values,
+  });
+  return {
+    ...report,
+    latestEligibleTransactionDate: '2025-12-01',
+    overall: metric(),
+    byStatus: {
+      reliable: metric(),
+      review: metric({
+        caseCount: 0, estimatedCount: 0, estimateCoverage: 0,
+        medianApe: null, p75Ape: null,
+      }),
+      unavailable: metric({
+        caseCount: 0, estimatedCount: 0, estimateCoverage: 0,
+        medianApe: null, p75Ape: null,
+      }),
+    },
+    byConfidence: {
+      ...report.byConfidence,
+      high: metric({ medianApe: 0.08 }),
+      medium: metric({ medianApe: 0.10 }),
+    },
+  };
+}
+
+function deterministicLock(): <T>(root: string, operation: () => Promise<T>) => Promise<T> {
+  let held = false;
+  const waiters: Array<() => void> = [];
+  return async <T>(_root: string, operation: () => Promise<T>): Promise<T> => {
+    if (held) await new Promise<void>((resolve) => waiters.push(resolve));
+    held = true;
+    try {
+      return await operation();
+    } finally {
+      held = false;
+      waiters.shift()?.();
+    }
+  };
+}
 
 test('backtest CLI accepts each explicit estimator policy', () => {
   for (const policy of ['baseline', '48-month', '1000-meter'] as const) {
@@ -149,4 +199,108 @@ test('non-active diagnostic policy cannot persist canonical acceptance', () => {
   };
 
   assert.equal(shouldPersistBacktestAcceptance(passingDiagnostic, false), false);
+});
+
+test('backtest acceptance writer cannot race a locked update into a stale final pair', async () => {
+  const emptyIndex: TransactionIndex = {
+    schemaVersion: 2,
+    datasetVersion: 'old-transactions',
+    builtAt: '2026-07-25T00:00:00.000Z',
+    cells: {},
+  };
+  const oldBundle: MarketDataBundle = {
+    manifest: {
+      schemaVersion: 2,
+      buildId: 'old-build',
+      builtAt: '2026-07-25T00:00:00.000Z',
+      doorplates: {
+        sourceUrl: 'https://example.test/doorplates.csv',
+        publishedAt: null,
+        checkedAt: '2026-07-25T00:00:00.000Z',
+        sha256: 'old-doorplates',
+        recordCount: 0,
+      },
+      transactions: {
+        sourceUrls: ['https://example.test/transactions.zip'],
+        publishedAt: null,
+        checkedAt: '2026-07-25T00:00:00.000Z',
+        sha256: 'old-transactions',
+        recordCount: 0,
+        normalization: {
+          rawRows: 0,
+          reliableEligible: 0,
+          reviewOnly: 0,
+          excluded: 0,
+          excludedByReason: {},
+        },
+      },
+      lastFailure: null,
+      artifacts: {
+        'transactions-index.json': { sha256: 'old-checksum', bytes: 1 },
+      },
+    },
+    doorplates: {
+      schemaVersion: 2,
+      datasetVersion: 'old-doorplates',
+      byCanonicalAddress: {},
+      byRoad: {},
+      cells: {},
+    },
+    transactions: emptyIndex,
+  };
+  const queueLock = deterministicLock();
+  let criticalSectionDepth = 0;
+  const lock = async <T>(root: string, operation: () => Promise<T>): Promise<T> =>
+    queueLock(root, async () => {
+      criticalSectionDepth += 1;
+      try {
+        return await operation();
+      } finally {
+        criticalSectionDepth -= 1;
+      }
+    });
+  let finalPair = { buildChecksum: 'old-checksum', acceptanceChecksum: 'old-checksum' };
+  let releaseWriter!: () => void;
+  let writerReached!: () => void;
+  const writerCanFinish = new Promise<void>((resolve) => { releaseWriter = resolve; });
+  const writerStarted = new Promise<void>((resolve) => { writerReached = resolve; });
+
+  const backtestRun = runMarketDataCommand(
+    ['backtest', '--city', 'taipei'],
+    new Date('2026-07-26T01:00:00.000Z'),
+    {
+      backtest: {
+        lock,
+        load: async () => {
+          assert.equal(criticalSectionDepth, 1);
+          return oldBundle;
+        },
+        evaluate: () => {
+          assert.equal(criticalSectionDepth, 1);
+          return passingBacktestReport(emptyIndex);
+        },
+        persistAcceptance: async (_root: string, acceptance: BacktestAcceptance) => {
+          assert.equal(criticalSectionDepth, 1);
+          writerReached();
+          await writerCanFinish;
+          finalPair = {
+            ...finalPair,
+            acceptanceChecksum: acceptance.transactionArtifactSha256,
+          };
+        },
+      },
+    },
+  );
+  await writerStarted;
+
+  const updatePublication = lock('ignored-by-test-lock', async () => {
+    finalPair = { buildChecksum: 'new-checksum', acceptanceChecksum: 'new-checksum' };
+  });
+  releaseWriter();
+  await Promise.all([backtestRun, updatePublication]);
+
+  assert.deepEqual(finalPair, {
+    buildChecksum: 'new-checksum',
+    acceptanceChecksum: 'new-checksum',
+  });
 });

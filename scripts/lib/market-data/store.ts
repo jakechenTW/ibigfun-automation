@@ -39,7 +39,7 @@ export interface PublishOptions {
   readerRetries?: number;
   readerRetryDelayMs?: number;
   /** @internal Narrow file-operation seam for publication failure/window tests. */
-  publicationFileOps?: Pick<PublicationFileOps, 'rename'>;
+  publicationFileOps?: Partial<Pick<PublicationFileOps, 'rename' | 'rm'>>;
 }
 
 const publicationFileOps: PublicationFileOps = {
@@ -478,6 +478,7 @@ async function publishAcceptedBuild(
   let oldAcceptance: Buffer | null = null;
   let movedActive = false;
   let activatedStage = false;
+  let published!: MarketDataBundle;
 
   try {
     await ops.writeFile(acceptanceCandidate, Buffer.from(`${stableJson(acceptance)}\n`));
@@ -492,15 +493,14 @@ async function publishAcceptedBuild(
     activatedStage = true;
     await ops.rename(acceptanceCandidate, acceptanceTarget);
 
-    const published = await loadMarketData(activeRoot, options);
-    if (!published
-        || published.manifest.buildId !== staged.manifest.buildId
-        || !published.backtestAcceptance
-        || !marketDataBacktestAccepted(published)) {
+    const loaded = await loadMarketData(activeRoot, options);
+    if (!loaded
+        || loaded.manifest.buildId !== staged.manifest.buildId
+        || !loaded.backtestAcceptance
+        || !marketDataBacktestAccepted(loaded)) {
       throw new Error('Published market-data build and acceptance pair failed validation');
     }
-    if (movedActive) await ops.rm(backupRoot, { recursive: true, force: false });
-    return published;
+    published = loaded;
   } catch (publicationError) {
     try {
       if (activatedStage) await ops.rename(activeRoot, failedRoot);
@@ -521,6 +521,13 @@ async function publishAcceptedBuild(
     }
     throw publicationError;
   }
+
+  // Pair validation is the commit point. Cleanup must never turn a committed
+  // new pair into a rollback from a partially removed recovery backup.
+  if (movedActive) {
+    try { await ops.rm(backupRoot, { recursive: true, force: false }); } catch { /* recoverable backup retained */ }
+  }
+  return published;
 }
 
 /**
