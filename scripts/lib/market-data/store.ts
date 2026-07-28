@@ -103,10 +103,15 @@ function validateTransactionBuildDiagnostics(
     throw new Error('Transaction normalization diagnostics lack exclusion reasons');
   }
   const reasons = Object.keys(value.excludedByReason);
+  const excludedReasonCount = reasons.reduce(
+    (total, reason) => total + (value.excludedByReason[reason] ?? 0),
+    0,
+  );
   if (reasons.some((reason) => !reason
       || !Number.isSafeInteger(value.excludedByReason[reason])
       || value.excludedByReason[reason]! <= 0)
-    || reasons.join('\n') !== [...reasons].sort(compareStableText).join('\n')) {
+    || reasons.join('\n') !== [...reasons].sort(compareStableText).join('\n')
+    || excludedReasonCount !== value.excluded) {
     throw new Error('Transaction normalization exclusion reasons are invalid or unstable');
   }
 }

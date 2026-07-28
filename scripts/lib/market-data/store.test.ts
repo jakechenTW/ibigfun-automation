@@ -181,6 +181,60 @@ test('load rejects inconsistent or unstably ordered normalization diagnostics', 
   };
   await writeFile(join(unsorted, 'manifest.json'), JSON.stringify(unsortedManifest));
   assert.equal(await loadMarketData(unsorted, { minDoorplates: 0, minTransactions: 0 }), null);
+
+  const zeroExcludedWithReason = join(parent, 'zero-excluded-with-reason');
+  await writeBuild(zeroExcludedWithReason, 'zero-excluded-with-reason');
+  const zeroExcludedManifest = JSON.parse(
+    await readFile(join(zeroExcludedWithReason, 'manifest.json'), 'utf8'),
+  ) as MarketDataManifest;
+  zeroExcludedManifest.transactions.normalization.excludedByReason = { bogus: 99 };
+  await writeFile(
+    join(zeroExcludedWithReason, 'manifest.json'),
+    JSON.stringify(zeroExcludedManifest),
+  );
+  assert.equal(
+    await loadMarketData(zeroExcludedWithReason, { minDoorplates: 0, minTransactions: 0 }),
+    null,
+  );
+
+  const inconsistentReasons = join(parent, 'inconsistent-reasons');
+  await writeBuild(inconsistentReasons, 'inconsistent-reasons');
+  const inconsistentReasonsManifest = JSON.parse(
+    await readFile(join(inconsistentReasons, 'manifest.json'), 'utf8'),
+  ) as MarketDataManifest;
+  inconsistentReasonsManifest.transactions.normalization = {
+    rawRows: 3,
+    reliableEligible: 1,
+    reviewOnly: 0,
+    excluded: 2,
+    excludedByReason: { alpha: 1 },
+  };
+  await writeFile(
+    join(inconsistentReasons, 'manifest.json'),
+    JSON.stringify(inconsistentReasonsManifest),
+  );
+  assert.equal(
+    await loadMarketData(inconsistentReasons, { minDoorplates: 0, minTransactions: 0 }),
+    null,
+  );
+
+  const valid = join(parent, 'valid');
+  await writeBuild(valid, 'valid-diagnostics');
+  const validManifest = JSON.parse(
+    await readFile(join(valid, 'manifest.json'), 'utf8'),
+  ) as MarketDataManifest;
+  validManifest.transactions.normalization = {
+    rawRows: 3,
+    reliableEligible: 1,
+    reviewOnly: 0,
+    excluded: 2,
+    excludedByReason: { alpha: 1, zeta: 1 },
+  };
+  await writeFile(join(valid, 'manifest.json'), JSON.stringify(validManifest));
+  assert.equal(
+    (await loadMarketData(valid, { minDoorplates: 0, minTransactions: 0 }))?.manifest.buildId,
+    'valid-diagnostics',
+  );
 });
 
 test('external diagnostics leave the active build valid while undeclared internal files fail closed', async (t) => {

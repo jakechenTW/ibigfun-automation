@@ -50,7 +50,9 @@ export interface EnsureTaipeiMarketDataOptions {
   lockTimeoutMs?: number;
   lockStaleMs?: number;
   lockPollMs?: number;
+  /** Test seam may reject or throw, but cannot override the production gate. */
   gateEvaluator?: (report: BacktestReport) => BacktestGateResult;
+  publisher?: typeof publishStagedBuild;
 }
 
 export interface CandidateEvaluation {
@@ -204,9 +206,9 @@ async function addTransactionCsv(
     diagnostics.rawRows += 1;
     if (normalized.kind === 'excluded') {
       diagnostics.excluded += 1;
-      for (const reason of normalized.reasons) {
-        diagnostics.excludedByReason[reason] = (diagnostics.excludedByReason[reason] ?? 0) + 1;
-      }
+      const primaryReason = normalized.reasons[0] ?? 'unspecified';
+      diagnostics.excludedByReason[primaryReason] =
+        (diagnostics.excludedByReason[primaryReason] ?? 0) + 1;
       continue;
     }
     (cells[gridKey(normalized.transaction.location.coordinate!)] ??= []).push(normalized.transaction);
@@ -428,9 +430,10 @@ async function ensureTaipeiMarketDataUnlocked(
       asOf: options.asOf,
       policy: execution.policy,
     });
-    const gateEvaluator = options.gateEvaluator ?? evaluateBacktestGate;
-    const gate = gateEvaluator(report);
-    const acceptance = gate.passed && evaluateBacktestGate(report).passed
+    const productionGate = evaluateBacktestGate(report);
+    const injectedGate = options.gateEvaluator?.(report);
+    const gate = injectedGate && !injectedGate.passed ? injectedGate : productionGate;
+    const acceptance = gate.passed && productionGate.passed
       ? backtestAcceptance(report, transactionArtifactSha256, builtAt)
       : null;
     const evaluation: CandidateEvaluation = {
@@ -448,17 +451,22 @@ async function ensureTaipeiMarketDataUnlocked(
       stage = null;
       return null;
     }
+    if (!acceptance) {
+      throw new Error('candidate backtest passed without a production acceptance');
+    }
     if (!execution.publish) {
       await fs.rm(stage, { recursive: true, force: true });
       stage = null;
       return null;
     }
-    const published = await publishStagedBuild(root, stage, { minDoorplates: options.minDoorplates, minTransactions: options.minTransactions });
+    const publisher = options.publisher ?? publishStagedBuild;
+    const published = await publisher(root, stage, {
+      minDoorplates: options.minDoorplates,
+      minTransactions: options.minTransactions,
+    });
     stage = null;
-    if (acceptance) {
-      await writeBacktestAcceptance(root, acceptance);
-      published.backtestAcceptance = acceptance;
-    }
+    await writeBacktestAcceptance(root, acceptance);
+    published.backtestAcceptance = acceptance;
     published.refresh = { status: 'updated' };
     log(options.logger, 'info', 'market-data.updated', 'published a validated Taipei market-data build', { buildId: published.manifest.buildId });
     return published;

@@ -12,6 +12,23 @@ import type { MarketDataManifest } from './types.ts';
 
 const PASSING_GATE: BacktestGateResult = { passed: true, complete: true, reasons: [] };
 
+function productionPassingTransactionCsv(base: Buffer): Buffer {
+  const rows = base.toString('utf8').trimEnd().split('\n');
+  const transactionRows: string[] = [];
+  for (let day = 0; day < 36; day += 1) {
+    const date = new Date(Date.UTC(2025, 0, 1 + day));
+    const rocDate = `${date.getUTCFullYear() - 1911}${String(date.getUTCMonth() + 1).padStart(2, '0')}${String(date.getUTCDate()).padStart(2, '0')}`;
+    transactionRows.push(
+      `房地(土地+建物),台北市中正區測試路1段10號,${rocDate},五層,十層,華廈(10層含以下有電梯),1000101,100,30000000,300000,無車位,0,0,住家用,土地1建物1車位0,有,,G-H-${day}`,
+    );
+    const totalPrice = [27_000_000, 30_000_000, 33_000_000][day % 3]!;
+    transactionRows.push(
+      `房地(土地+建物),台北市中正區測試路1段10號,${rocDate},三層,五層,公寓(5樓含以下無電梯),0900101,100,${totalPrice},${totalPrice / 100},無車位,0,0,住家用,土地1建物1車位0,無,,G-M-${day}`,
+    );
+  }
+  return Buffer.from([...rows, ...transactionRows].join('\n'));
+}
+
 async function seedValidBuild(root: string): Promise<void> {
   await mkdir(join(root, 'raw'), { recursive: true });
   await writeFile(join(root, 'raw', 'source.csv'), 'fixture\n');
@@ -73,6 +90,8 @@ test('bootstrap skips an unpublished current season but publishes the completed 
   t.after(() => rm(join(rootPath, '..'), { recursive: true, force: true }));
   const doorplateCsv = await readFile(fileURLToPath(new URL('./fixtures/doorplates.csv', import.meta.url)));
   const transactionCsv = await readFile(fileURLToPath(new URL('./fixtures/transactions.csv', import.meta.url)));
+  const passingTransactionCsv = productionPassingTransactionCsv(transactionCsv);
+  const nonDataOnlyCsv = Buffer.from(transactionCsv.toString('utf8').split('\n').slice(0, 2).join('\n'));
   const detail = '<a href="https://example.test/resource.download?rid=one&amp;fileName=doorplates.csv">doorplates.csv</a>';
   const events: string[] = [];
   const bundle = await ensureTaipeiMarketData({
@@ -85,9 +104,11 @@ test('bootstrap skips an unpublished current season but publishes the completed 
     },
     openZip: async (file) => {
       if (file.endsWith('/115S3.zip')) throw new Error('FILE_ENDED');
-      return [{ path: 'a_lvr_land_a.csv', stream: () => Readable.from(transactionCsv) }];
+      return [{
+        path: 'a_lvr_land_a.csv',
+        stream: () => Readable.from(file.endsWith('/115S2.zip') ? passingTransactionCsv : nonDataOnlyCsv),
+      }];
     },
-    gateEvaluator: () => PASSING_GATE,
     logger: { event: (_level, event) => events.push(event) },
   });
 
@@ -109,6 +130,7 @@ test('candidate manifest records aggregate normalization diagnostics without row
   t.after(() => rm(join(rootPath, '..'), { recursive: true, force: true }));
   const doorplateCsv = await readFile(fileURLToPath(new URL('./fixtures/doorplates.csv', import.meta.url)));
   const transactionCsv = await readFile(fileURLToPath(new URL('./fixtures/transactions.csv', import.meta.url)));
+  const passingTransactionCsv = productionPassingTransactionCsv(transactionCsv);
   const nonDataOnlyCsv = Buffer.from(transactionCsv.toString('utf8').split('\n').slice(0, 2).join('\n'));
   const detail = '<a href="https://example.test/resource.download?rid=one&amp;fileName=doorplates.csv">doorplates.csv</a>';
   const bundle = await ensureTaipeiMarketData({
@@ -120,14 +142,13 @@ test('candidate manifest records aggregate normalization diagnostics without row
         : new Response('synthetic zip'),
     openZip: async (file) => [{
       path: 'a_lvr_land_a.csv',
-      stream: () => Readable.from(file.endsWith('/115S2.zip') ? transactionCsv : nonDataOnlyCsv),
+      stream: () => Readable.from(file.endsWith('/115S2.zip') ? passingTransactionCsv : nonDataOnlyCsv),
     }],
-    gateEvaluator: () => PASSING_GATE,
   });
 
   assert.deepEqual(bundle?.manifest.transactions.normalization, {
-    rawRows: 3,
-    reliableEligible: 1,
+    rawRows: 75,
+    reliableEligible: 73,
     reviewOnly: 1,
     excluded: 1,
     excludedByReason: { 'non-residential-primary-use': 1 },
@@ -178,11 +199,69 @@ test('candidate gate failure without an active build returns null', async (t) =>
   assert.equal(bundle, null);
 });
 
+test('injected passing gate cannot publish a production-gate failure over an active build', async (t) => {
+  const rootPath = join(await mkdtemp(join(tmpdir(), 'market-update-')), 'taipei');
+  t.after(() => rm(join(rootPath, '..'), { recursive: true, force: true }));
+  await seedValidBuild(rootPath);
+  const activeManifest = await readFile(join(rootPath, 'manifest.json'), 'utf8');
+  const doorplateCsv = await readFile(fileURLToPath(new URL('./fixtures/doorplates.csv', import.meta.url)));
+  const transactionCsv = await readFile(fileURLToPath(new URL('./fixtures/transactions.csv', import.meta.url)));
+  const detail = '<a href="https://example.test/resource.download?rid=one&amp;fileName=doorplates.csv">doorplates.csv</a>';
+  let publisherCalls = 0;
+  const bundle = await ensureTaipeiMarketData({
+    asOf: '2026-07-25', rootPath, minDoorplates: 1, minTransactions: 1,
+    fetch: async (input) => String(input).includes('dataset/detail')
+      ? new Response(detail)
+      : String(input).includes('resource.download')
+        ? new Response(doorplateCsv)
+        : new Response('synthetic zip'),
+    openZip: async () => [{ path: 'a_lvr_land_a.csv', stream: () => Readable.from(transactionCsv) }],
+    gateEvaluator: () => PASSING_GATE,
+    publisher: async () => {
+      publisherCalls += 1;
+      throw new Error('publisher must not run without acceptance');
+    },
+  });
+
+  assert.equal(bundle?.refresh?.status, 'last-known-good');
+  assert.match(bundle?.refresh?.failure ?? '', /candidate backtest failed|acceptance/i);
+  assert.equal(publisherCalls, 0);
+  assert.equal(await readFile(join(rootPath, 'manifest.json'), 'utf8'), activeManifest);
+});
+
+test('injected passing gate cannot bootstrap a production-gate failure without acceptance', async (t) => {
+  const rootPath = join(await mkdtemp(join(tmpdir(), 'market-update-')), 'taipei');
+  t.after(() => rm(join(rootPath, '..'), { recursive: true, force: true }));
+  const doorplateCsv = await readFile(fileURLToPath(new URL('./fixtures/doorplates.csv', import.meta.url)));
+  const transactionCsv = await readFile(fileURLToPath(new URL('./fixtures/transactions.csv', import.meta.url)));
+  const detail = '<a href="https://example.test/resource.download?rid=one&amp;fileName=doorplates.csv">doorplates.csv</a>';
+  let publisherCalls = 0;
+  const bundle = await ensureTaipeiMarketData({
+    asOf: '2026-07-25', rootPath, minDoorplates: 1, minTransactions: 1,
+    fetch: async (input) => String(input).includes('dataset/detail')
+      ? new Response(detail)
+      : String(input).includes('resource.download')
+        ? new Response(doorplateCsv)
+        : new Response('synthetic zip'),
+    openZip: async () => [{ path: 'a_lvr_land_a.csv', stream: () => Readable.from(transactionCsv) }],
+    gateEvaluator: () => PASSING_GATE,
+    publisher: async () => {
+      publisherCalls += 1;
+      throw new Error('publisher must not run without acceptance');
+    },
+  });
+
+  assert.equal(bundle, null);
+  assert.equal(publisherCalls, 0);
+});
+
 test('unchanged conditional refresh keeps build and index checksums while advancing checkedAt', async (t) => {
   const rootPath = join(await mkdtemp(join(tmpdir(), 'market-update-')), 'taipei');
   t.after(() => rm(join(rootPath, '..'), { recursive: true, force: true }));
   const doorplateCsv = await readFile(fileURLToPath(new URL('./fixtures/doorplates.csv', import.meta.url)));
   const transactionCsv = await readFile(fileURLToPath(new URL('./fixtures/transactions.csv', import.meta.url)));
+  const passingTransactionCsv = productionPassingTransactionCsv(transactionCsv);
+  const nonDataOnlyCsv = Buffer.from(transactionCsv.toString('utf8').split('\n').slice(0, 2).join('\n'));
   const detail = '<a href="https://example.test/resource.download?rid=one&amp;fileName=doorplates.csv">doorplates.csv</a><time datetime="2026-07-02T09:47:33+08:00"></time>';
   let repeat = false;
   let concurrentChange = false;
@@ -215,8 +294,10 @@ test('unchanged conditional refresh keeps build and index checksums while advanc
   const first = await ensureTaipeiMarketData({
     asOf: '2026-07-25', rootPath, minDoorplates: 1, minTransactions: 1,
     fetch: fakeFetch, clock: () => new Date('2026-07-25T01:00:00.000Z'),
-    openZip: async () => [{ path: 'a_lvr_land_a.csv', stream: () => Readable.from(transactionCsv) }],
-    gateEvaluator: () => PASSING_GATE,
+    openZip: async (file) => [{
+      path: 'a_lvr_land_a.csv',
+      stream: () => Readable.from(file.endsWith('/115S2.zip') ? passingTransactionCsv : nonDataOnlyCsv),
+    }],
     logger: { event: (_level, event) => events.push(event) },
   });
   assert.equal(first?.refresh?.status, 'updated');
@@ -250,7 +331,6 @@ test('unchanged conditional refresh keeps build and index checksums while advanc
     asOf: '2026-07-25', rootPath, minDoorplates: 1, minTransactions: 1,
     fetch: fakeFetch, clock: () => new Date('2026-07-27T01:00:00.000Z'),
     openZip: async () => { throw new Error('conditionally unchanged ZIP must not be opened'); },
-    gateEvaluator: () => PASSING_GATE,
   };
   const concurrent = await Promise.all([
     ensureTaipeiMarketData(concurrentOptions),
