@@ -26,12 +26,28 @@ import type {
 
 const TAIPEI_BOUNDS = { minLat: 24.7, maxLat: 25.4, minLng: 121.2, maxLng: 121.9 };
 
+interface PublicationFileOps {
+  rename(from: string, to: string): Promise<void>;
+  rm(file: string, options?: { recursive?: boolean; force?: boolean }): Promise<void>;
+  readFile(file: string): Promise<Buffer>;
+  writeFile(file: string, data: Uint8Array): Promise<void>;
+}
+
 export interface PublishOptions {
   minDoorplates?: number;
   minTransactions?: number;
   readerRetries?: number;
   readerRetryDelayMs?: number;
+  /** @internal Narrow file-operation seam for publication failure/window tests. */
+  publicationFileOps?: Pick<PublicationFileOps, 'rename'>;
 }
+
+const publicationFileOps: PublicationFileOps = {
+  rename: (from, to) => fsp.rename(from, to),
+  rm: (file, options) => fsp.rm(file, options),
+  readFile: (file) => fsp.readFile(file),
+  writeFile: (file, data) => fsp.writeFile(file, data),
+};
 
 /** Byte/code-unit ordering is locale-independent and therefore checksum-safe. */
 export function compareStableText(left: string, right: string): number {
@@ -396,4 +412,129 @@ export async function publishStagedBuild(activeRoot: string, stageRoot: string, 
     try { await fsp.rm(backup, { recursive: true, force: false }); } catch { /* recoverable backup retained */ }
   }
   return attachMatchingBacktestAcceptance(activeRoot, bundle);
+}
+
+function stagingPathError(activeRoot: string, stageRoot: string): Error | null {
+  const parent = path.dirname(activeRoot);
+  const expectedPrefix = `.${path.basename(activeRoot)}-staging-`;
+  return path.dirname(stageRoot) !== parent || !path.basename(stageRoot).startsWith(expectedPrefix)
+    ? new Error('Staging directory must be a sibling with the expected market-data prefix')
+    : null;
+}
+
+function validateAcceptanceForBundle(
+  acceptance: BacktestAcceptance,
+  bundle: MarketDataBundle,
+): void {
+  if (acceptance.estimatorPolicyVersion !== ESTIMATOR_POLICY_VERSION
+      || acceptance.policyId !== ACTIVE_ESTIMATOR_POLICY.id) {
+    throw new Error('Backtest acceptance does not match the active estimator policy');
+  }
+  if (!validBacktestAcceptance(acceptance)) {
+    throw new Error('Refusing to publish a non-passing backtest acceptance');
+  }
+  if (acceptance.transactionArtifactSha256 !== transactionArtifactChecksum(bundle.manifest)) {
+    throw new Error('Backtest acceptance transaction artifact checksum does not match the staged build');
+  }
+  const latest = latestEligibleTransactionDate(bundle.transactions);
+  if (!latest || acceptance.latestEligibleTransactionDate !== latest
+      || acceptance.evaluatedThrough < latest) {
+    throw new Error('Backtest acceptance must cover the complete staged transaction index');
+  }
+}
+
+function isMissingFile(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
+async function readOptionalFile(ops: PublicationFileOps, file: string): Promise<Buffer | null> {
+  try {
+    return await ops.readFile(file);
+  } catch (error) {
+    if (isMissingFile(error)) return null;
+    throw error;
+  }
+}
+
+async function publishAcceptedBuild(
+  activeRoot: string,
+  stageRoot: string,
+  acceptance: BacktestAcceptance,
+  options: PublishOptions,
+  ops: PublicationFileOps,
+): Promise<MarketDataBundle> {
+  const invalidStage = stagingPathError(activeRoot, stageRoot);
+  if (invalidStage) throw invalidStage;
+  const staged = await validateBuild(stageRoot, options);
+  validateAcceptanceForBundle(acceptance, staged);
+
+  const parent = path.dirname(activeRoot);
+  const basename = path.basename(activeRoot);
+  const publicationId = randomUUID();
+  const acceptanceTarget = backtestAcceptancePath(activeRoot);
+  const acceptanceCandidate = `${acceptanceTarget}.candidate-${publicationId}`;
+  const backupRoot = path.join(parent, `.${basename}-backup-${publicationId}`);
+  const failedRoot = path.join(parent, `.${basename}-failed-${publicationId}`);
+  let oldAcceptance: Buffer | null = null;
+  let movedActive = false;
+  let activatedStage = false;
+
+  try {
+    await ops.writeFile(acceptanceCandidate, Buffer.from(`${stableJson(acceptance)}\n`));
+    oldAcceptance = await readOptionalFile(ops, acceptanceTarget);
+    try {
+      await ops.rename(activeRoot, backupRoot);
+      movedActive = true;
+    } catch (error) {
+      if (!isMissingFile(error)) throw error;
+    }
+    await ops.rename(stageRoot, activeRoot);
+    activatedStage = true;
+    await ops.rename(acceptanceCandidate, acceptanceTarget);
+
+    const published = await loadMarketData(activeRoot, options);
+    if (!published
+        || published.manifest.buildId !== staged.manifest.buildId
+        || !published.backtestAcceptance
+        || !marketDataBacktestAccepted(published)) {
+      throw new Error('Published market-data build and acceptance pair failed validation');
+    }
+    if (movedActive) await ops.rm(backupRoot, { recursive: true, force: false });
+    return published;
+  } catch (publicationError) {
+    try {
+      if (activatedStage) await ops.rename(activeRoot, failedRoot);
+      if (movedActive) await ops.rename(backupRoot, activeRoot);
+      if (movedActive || activatedStage) {
+        if (oldAcceptance !== null) await ops.writeFile(acceptanceTarget, oldAcceptance);
+        else await ops.rm(acceptanceTarget, { force: true });
+      }
+      if (activatedStage) await ops.rm(failedRoot, { recursive: true, force: true });
+      await ops.rm(acceptanceCandidate, { force: true });
+    } catch (rollbackError) {
+      throw new AggregateError(
+        [publicationError, rollbackError],
+        `Market-data publication failed and rollback failed: ${
+          publicationError instanceof Error ? publicationError.message : String(publicationError)
+        }`,
+      );
+    }
+    throw publicationError;
+  }
+}
+
+/**
+ * Publishes a staged build and its checksum-/policy-bound acceptance as one
+ * recoverable final-state transition.
+ */
+export async function publishStagedBuildWithAcceptance(
+  root: string,
+  stage: string,
+  acceptance: BacktestAcceptance,
+  options: PublishOptions = {},
+): Promise<MarketDataBundle> {
+  return publishAcceptedBuild(root, stage, acceptance, options, {
+    ...publicationFileOps,
+    ...options.publicationFileOps,
+  });
 }

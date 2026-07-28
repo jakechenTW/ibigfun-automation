@@ -22,10 +22,9 @@ import { extractTaipeiSalesCsv, downloadConditional, moiSeasonUrl, quartersForLo
 import {
   compareStableText,
   loadMarketData,
-  publishStagedBuild,
+  publishStagedBuildWithAcceptance,
   sha256File,
   validateStagedBuild,
-  writeBacktestAcceptance,
   writeStableJson,
 } from './store.ts';
 import { normalizeSaleTransaction, validateSaleTransactionHeaders, type SaleTransactionRow } from './transactions.ts';
@@ -52,7 +51,7 @@ export interface EnsureTaipeiMarketDataOptions {
   lockPollMs?: number;
   /** Test seam may reject or throw, but cannot override the production gate. */
   gateEvaluator?: (report: BacktestReport) => BacktestGateResult;
-  publisher?: typeof publishStagedBuild;
+  publisher?: typeof publishStagedBuildWithAcceptance;
 }
 
 export interface CandidateEvaluation {
@@ -459,14 +458,12 @@ async function ensureTaipeiMarketDataUnlocked(
       stage = null;
       return null;
     }
-    const publisher = options.publisher ?? publishStagedBuild;
-    const published = await publisher(root, stage, {
+    const publisher = options.publisher ?? publishStagedBuildWithAcceptance;
+    const published = await publisher(root, stage, acceptance, {
       minDoorplates: options.minDoorplates,
       minTransactions: options.minTransactions,
     });
     stage = null;
-    await writeBacktestAcceptance(root, acceptance);
-    published.backtestAcceptance = acceptance;
     published.refresh = { status: 'updated' };
     log(options.logger, 'info', 'market-data.updated', 'published a validated Taipei market-data build', { buildId: published.manifest.buildId });
     return published;

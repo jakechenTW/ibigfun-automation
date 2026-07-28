@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -11,8 +11,10 @@ import {
 import {
   backtestAcceptancePath,
   loadMarketData,
+  marketDataBacktestAccepted,
   marketDataFreshness,
   publishStagedBuild,
+  publishStagedBuildWithAcceptance,
   readBacktestAcceptance,
   readManifest,
   sha256File,
@@ -98,13 +100,55 @@ async function writeBuild(dir: string, buildId: string, count = 1): Promise<void
   await mkdir(join(dir, 'raw'), { recursive: true });
   await writeFile(join(dir, 'raw', 'doorplates.csv'), 'a,b\n1,2\n');
   await writeFile(join(dir, 'doorplates-index.json'), JSON.stringify(doorplates));
-  await writeFile(join(dir, 'transactions-index.json'), JSON.stringify(transactions));
+  await writeFile(join(dir, 'transactions-index.json'), JSON.stringify({
+    ...transactions,
+    datasetVersion: `transactions-${buildId}`,
+    cells: {
+      '5000:24300': [{
+        ...transaction,
+        id: `tx-${buildId}`,
+        sourceVersion: `transactions-${buildId}`,
+      }],
+    },
+  }));
   const value = manifest(buildId, count);
   value.transactions.recordCount = Object.values(transactions.cells).flat().length;
   for (const file of ['raw/doorplates.csv', 'doorplates-index.json', 'transactions-index.json']) {
     value.artifacts[file] = { sha256: await sha256File(join(dir, file)), bytes: (await readFile(join(dir, file))).byteLength };
   }
   await writeFile(join(dir, 'manifest.json'), `${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function passingAcceptance(root: string): Promise<BacktestAcceptance> {
+  const checksum = transactionArtifactChecksum(readManifest(root)!);
+  assert.ok(checksum);
+  return {
+    schemaVersion: 2,
+    estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
+    policyId: ACTIVE_ESTIMATOR_POLICY.id,
+    transactionArtifactSha256: checksum,
+    approvedAt: '2026-07-26T01:00:00.000Z',
+    asOf: '2026-07-25',
+    evaluatedThrough: '2026-07-25',
+    latestEligibleTransactionDate: '2025-12-01',
+    thresholds: {
+      medianApeMax: 0.12,
+      p75ApeMax: 0.20,
+      minimumEstimateCoverage: 0.70,
+      minimumConfidenceSliceCases: 20,
+      minimumHighConfidenceImprovement: 0.01,
+    },
+    metrics: {
+      estimateCoverage: 0.8,
+      reliableEstimatedCount: 20,
+      reliableMedianApe: 0.08,
+      reliableP75Ape: 0.16,
+      highConfidenceEstimatedCount: 20,
+      highConfidenceMedianApe: 0.07,
+      mediumConfidenceEstimatedCount: 20,
+      mediumConfidenceMedianApe: 0.09,
+    },
+  };
 }
 
 test('failed validation preserves last-known-good manifest and indexes', async (t) => {
@@ -132,6 +176,144 @@ test('publication verifies checksums and replaces a complete validated build ato
   await publishStagedBuild(active, stage, { minDoorplates: 1, minTransactions: 0 });
   assert.equal(readManifest(active)?.buildId, 'next-build');
   await assert.rejects(() => readFile(stage));
+});
+
+test('transactional publication loads the new build with its matching acceptance', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-'));
+  const active = join(parent, 'taipei');
+  const stage = join(parent, '.taipei-staging-next');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(active, 'good-build');
+  await writeBuild(stage, 'next-build');
+  const acceptance = await passingAcceptance(stage);
+
+  const published = await publishStagedBuildWithAcceptance(active, stage, acceptance, {
+    minDoorplates: 1,
+    minTransactions: 0,
+  });
+  const loaded = await loadMarketData(active, { minDoorplates: 1, minTransactions: 0 });
+
+  assert.equal(published.manifest.buildId, 'next-build');
+  assert.equal(published.backtestAcceptance?.transactionArtifactSha256, acceptance.transactionArtifactSha256);
+  assert.equal(loaded?.manifest.buildId, 'next-build');
+  assert.equal(loaded?.backtestAcceptance?.transactionArtifactSha256, acceptance.transactionArtifactSha256);
+  assert.equal(marketDataBacktestAccepted(loaded!), true);
+});
+
+test('acceptance publication failure restores the old build and acceptance pair', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-'));
+  const active = join(parent, 'taipei');
+  const stage = join(parent, '.taipei-staging-next');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(active, 'good-build');
+  const oldAcceptance = await passingAcceptance(active);
+  await writeBacktestAcceptance(active, oldAcceptance);
+  const oldAcceptanceBytes = await readFile(backtestAcceptancePath(active));
+  await writeBuild(stage, 'next-build');
+  const nextAcceptance = await passingAcceptance(stage);
+  const acceptancePath = backtestAcceptancePath(active);
+
+  await assert.rejects(
+    () => publishStagedBuildWithAcceptance(active, stage, nextAcceptance, {
+      minDoorplates: 1,
+      minTransactions: 0,
+      publicationFileOps: {
+        rename: async (from, to) => {
+          if (to === acceptancePath && from !== stage) {
+            throw new Error('injected acceptance publication failure');
+          }
+          await rename(from, to);
+        },
+      },
+    }),
+    /injected acceptance publication failure/,
+  );
+
+  const restored = await loadMarketData(active, { minDoorplates: 1, minTransactions: 0 });
+  assert.equal(restored?.manifest.buildId, 'good-build');
+  assert.equal(restored?.backtestAcceptance?.transactionArtifactSha256, oldAcceptance.transactionArtifactSha256);
+  assert.deepEqual(await readFile(acceptancePath), oldAcceptanceBytes);
+  assert.equal(marketDataBacktestAccepted(restored!), true);
+});
+
+test('transaction checksum mismatch is rejected before any publication rename', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-'));
+  const active = join(parent, 'taipei');
+  const stage = join(parent, '.taipei-staging-next');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(active, 'good-build');
+  await writeBuild(stage, 'next-build');
+  const acceptance = {
+    ...await passingAcceptance(stage),
+    transactionArtifactSha256: 'wrong-transaction-checksum',
+  };
+
+  await assert.rejects(
+    () => publishStagedBuildWithAcceptance(active, stage, acceptance, {
+      minDoorplates: 1,
+      minTransactions: 0,
+      publicationFileOps: {
+        rename: async () => { throw new Error('publication renamed before checksum validation'); },
+      },
+    }),
+    /transaction.*checksum/i,
+  );
+
+  assert.equal(readManifest(active)?.buildId, 'good-build');
+  assert.equal(readManifest(stage)?.buildId, 'next-build');
+});
+
+test('reader in the build-to-acceptance rename window sees a review-only mismatch', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-'));
+  const active = join(parent, 'taipei');
+  const stage = join(parent, '.taipei-staging-next');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(active, 'good-build');
+  await writeBacktestAcceptance(active, await passingAcceptance(active));
+  await writeBuild(stage, 'next-build');
+  const nextAcceptance = await passingAcceptance(stage);
+  let observed: Awaited<ReturnType<typeof loadMarketData>> | undefined;
+
+  await publishStagedBuildWithAcceptance(active, stage, nextAcceptance, {
+    minDoorplates: 1,
+    minTransactions: 0,
+    publicationFileOps: {
+      rename: async (from, to) => {
+        await rename(from, to);
+        if (from === stage && to === active) {
+          observed = await loadMarketData(active, {
+            minDoorplates: 1,
+            minTransactions: 0,
+            readerRetries: 0,
+          });
+        }
+      },
+    },
+  });
+
+  assert.equal(observed?.manifest.buildId, 'next-build');
+  assert.equal(observed?.backtestAcceptance, undefined);
+  assert.equal(marketDataBacktestAccepted(observed!), false);
+});
+
+test('successful transactional publication removes candidate and backup paths', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-'));
+  const active = join(parent, 'taipei');
+  const stage = join(parent, '.taipei-staging-next');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(active, 'good-build');
+  await writeBacktestAcceptance(active, await passingAcceptance(active));
+  await writeBuild(stage, 'next-build');
+
+  await publishStagedBuildWithAcceptance(active, stage, await passingAcceptance(stage), {
+    minDoorplates: 1,
+    minTransactions: 0,
+  });
+
+  assert.deepEqual(
+    (await readdir(parent)).sort(),
+    ['taipei', 'taipei-backtest-acceptance.json'],
+  );
 });
 
 test('load rejects unsorted cells, out-of-bounds points, and checksum drift', async (t) => {
@@ -299,33 +481,7 @@ test('backtest acceptance loads only for the active transaction artifact checksu
   const checksum = transactionArtifactChecksum(readManifest(root)!);
   assert.ok(checksum);
 
-  const acceptance: BacktestAcceptance = {
-    schemaVersion: 2,
-    estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
-    policyId: ACTIVE_ESTIMATOR_POLICY.id,
-    transactionArtifactSha256: checksum,
-    approvedAt: '2026-07-26T01:00:00.000Z',
-    asOf: '2026-07-25',
-    evaluatedThrough: '2026-07-25',
-    latestEligibleTransactionDate: '2025-12-01',
-    thresholds: {
-      medianApeMax: 0.12,
-      p75ApeMax: 0.20,
-      minimumEstimateCoverage: 0.70,
-      minimumConfidenceSliceCases: 20,
-      minimumHighConfidenceImprovement: 0.01,
-    },
-    metrics: {
-      estimateCoverage: 0.8,
-      reliableEstimatedCount: 20,
-      reliableMedianApe: 0.08,
-      reliableP75Ape: 0.16,
-      highConfidenceEstimatedCount: 20,
-      highConfidenceMedianApe: 0.07,
-      mediumConfidenceEstimatedCount: 20,
-      mediumConfidenceMedianApe: 0.09,
-    },
-  };
+  const acceptance = await passingAcceptance(root);
   await writeBacktestAcceptance(root, acceptance);
   assert.equal(
     (await loadMarketData(root, { minDoorplates: 1, minTransactions: 0 }))?.backtestAcceptance?.transactionArtifactSha256,

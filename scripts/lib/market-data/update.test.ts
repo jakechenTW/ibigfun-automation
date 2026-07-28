@@ -6,7 +6,7 @@ import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { ensureTaipeiMarketData, withMarketDataLock } from './update.ts';
-import { sha256File } from './store.ts';
+import { publishStagedBuildWithAcceptance, sha256File } from './store.ts';
 import type { BacktestGateResult } from './backtest.ts';
 import type { MarketDataManifest } from './types.ts';
 
@@ -94,6 +94,7 @@ test('bootstrap skips an unpublished current season but publishes the completed 
   const nonDataOnlyCsv = Buffer.from(transactionCsv.toString('utf8').split('\n').slice(0, 2).join('\n'));
   const detail = '<a href="https://example.test/resource.download?rid=one&amp;fileName=doorplates.csv">doorplates.csv</a>';
   const events: string[] = [];
+  let publishedAcceptanceChecksum: string | null = null;
   const bundle = await ensureTaipeiMarketData({
     asOf: '2026-07-25', rootPath, minDoorplates: 1, minTransactions: 1,
     fetch: async (input) => {
@@ -109,10 +110,15 @@ test('bootstrap skips an unpublished current season but publishes the completed 
         stream: () => Readable.from(file.endsWith('/115S2.zip') ? passingTransactionCsv : nonDataOnlyCsv),
       }];
     },
+    publisher: async (root, stage, acceptance, options) => {
+      publishedAcceptanceChecksum = acceptance.transactionArtifactSha256;
+      return publishStagedBuildWithAcceptance(root, stage, acceptance, options);
+    },
     logger: { event: (_level, event) => events.push(event) },
   });
 
   assert.equal(bundle?.refresh?.status, 'updated');
+  assert.equal(bundle?.backtestAcceptance?.transactionArtifactSha256, publishedAcceptanceChecksum);
   assert.equal(bundle?.manifest.transactionSources?.['115S3'], undefined);
   assert.equal(
     bundle?.manifest.transactions.sourceUrls.some((url) => url.includes('season=115S3')),
