@@ -101,6 +101,12 @@ evaluation, and writing the report.
   atomically publishing the candidate build and its matching schema-2
   acceptance. A failed refresh retains the last-known-good build plus its
   matching acceptance; this git-ignored local state is never committed.
+  Unchanged sources may return `not-modified` only when the active build already
+  carries matching current-policy acceptance. Missing/old-policy acceptance
+  forces a semantic rebuild and gate even when source bytes are unchanged.
+  Accepted publication uses a durable sibling journal plus old-acceptance
+  backup; update and production backtest recover an interrupted publication
+  under the same refresh lock before loading the active pair.
 - `npm run market-data -- candidate --city taipei --policy
   <baseline|48-month|1000-meter>` — builds and backtests a fresh candidate
   without publishing it. Standard output contains the full held-out report and
@@ -124,7 +130,9 @@ evaluation, and writing the report.
   estimates; a historical `--as-of` cannot approve a newer index and
   `--no-gate` is diagnostic and never approves. Bump
   `ESTIMATOR_POLICY_VERSION` whenever selector, weighting, outlier, confidence,
-  status, or backtest semantics change.
+  status, or backtest semantics change. When that bump changes transaction
+  normalization or eligibility, use `update` to rebuild and publish the index;
+  never use `backtest` to mint new acceptance for a pre-change index.
 - `npm run route -- --lat <> --lng <>` — deterministic nearest-walk exit for one
   coordinate (shared ORS cache). Used during triage (step 5) to get a trustworthy
   walking distance after re-locating a listing from its address.

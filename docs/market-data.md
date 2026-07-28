@@ -59,13 +59,21 @@ set into notifications.
 
 Doorplate construction and official transaction lookup use the same
 `baseDoorplateKey`: city, district, road, optional section/lane/alley, main
-number, and optional sub-number. A structurally parsed floor or unit suffix is
-not part of the key, so an official address such as `...1號四樓之12` can match
-the `...1號` base doorplate. This is matching normalization, not evidence
-destruction: every indexed transaction retains the original address and the
-full `LocationEvidence` (`normalizedAddress`, `matchedAddress`, method,
-coordinate, uncertainty, confidence, and dataset version). Missing structural
-address parts are never inferred from marketing prose.
+number, and optional sub-number. Only an empty suffix or the explicit
+floor/unit grammar is eligible for exact matching: a positive floor (optionally
+`地下`) with an optional `之<unit>` / `<unit>室`, or a positive terminal
+`<unit>室`. Fullwidth and Chinese numerals are normalized before this check.
+The accepted suffix is not part of the key, so an official address such as
+`...1號四樓之12` can match the `...1號` base doorplate. Approximate or malformed
+tails such as `附近`, `隔壁巷`, or an incomplete floor/unit marker remain
+unresolved. If retained official rows share one base key, exact lookup is
+allowed only when every row has exactly identical latitude and longitude;
+coordinate-conflicting keys remain unresolved instead of selecting an
+arbitrary row. This is matching normalization, not evidence destruction: every
+indexed transaction retains the original address and the full
+`LocationEvidence` (`normalizedAddress`, `matchedAddress`, method, coordinate,
+uncertainty, confidence, and dataset version). Missing structural address parts
+are never inferred from marketing prose.
 
 Normalization assigns each usable official row one production class before
 selection:
@@ -102,6 +110,11 @@ backtest, and acceptance validation. The candidate directory and its
 checksum-bound schema-2 acceptance are promoted transactionally; the published
 pair therefore has the same transaction-index checksum, active policy id,
 estimator policy version, and latest eligible transaction-date coverage.
+Unchanged source checks may use the lightweight `not-modified` path only when
+the active build already has matching current-policy acceptance. Missing,
+outdated, or otherwise invalid acceptance forces a full rebuild and gate even
+when source bytes are unchanged, because eligibility/location semantics may
+have changed without changing the downloaded source files.
 
 Enrichment also calls the same updater once per run before estimates are
 attached. It performs a lightweight online source check without credentials:
@@ -143,12 +156,22 @@ recommendations, and requires notification status `warn`.
 ### Recovering from a bad refresh
 
 Do not edit indexes or `manifest.json` in place. A failed refresh automatically
-keeps the prior active directory. During a successful replacement the updater
-uses a sibling `.taipei-backup-<build-id>` directory briefly and normally
-removes it after cleanup (a cleanup failure can leave it as a recoverable
-backup); it is not a durable rollback archive. Before an intentional
-refresh that needs a manual rollback point, stop concurrent runs and make a
-local copy of the validated directory outside the active path, for example:
+keeps the prior active directory. Accepted publication durably records a fixed
+sibling `.taipei-publication-journal.json`, a publication-ID-scoped build
+backup, and (when present) an on-disk old-acceptance backup before any active
+rename. Update and production backtest entrypoints recover that journal under
+the same writer lock before loading the active build. Journal phase, UUID,
+basenames, build IDs, and checksums are validated before deriving any path;
+restart recovery then completes a validated new build/acceptance pair or
+restores the validated old pair. A reader in an intermediate window still
+fails closed because mismatched acceptance is never attached.
+
+After pair validation—the commit point—backup/journal cleanup is best effort;
+a cleanup failure does not roll back the committed pair, and the next locked
+entry retries recovery. These temporary recovery files are not durable rollback
+archives. Before an intentional refresh that needs a manual rollback point,
+stop concurrent runs and make a local copy of the validated directory outside
+the active path, for example:
 
 ```bash
 cp -a state/market-data/taipei state/market-data/taipei.snapshot-2026-07-26
@@ -220,12 +243,23 @@ tests, and the normal `update` command so the accepted candidate is published
 transactionally. Thresholds are never lowered. If no policy passes, retain the
 last-known-good active pair.
 
-The 2026-07-28 official-data calibration selected `baseline`: eligible coverage
-was 93.09%, reliable-cohort median/P75 APE were 7.65%/14.05%, high/medium
-confidence had 5,139/12,830 scored cases, and high median APE was 1.52 absolute
-percentage points lower than medium. The gate passed without reasons, so the
-48-month and 1,000-meter policies were not evaluated, the active policy stayed
-baseline, and compatibility version 3 was retained.
+The 2026-07-29 policy-v4 recalibration selected `baseline`: 73,803 raw rows
+produced 33,667 reliable-eligible and 629 review-only retained transactions.
+Eligible held-out coverage was 93.09%; reliable-cohort median/P75 APE were
+7.66%/14.03%; high/medium confidence had 5,105/12,729 scored cases; and high
+median APE was 1.56 absolute percentage points lower than medium. The gate
+passed without reasons, so the 48-month and 1,000-meter policies were not
+evaluated. The active policy stayed baseline, schema stayed 2, and compatibility
+version advanced from 3 to 4 for the stricter address/location eligibility
+semantics.
+
+That full candidate measured a peak resident set of 2,781,609,984 bytes
+(2.59 GiB). Count validation no longer creates `.flat()` copies of complete
+indexes, but the candidate still retains validated indexes and the held-out
+case report concurrently. Further meaningful reduction requires an
+architecture change such as streaming/spillable index construction and
+aggregate-only evaluation; do not weaken checksum, full-index, or held-out
+validation to fit a smaller runner.
 
 The `backtest` command reads the active validated local build only; it never
 refreshes sources or exposes a held-out sale to its estimator. Supply a

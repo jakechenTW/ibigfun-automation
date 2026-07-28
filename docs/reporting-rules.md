@@ -77,8 +77,10 @@ exclusion.
 通知只顯示這個摘要；完整可比成交及其排除理由留在 git-ignored 的 `enriched.json`，不可整份貼進通知。
 
 - 門牌索引與交易查找共用結構化的 base-doorplate key（市／區／路、選填段巷弄、號與子號），
-  樓層或戶別尾碼不參與 key；原始地址、完整正規化地址、配對門牌、方法與不確定範圍仍完整保留在
-  本機 evidence。不可用模糊文字補猜缺失的市、區、路或號。
+  只有明確且完整的樓層／戶別文法可移除後再配對；`附近`、`隔壁巷` 或混合／不完整尾碼一律
+  unresolved。相同 base key 的所有保留點必須有完全相同的經緯度才可 exact match；座標衝突時
+  不得任選一點。原始地址、完整正規化地址、配對門牌、方法與不確定範圍仍完整保留在本機
+  evidence。不可用模糊文字補猜缺失的市、區、路或號。
 - 官方交易先分成三類：一般市場的單一建物 `住家用` 且通過所有硬性品質檢查者為
   `reliable-eligible`；`住商用` 或一次移轉多棟建物者為 `review-only`；非住宅／空白用途、
   政府標讓售、特殊交易、無法定位、無法分離車位或其他硬性衝突者為 `excluded`。
@@ -97,7 +99,10 @@ exclusion.
   並重新通過完整 backtest。
 - 市場資料 refresh 先在 staging 建 candidate index 並完成 gate，只有 candidate build 與 checksum
   綁定 acceptance 皆通過才一起發佈。失敗時保留 last-known-good active build／acceptance，不得把
-  失敗 candidate 或錯配 acceptance 用於 `reliable`。
+  失敗 candidate 或錯配 acceptance 用於 `reliable`。來源 byte 未變時，也只有目前 active build
+  已有相符的現行 policy acceptance 才可走 `not-modified` 快路徑；policy／eligibility 變更造成舊
+  acceptance 失效時必須重建 index、重新 gate 並交易式發佈。發佈 rename 中斷後，由同一 writer
+  lock 下的 durable journal／old-acceptance backup 恢復成驗證過的舊 pair 或新 pair。
 - Coverage 不足只能依序評估 baseline → 48-month → 1000-meter；只有前一政策「單純 coverage
   <70%」時才可擴張，任何 accuracy／confidence calibration failure 都必須停止。Fallback 必須全面
   通過相同門檻、提高 policy compatibility 版本並以正常 update 發佈；不得降低門檻或混用建物型態。
