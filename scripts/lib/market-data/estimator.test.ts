@@ -2,10 +2,19 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { gridKey } from './grid.ts';
 import { estimateMarket } from './estimator.ts';
+import {
+  EXPERIMENTAL_1000_METER_POLICY,
+  EXPERIMENTAL_48_MONTH_POLICY,
+} from './config.ts';
 import type { MarketSubject, MarketTransaction, SourceFreshness, TransactionIndex } from './types.ts';
 
 const AS_OF = '2026-07-25';
 const coordinate = { lat: 25.033964, lng: 121.564468 };
+const METERS_PER_LNG = 111_320 * Math.cos(coordinate.lat * Math.PI / 180);
+
+function coordinateAt(distanceM: number): { lat: number; lng: number } {
+  return { lat: coordinate.lat, lng: coordinate.lng + distanceM / METERS_PER_LNG };
+}
 
 const subject: MarketSubject = {
   listingId: 1,
@@ -158,4 +167,76 @@ test('review-only transactions produce a review estimate without price statistic
   assert.equal(estimate.marketUnitPriceP25, null);
   assert.equal(estimate.marketUnitPriceP75, null);
   assert.deepEqual(estimate.unavailableReasons, ['review-only-comparables']);
+});
+
+test('48-month fallback produces a weighted estimate but never high confidence', () => {
+  const oldTransactions = [98, 99, 100, 101, 102].map((price, index) =>
+    transaction(`old-${index}`, price, { transactionDate: '2023-01-25' }),
+  );
+
+  const baseline = estimateMarket(subject, indexWithTransactions(oldTransactions), fresh, AS_OF);
+  const experimental = estimateMarket(
+    subject,
+    indexWithTransactions(oldTransactions),
+    fresh,
+    AS_OF,
+    { policy: EXPERIMENTAL_48_MONTH_POLICY },
+  );
+
+  assert.equal(baseline.marketUnitPriceMedian, null);
+  assert.equal(experimental.marketUnitPriceMedian, 100);
+  assert.ok(experimental.comparables.every((candidate) => candidate.weight.total > 0));
+  assert.equal(experimental.selectedStage, 6);
+  assert.equal(experimental.confidence, 'medium');
+});
+
+test('1000-meter fallback produces a weighted estimate while baseline excludes it', () => {
+  const distantTransactions = [99, 100, 101].map((price, index) =>
+    transaction(`distant-${index}`, price, {
+      location: {
+        ...transaction(`coordinate-${index}`, price).location,
+        coordinate: coordinateAt(900),
+      },
+    }),
+  );
+
+  const baseline = estimateMarket(subject, indexWithTransactions(distantTransactions), fresh, AS_OF);
+  const experimental = estimateMarket(
+    subject,
+    indexWithTransactions(distantTransactions),
+    fresh,
+    AS_OF,
+    { policy: EXPERIMENTAL_1000_METER_POLICY },
+  );
+
+  assert.equal(baseline.marketUnitPriceMedian, null);
+  assert.equal(experimental.marketUnitPriceMedian, 100);
+  assert.ok(experimental.comparables.every((candidate) => candidate.weight.total > 0));
+  assert.equal(experimental.selectedStage, 7);
+  assert.equal(experimental.confidence, 'medium');
+});
+
+test('extended policy does not promote baseline fallback comparables to high confidence', () => {
+  const baselineFallback = [98, 99, 100, 101, 102].map((price, index) =>
+    transaction(`baseline-fallback-${index}`, price, {
+      location: {
+        ...transaction(`coordinate-${index}`, price).location,
+        coordinate: coordinateAt(600),
+      },
+    }),
+  );
+
+  const baseline = estimateMarket(subject, indexWithTransactions(baselineFallback), fresh, AS_OF);
+  const extended = estimateMarket(
+    subject,
+    indexWithTransactions(baselineFallback),
+    fresh,
+    AS_OF,
+    { policy: EXPERIMENTAL_1000_METER_POLICY },
+  );
+
+  assert.equal(baseline.selectedStage, 5);
+  assert.equal(baseline.confidence, 'medium');
+  assert.equal(extended.selectedStage, 5);
+  assert.equal(extended.confidence, 'medium');
 });

@@ -161,8 +161,11 @@ export function estimateMarket(
   const p75 = weightedQuantile(observations, 0.75);
   const iqrRatio = (p75 - p25) / median;
   const stale = freshness.transactionStale || freshness.doorplateStale;
+  const selectedStage = selection.selectedStage === null
+    ? null
+    : policy.stages[selection.selectedStage - 1] ?? null;
   const high = comparables.length >= HIGH_CONFIDENCE_MIN_COMPARABLES
-    && selection.selectedStage !== policy.stages.length
+    && selectedStage?.confidenceClass === 'standard'
     && iqrRatio <= HIGH_IQR_RATIO
     && !stale;
   const medium = comparables.length >= 3 && iqrRatio <= MEDIUM_IQR_RATIO;

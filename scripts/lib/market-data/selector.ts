@@ -120,18 +120,16 @@ function weightBreakdown(
   distances: { min: number; max: number } | null,
   transactionDate: Date | null,
   asOf: Date,
+  policy: EstimatorPolicy,
 ): WeightBreakdown {
-  const distance = !distances || distances.max > 800 ? 0
-    : distances.max <= 300 ? WEIGHTS.distance[0]
-      : distances.max <= 500 ? WEIGHTS.distance[1]
-        : WEIGHTS.distance[2];
-  const twelveMonthCutoff = subtractCalendarMonths(asOf, 12);
-  const twentyFourMonthCutoff = subtractCalendarMonths(asOf, 24);
-  const thirtySixMonthCutoff = subtractCalendarMonths(asOf, 36);
-  const time = !transactionDate || transactionDate > asOf || transactionDate < thirtySixMonthCutoff ? 0
-    : transactionDate >= twelveMonthCutoff ? WEIGHTS.time[0]
-      : transactionDate >= twentyFourMonthCutoff ? WEIGHTS.time[1]
-        : WEIGHTS.time[2];
+  const distance = !distances
+    ? 0
+    : policy.distanceWeightBands.find((band) => distances.max <= band.maxDistanceM)?.weight ?? 0;
+  const time = !transactionDate || transactionDate > asOf
+    ? 0
+    : policy.timeWeightBands.find((band) =>
+      transactionDate >= subtractCalendarMonths(asOf, band.maxAgeMonths),
+    )?.weight ?? 0;
   const locationPrecision = transaction.location.method === 'address-range'
     ? Math.max(0.5, 1 / (1 + (transaction.location.uncertaintyMeters ?? 0) / 400))
     : transaction.location.coordinate ? 1 : 0;
@@ -183,7 +181,7 @@ export function selectComparables(
         distanceMinM: distances?.min ?? Number.POSITIVE_INFINITY,
         distanceMaxM: distances?.max ?? Number.POSITIVE_INFINITY,
         transactionAgeMonths: transactionMonths,
-        weight: weightBreakdown(subject, transaction, distances, transactionDate, targetDate),
+        weight: weightBreakdown(subject, transaction, distances, transactionDate, targetDate, policy),
         included: false,
         reasons: [],
       },

@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { EXPERIMENTAL_48_MONTH_POLICY } from './config.ts';
+import {
+  EXPERIMENTAL_1000_METER_POLICY,
+  EXPERIMENTAL_48_MONTH_POLICY,
+} from './config.ts';
 import { selectComparables } from './selector.ts';
 import type { LocationEvidence, MarketSubject, MarketTransaction } from './types.ts';
 
@@ -90,6 +93,28 @@ test('uses a 48-month stage only when that experimental policy is supplied', () 
   assert.equal(baseline.included.length, 0);
   assert.deepEqual(experimental.included.map((item) => item.transaction.id), ['forty-two-months-old']);
   assert.equal(experimental.selectedStage, 6);
+  assert.equal(experimental.included[0]?.weight.time, 0.4);
+  assert.ok((experimental.included[0]?.weight.total ?? 0) > 0);
+});
+
+test('uses a 1000-meter stage with positive weight only for the expanded policy', () => {
+  const distantComparable = transaction('nine-hundred-meters', {
+    location: location(900),
+  });
+
+  const baseline = selectComparables(subject, [distantComparable], AS_OF);
+  const experimental = selectComparables(
+    subject,
+    [distantComparable],
+    AS_OF,
+    EXPERIMENTAL_1000_METER_POLICY,
+  );
+
+  assert.equal(baseline.included.length, 0);
+  assert.deepEqual(experimental.included.map((item) => item.transaction.id), ['nine-hundred-meters']);
+  assert.equal(experimental.selectedStage, 7);
+  assert.equal(experimental.included[0]?.weight.distance, 0.5);
+  assert.ok((experimental.included[0]?.weight.total ?? 0) > 0);
 });
 
 test('stops at the first stage with three comparables', () => {

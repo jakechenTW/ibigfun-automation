@@ -253,7 +253,7 @@ test('selected backtest policy is passed to estimation without changing the acti
   assert.equal(baseline.policyId, 'baseline');
   assert.equal(expanded.policyId, '1000-meter');
   assert.equal(baseline.cases.at(-1)?.estimatedUnitPriceWan, null);
-  assert.equal(expanded.cases.at(-1)?.estimatedUnitPriceWan, null);
+  assert.equal(typeof expanded.cases.at(-1)?.estimatedUnitPriceWan, 'number');
   assert.equal(ACTIVE_ESTIMATOR_POLICY.id, 'baseline');
 });
 
