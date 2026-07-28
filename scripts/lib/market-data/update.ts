@@ -23,6 +23,7 @@ import {
   compareStableText,
   countIndexEntries,
   loadMarketData,
+  marketDataBacktestAccepted,
   publishStagedBuildWithAcceptance,
   recoverInterruptedMarketDataPublication,
   sha256File,
@@ -351,7 +352,8 @@ async function ensureTaipeiMarketDataUnlocked(
     }
 
     const builtAt = nowIso(clock);
-    if (existing && !sourcesChanged && !execution.forceCandidateBuild) {
+    if (existing && !sourcesChanged && !execution.forceCandidateBuild
+        && marketDataBacktestAccepted(existing)) {
       const current = await loadMarketData(root, {
         minDoorplates: options.minDoorplates,
         minTransactions: options.minTransactions,

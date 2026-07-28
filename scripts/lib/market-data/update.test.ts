@@ -6,7 +6,13 @@ import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { ensureTaipeiMarketData, withMarketDataLock } from './update.ts';
-import { publishStagedBuildWithAcceptance, sha256File } from './store.ts';
+import {
+  backtestAcceptancePath,
+  marketDataBacktestAccepted,
+  publishStagedBuildWithAcceptance,
+  sha256File,
+} from './store.ts';
+import { ESTIMATOR_POLICY_VERSION } from './config.ts';
 import type { BacktestGateResult } from './backtest.ts';
 import type { MarketDataManifest } from './types.ts';
 
@@ -294,7 +300,7 @@ test('injected passing gate cannot bootstrap a production-gate failure without a
   assert.equal(publisherCalls, 0);
 });
 
-test('unchanged conditional refresh keeps build and index checksums while advancing checkedAt', async (t) => {
+test('unchanged conditional refresh skips an accepted build but rebuilds an invalid-policy build', async (t) => {
   const rootPath = join(await mkdtemp(join(tmpdir(), 'market-update-')), 'taipei');
   t.after(() => rm(join(rootPath, '..'), { recursive: true, force: true }));
   const doorplateCsv = await readFile(fileURLToPath(new URL('./fixtures/doorplates.csv', import.meta.url)));
@@ -364,6 +370,27 @@ test('unchanged conditional refresh keeps build and index checksums while advanc
   assert.equal(second?.manifest.transactions.checkedAt, '2026-07-26T01:00:00.000Z');
   assert.deepEqual(conditionalSeasons.sort(), ['115S2', '115S3']);
   assert.equal(events.at(-1), 'market-data.not-modified');
+
+  const acceptancePath = backtestAcceptancePath(rootPath);
+  const staleAcceptance = JSON.parse(await readFile(acceptancePath, 'utf8')) as {
+    estimatorPolicyVersion: number;
+  };
+  staleAcceptance.estimatorPolicyVersion = 3;
+  await writeFile(acceptancePath, `${JSON.stringify(staleAcceptance)}\n`);
+  const rebuilt = await ensureTaipeiMarketData({
+    asOf: '2026-07-25', rootPath, minDoorplates: 1, minTransactions: 1,
+    fetch: fakeFetch, clock: () => new Date('2026-07-26T02:00:00.000Z'),
+    openZip: async () => { throw new Error('conditionally unchanged ZIP must not be opened'); },
+    logger: { event: (_level, event) => events.push(event) },
+  });
+  assert.equal(rebuilt?.refresh?.status, 'updated');
+  assert.notEqual(rebuilt?.manifest.buildId, buildId);
+  assert.notEqual(
+    rebuilt?.manifest.artifacts['transactions-index.json']?.sha256,
+    indexChecksums.transactions,
+  );
+  assert.equal(rebuilt?.backtestAcceptance?.estimatorPolicyVersion, ESTIMATOR_POLICY_VERSION);
+  assert.equal(marketDataBacktestAccepted(rebuilt!), true);
 
   concurrentChange = true;
   const concurrentOptions = {
