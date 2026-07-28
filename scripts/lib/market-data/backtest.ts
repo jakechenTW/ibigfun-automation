@@ -1,5 +1,10 @@
 import { estimateMarket } from './estimator.ts';
-import { BACKTEST_ACCEPTANCE_THRESHOLDS, ESTIMATOR_POLICY_VERSION } from './config.ts';
+import {
+  ACTIVE_ESTIMATOR_POLICY,
+  BACKTEST_ACCEPTANCE_THRESHOLDS,
+  ESTIMATOR_POLICY_VERSION,
+} from './config.ts';
+import type { EstimatorPolicy } from './config.ts';
 import { weightedQuantile } from './statistics.ts';
 import type {
   BacktestAcceptance,
@@ -14,6 +19,7 @@ import type {
 
 export interface BacktestOptions {
   asOf: string;
+  policy?: EstimatorPolicy;
 }
 
 export interface BacktestMetrics {
@@ -43,11 +49,13 @@ export interface BacktestCase {
 
 export interface BacktestReport {
   asOf: string;
+  policyId: EstimatorPolicy['id'];
   /** Latest eligible sale in the complete active index, before as-of filtering. */
   latestEligibleTransactionDate: string | null;
   overall: BacktestMetrics;
   byBuildingType: Record<BuildingType, BacktestMetrics>;
   byConfidence: Record<EstimateConfidence, BacktestMetrics>;
+  byStatus: Record<EstimateStatus, BacktestMetrics>;
   work: {
     historicalIndexBuilds: number;
     historicalInsertions: number;
@@ -98,6 +106,7 @@ export function heldOutTransactionEligible(transaction: MarketTransaction): bool
   const subjectDate = transactionDate(transaction);
   const coordinate = transaction.location.coordinate;
   if (!subjectDate || !coordinate || !Number.isFinite(coordinate.lat) || !Number.isFinite(coordinate.lng)) return false;
+  if (transaction.eligibility !== 'reliable-eligible') return false;
   if (!transaction.district || transaction.ownership !== 'freehold') return false;
   if (!finitePositive(transaction.buildingAreaPing) || !finitePositive(transaction.buildingUnitPriceWan)) return false;
   if (!Number.isFinite(transaction.floor) || !Number.isFinite(transaction.totalFloors) || transaction.totalFloors <= 0) return false;
@@ -177,9 +186,11 @@ function metrics(cases: readonly BacktestCase[]): BacktestMetrics {
 export function evaluateBacktestGate(report: BacktestReport): BacktestGateResult {
   const reasons: string[] = [];
   const overall = report.overall;
+  const reliable = report.byStatus.reliable;
   const high = report.byConfidence.high;
   const medium = report.byConfidence.medium;
-  if (overall.caseCount === 0 || overall.estimatedCount === 0 || overall.medianApe === null || overall.p75Ape === null) {
+  if (overall.caseCount === 0 || reliable.estimatedCount === 0
+    || reliable.medianApe === null || reliable.p75Ape === null) {
     reasons.push('incomplete-overall');
   }
   if (high.estimatedCount < BACKTEST_GATE.minimumConfidenceSliceCases || high.medianApe === null) {
@@ -191,10 +202,13 @@ export function evaluateBacktestGate(report: BacktestReport): BacktestGateResult
   if (report.latestEligibleTransactionDate === null || report.asOf < report.latestEligibleTransactionDate) {
     reasons.push('incomplete-active-transaction-coverage');
   }
-  if (overall.medianApe !== null && overall.medianApe > BACKTEST_GATE.medianApeMax) {
+  if (overall.estimateCoverage < BACKTEST_GATE.minimumEstimateCoverage) {
+    reasons.push('estimate-coverage-target-missed');
+  }
+  if (reliable.medianApe !== null && reliable.medianApe > BACKTEST_GATE.medianApeMax) {
     reasons.push('median-ape-target-missed');
   }
-  if (overall.p75Ape !== null && overall.p75Ape > BACKTEST_GATE.p75ApeMax) {
+  if (reliable.p75Ape !== null && reliable.p75Ape > BACKTEST_GATE.p75ApeMax) {
     reasons.push('p75-ape-target-missed');
   }
   if (high.medianApe !== null && medium.medianApe !== null
@@ -215,16 +229,18 @@ export function backtestAcceptance(
   approvedAt: string,
 ): BacktestAcceptance {
   const gate = evaluateBacktestGate(report);
+  const reliable = report.byStatus.reliable;
   const high = report.byConfidence.high;
   const medium = report.byConfidence.medium;
-  if (!gate.passed || report.overall.medianApe === null || report.overall.p75Ape === null
+  if (!gate.passed || reliable.medianApe === null || reliable.p75Ape === null
     || high.medianApe === null || medium.medianApe === null
     || report.latestEligibleTransactionDate === null) {
     throw new Error(`Backtest does not pass acceptance: ${gate.reasons.join(', ')}`);
   }
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
+    policyId: report.policyId,
     transactionArtifactSha256,
     approvedAt,
     asOf: report.asOf,
@@ -233,8 +249,9 @@ export function backtestAcceptance(
     thresholds: { ...BACKTEST_GATE },
     metrics: {
       estimateCoverage: report.overall.estimateCoverage,
-      medianApe: report.overall.medianApe,
-      p75Ape: report.overall.p75Ape,
+      reliableEstimatedCount: reliable.estimatedCount,
+      reliableMedianApe: reliable.medianApe,
+      reliableP75Ape: reliable.p75Ape,
       highConfidenceEstimatedCount: high.estimatedCount,
       highConfidenceMedianApe: high.medianApe,
       mediumConfidenceEstimatedCount: medium.estimatedCount,
@@ -250,6 +267,7 @@ export function backtestAcceptance(
 export function backtestTransactions(index: TransactionIndex, options: BacktestOptions): BacktestReport {
   const asOf = parseIsoDate(options.asOf);
   if (!asOf) throw new RangeError('Backtest requires a valid as-of date (YYYY-MM-DD)');
+  const policy = options.policy ?? ACTIVE_ESTIMATOR_POLICY;
 
   const completeEntries = allTransactions(index);
   const completeLatestEligibleDate = latestEligibleDate(completeEntries);
@@ -273,7 +291,7 @@ export function backtestTransactions(index: TransactionIndex, options: BacktestO
         historicalIndex,
         BACKTEST_FRESHNESS,
         transaction.transactionDate,
-        { allowMissingAskingUnitPrice: true },
+        { allowMissingAskingUnitPrice: true, policy },
       );
       const median = estimate.marketUnitPriceMedian;
       const p25 = estimate.marketUnitPriceP25;
@@ -304,6 +322,7 @@ export function backtestTransactions(index: TransactionIndex, options: BacktestO
 
   return {
     asOf: options.asOf,
+    policyId: policy.id,
     latestEligibleTransactionDate: completeLatestEligibleDate,
     overall: metrics(cases),
     byBuildingType: {
@@ -315,6 +334,11 @@ export function backtestTransactions(index: TransactionIndex, options: BacktestO
       high: metrics(cases.filter((backtestCase) => backtestCase.confidence === 'high')),
       medium: metrics(cases.filter((backtestCase) => backtestCase.confidence === 'medium')),
       low: metrics(cases.filter((backtestCase) => backtestCase.confidence === 'low')),
+    },
+    byStatus: {
+      reliable: metrics(cases.filter((backtestCase) => backtestCase.status === 'reliable')),
+      review: metrics(cases.filter((backtestCase) => backtestCase.status === 'review')),
+      unavailable: metrics(cases.filter((backtestCase) => backtestCase.status === 'unavailable')),
     },
     work: { historicalIndexBuilds: 1, historicalInsertions },
     cases,

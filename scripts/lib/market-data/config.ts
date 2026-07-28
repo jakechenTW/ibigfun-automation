@@ -1,4 +1,4 @@
-export const MARKET_SCHEMA_VERSION = 1;
+export const MARKET_SCHEMA_VERSION = 2;
 /**
  * Intentional acceptance compatibility contract. Bump whenever selector,
  * weighting, outlier, confidence, status, or backtest semantics change.
@@ -16,6 +16,7 @@ export const MIN_PRODUCTION_TRANSACTIONS = 1_000;
 export const BACKTEST_ACCEPTANCE_THRESHOLDS = {
   medianApeMax: 0.12,
   p75ApeMax: 0.20,
+  minimumEstimateCoverage: 0.70,
   minimumConfidenceSliceCases: 20,
   minimumHighConfidenceImprovement: 0.01,
 } as const;
@@ -31,6 +32,8 @@ export interface EstimatorPolicy {
   id: 'baseline' | '48-month' | '1000-meter';
   stages: readonly SearchStage[];
 }
+
+export type PolicyId = EstimatorPolicy['id'];
 
 export const BASELINE_ESTIMATOR_POLICY: EstimatorPolicy = {
   id: 'baseline',
@@ -60,6 +63,14 @@ export const EXPERIMENTAL_1000_METER_POLICY: EstimatorPolicy = {
 };
 
 export const ACTIVE_ESTIMATOR_POLICY = BASELINE_ESTIMATOR_POLICY;
+
+export function estimatorPolicyById(id: PolicyId): EstimatorPolicy {
+  switch (id) {
+    case 'baseline': return BASELINE_ESTIMATOR_POLICY;
+    case '48-month': return EXPERIMENTAL_48_MONTH_POLICY;
+    case '1000-meter': return EXPERIMENTAL_1000_METER_POLICY;
+  }
+}
 
 /** @deprecated Use ACTIVE_ESTIMATOR_POLICY.stages for new selection code. */
 export const SEARCH_STAGES = ACTIVE_ESTIMATOR_POLICY.stages;

@@ -4,6 +4,7 @@ import { resolve, sep } from 'node:path';
 import {
   DOORPLATE_STALE_DAYS,
   ESTIMATOR_POLICY_VERSION,
+  MARKET_SCHEMA_VERSION,
   MARKET_BACKTEST_DIAGNOSTIC_ROOT,
   MARKET_DATA_ROOT,
   SEARCH_STAGES,
@@ -34,6 +35,7 @@ test('approved weights and stale windows are centralized', () => {
 
 test('estimator acceptance uses an intentional policy compatibility version', () => {
   assert.equal(ESTIMATOR_POLICY_VERSION, 2);
+  assert.equal(MARKET_SCHEMA_VERSION, 2);
 });
 
 test('backtest diagnostics live outside the checksum-closed active build', () => {

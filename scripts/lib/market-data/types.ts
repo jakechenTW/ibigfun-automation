@@ -1,4 +1,5 @@
 import type { Coordinate } from '../coords.ts';
+import type { EstimatorPolicy } from './config.ts';
 
 export type BuildingType = 'apartment' | 'midrise' | 'highrise';
 export type FloorGroup = 'first' | 'low' | 'middle' | 'top' | 'high';
@@ -196,8 +197,9 @@ export interface MarketDataManifest {
 
 /** Aggregate-only proof that one exact transaction index passed the quality gate. */
 export interface BacktestAcceptance {
-  schemaVersion: 1;
+  schemaVersion: 2;
   estimatorPolicyVersion: number;
+  policyId: EstimatorPolicy['id'];
   transactionArtifactSha256: string;
   approvedAt: string;
   asOf: string;
@@ -206,13 +208,15 @@ export interface BacktestAcceptance {
   thresholds: {
     medianApeMax: number;
     p75ApeMax: number;
+    minimumEstimateCoverage: number;
     minimumConfidenceSliceCases: number;
     minimumHighConfidenceImprovement: number;
   };
   metrics: {
     estimateCoverage: number;
-    medianApe: number;
-    p75Ape: number;
+    reliableEstimatedCount: number;
+    reliableMedianApe: number;
+    reliableP75Ape: number;
     highConfidenceEstimatedCount: number;
     highConfidenceMedianApe: number;
     mediumConfidenceEstimatedCount: number;

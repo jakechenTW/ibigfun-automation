@@ -3,7 +3,11 @@ import { mkdtemp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { ESTIMATOR_POLICY_VERSION, MARKET_SCHEMA_VERSION } from './config.ts';
+import {
+  ACTIVE_ESTIMATOR_POLICY,
+  ESTIMATOR_POLICY_VERSION,
+  MARKET_SCHEMA_VERSION,
+} from './config.ts';
 import {
   backtestAcceptancePath,
   loadMarketData,
@@ -65,6 +69,10 @@ const transaction = {
   completionDate: null,
   notes: '',
   exclusionFlags: [],
+  eligibility: 'reliable-eligible' as const,
+  eligibilityReasons: [],
+  primaryUse: 'residential' as const,
+  transferredBuildingCount: 1,
 };
 const transactions: TransactionIndex = {
   schemaVersion: MARKET_SCHEMA_VERSION,
@@ -196,8 +204,9 @@ test('backtest acceptance loads only for the active transaction artifact checksu
   assert.ok(checksum);
 
   const acceptance: BacktestAcceptance = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
+    policyId: ACTIVE_ESTIMATOR_POLICY.id,
     transactionArtifactSha256: checksum,
     approvedAt: '2026-07-26T01:00:00.000Z',
     asOf: '2026-07-25',
@@ -206,13 +215,15 @@ test('backtest acceptance loads only for the active transaction artifact checksu
     thresholds: {
       medianApeMax: 0.12,
       p75ApeMax: 0.20,
+      minimumEstimateCoverage: 0.70,
       minimumConfidenceSliceCases: 20,
       minimumHighConfidenceImprovement: 0.01,
     },
     metrics: {
       estimateCoverage: 0.8,
-      medianApe: 0.08,
-      p75Ape: 0.16,
+      reliableEstimatedCount: 20,
+      reliableMedianApe: 0.08,
+      reliableP75Ape: 0.16,
       highConfidenceEstimatedCount: 20,
       highConfidenceMedianApe: 0.07,
       mediumConfidenceEstimatedCount: 20,
@@ -242,6 +253,13 @@ test('backtest acceptance loads only for the active transaction artifact checksu
   await assert.rejects(
     () => writeBacktestAcceptance(root, {
       ...acceptance,
+      policyId: '48-month',
+    }),
+    /active estimator policy/,
+  );
+  await assert.rejects(
+    () => writeBacktestAcceptance(root, {
+      ...acceptance,
       evaluatedThrough: '2025-11-30',
     }),
     /complete active transaction index/,
@@ -262,6 +280,8 @@ test('backtest acceptance loads only for the active transaction artifact checksu
     /non-passing backtest acceptance/,
   );
   for (const invalid of [
+    { ...acceptance, schemaVersion: 1 },
+    { ...acceptance, policyId: '48-month' },
     { ...acceptance, asOf: '2026-02-30', evaluatedThrough: '2026-02-30' },
     { ...acceptance, latestEligibleTransactionDate: '2026-02-30' },
   ]) {

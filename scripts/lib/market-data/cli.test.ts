@@ -1,0 +1,110 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import {
+  ACTIVE_ESTIMATOR_POLICY,
+  estimatorPolicyById,
+} from './config.ts';
+import {
+  parseMarketDataArgs,
+  shouldPersistBacktestAcceptance,
+} from '../../market-data.ts';
+import { backtestTransactions } from './backtest.ts';
+import type { TransactionIndex } from './types.ts';
+
+test('backtest CLI accepts each explicit estimator policy', () => {
+  for (const policy of ['baseline', '48-month', '1000-meter'] as const) {
+    const parsed = parseMarketDataArgs(['backtest', '--city', 'taipei', '--policy', policy]);
+    assert.equal(parsed.command, 'backtest');
+    assert.equal(parsed.policyId, policy);
+    assert.equal(estimatorPolicyById(policy).id, policy);
+  }
+});
+
+test('backtest CLI rejects unknown and duplicate policy flags', () => {
+  assert.throws(
+    () => parseMarketDataArgs(['backtest', '--city', 'taipei', '--policy', 'future']),
+    /unsupported policy/,
+  );
+  assert.throws(
+    () => parseMarketDataArgs([
+      'backtest', '--city', 'taipei', '--policy', 'baseline', '--policy=48-month',
+    ]),
+    /--policy may be supplied only once/,
+  );
+});
+
+test('update rejects the diagnostic policy selector', () => {
+  assert.throws(
+    () => parseMarketDataArgs(['update', '--city', 'taipei', '--policy', 'baseline']),
+    /--policy is supported only by backtest/,
+  );
+});
+
+test('backtest policy defaults to the active policy', () => {
+  const parsed = parseMarketDataArgs(['backtest', '--city', 'taipei']);
+  assert.equal(parsed.command, 'backtest');
+  assert.equal(parsed.policyId, ACTIVE_ESTIMATOR_POLICY.id);
+});
+
+test('CLI parsing rejects unsupported cities and invalid dates before any market-data operation', () => {
+  assert.throws(() => parseMarketDataArgs(['backtest', '--city', 'invalid']), /supported city: taipei/);
+  assert.throws(() => parseMarketDataArgs(['backtest', '--city', 'taipei', '--as-of', '2026-02-30']), /valid YYYY-MM-DD/);
+  assert.throws(() => parseMarketDataArgs(['update', '--city', 'taipei', '--as-of', '2026-07-25']), /only by backtest/);
+});
+
+test('implicit CLI dates use the Taipei calendar at the 00:00–07:59 window and a quarter boundary', () => {
+  const taipeiEarlyMorning = new Date('2026-06-30T17:30:00.000Z');
+  const taipeiLateMorning = new Date('2026-06-30T23:59:00.000Z');
+
+  assert.equal(parseMarketDataArgs(['backtest', '--city', 'taipei'], taipeiEarlyMorning).asOf, '2026-07-01');
+  assert.equal(parseMarketDataArgs(['backtest', '--city', 'taipei'], taipeiLateMorning).asOf, '2026-07-01');
+  assert.equal(parseMarketDataArgs(['update', '--city', 'taipei'], taipeiEarlyMorning).asOf, '2026-07-01');
+});
+
+test('non-active diagnostic policy cannot persist canonical acceptance', () => {
+  const emptyIndex: TransactionIndex = {
+    schemaVersion: 2,
+    datasetVersion: 'fixture',
+    builtAt: '2026-07-25T00:00:00.000Z',
+    cells: {},
+  };
+  const diagnostic = backtestTransactions(emptyIndex, {
+    asOf: '2026-07-25',
+    policy: estimatorPolicyById('48-month'),
+  });
+  const passingDiagnostic = {
+    ...diagnostic,
+    latestEligibleTransactionDate: '2026-07-25',
+    overall: {
+      caseCount: 25, estimatedCount: 20, estimateCoverage: 0.8,
+      medianApe: 0.08, p75Ape: 0.16, bias: 0, intervalCoverage: 0.5,
+    },
+    byStatus: {
+      reliable: {
+        caseCount: 20, estimatedCount: 20, estimateCoverage: 1,
+        medianApe: 0.08, p75Ape: 0.16, bias: 0, intervalCoverage: 0.5,
+      },
+      review: {
+        caseCount: 5, estimatedCount: 0, estimateCoverage: 0,
+        medianApe: null, p75Ape: null, bias: null, intervalCoverage: null,
+      },
+      unavailable: {
+        caseCount: 0, estimatedCount: 0, estimateCoverage: 0,
+        medianApe: null, p75Ape: null, bias: null, intervalCoverage: null,
+      },
+    },
+    byConfidence: {
+      ...diagnostic.byConfidence,
+      high: {
+        caseCount: 20, estimatedCount: 20, estimateCoverage: 1,
+        medianApe: 0.08, p75Ape: 0.16, bias: 0, intervalCoverage: 0.5,
+      },
+      medium: {
+        caseCount: 20, estimatedCount: 20, estimateCoverage: 1,
+        medianApe: 0.10, p75Ape: 0.18, bias: 0, intervalCoverage: 0.5,
+      },
+    },
+  };
+
+  assert.equal(shouldPersistBacktestAcceptance(passingDiagnostic, false), false);
+});

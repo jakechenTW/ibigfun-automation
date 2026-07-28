@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { attachMarketEstimates } from '../steps.ts';
 import type { PreMarketEnrichedListing } from '../types.ts';
-import { ESTIMATOR_POLICY_VERSION } from './config.ts';
+import { ACTIVE_ESTIMATOR_POLICY, ESTIMATOR_POLICY_VERSION } from './config.ts';
 import type { BacktestAcceptance, MarketDataBundle } from './types.ts';
 
 const AS_OF = '2026-07-25';
@@ -27,8 +27,9 @@ function bundleWithAcceptance(transactionArtifactSha256 = 'fixture-transactions-
     bytes: 1,
   };
   accepted.backtestAcceptance = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
+    policyId: ACTIVE_ESTIMATOR_POLICY.id,
     transactionArtifactSha256,
     approvedAt: '2026-07-25T01:00:00.000Z',
     asOf: AS_OF,
@@ -37,13 +38,15 @@ function bundleWithAcceptance(transactionArtifactSha256 = 'fixture-transactions-
     thresholds: {
       medianApeMax: 0.12,
       p75ApeMax: 0.20,
+      minimumEstimateCoverage: 0.70,
       minimumConfidenceSliceCases: 20,
       minimumHighConfidenceImprovement: 0.01,
     },
     metrics: {
       estimateCoverage: 0.8,
-      medianApe: 0.08,
-      p75Ape: 0.16,
+      reliableEstimatedCount: 20,
+      reliableMedianApe: 0.08,
+      reliableP75Ape: 0.16,
       highConfidenceEstimatedCount: 20,
       highConfidenceMedianApe: 0.07,
       mediumConfidenceEstimatedCount: 20,

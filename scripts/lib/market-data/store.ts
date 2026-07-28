@@ -5,6 +5,7 @@ import path from 'node:path';
 import { isValidDateString } from '../date.ts';
 import {
   BACKTEST_ACCEPTANCE_THRESHOLDS,
+  ACTIVE_ESTIMATOR_POLICY,
   DOORPLATE_STALE_DAYS,
   ESTIMATOR_POLICY_VERSION,
   MARKET_SCHEMA_VERSION,
@@ -86,13 +87,15 @@ function finiteRatio(value: unknown): value is number {
 function approvedBacktestThresholds(thresholds: BacktestAcceptance['thresholds']): boolean {
   return thresholds.medianApeMax === BACKTEST_ACCEPTANCE_THRESHOLDS.medianApeMax
     && thresholds.p75ApeMax === BACKTEST_ACCEPTANCE_THRESHOLDS.p75ApeMax
+    && thresholds.minimumEstimateCoverage === BACKTEST_ACCEPTANCE_THRESHOLDS.minimumEstimateCoverage
     && thresholds.minimumConfidenceSliceCases === BACKTEST_ACCEPTANCE_THRESHOLDS.minimumConfidenceSliceCases
     && thresholds.minimumHighConfidenceImprovement === BACKTEST_ACCEPTANCE_THRESHOLDS.minimumHighConfidenceImprovement;
 }
 
 function validBacktestAcceptance(value: BacktestAcceptance): boolean {
   const { thresholds, metrics } = value;
-  if (value.schemaVersion !== 1 || value.estimatorPolicyVersion !== ESTIMATOR_POLICY_VERSION
+  if (value.schemaVersion !== 2 || value.estimatorPolicyVersion !== ESTIMATOR_POLICY_VERSION
+    || value.policyId !== ACTIVE_ESTIMATOR_POLICY.id
     || !value.transactionArtifactSha256
     || !Number.isFinite(Date.parse(value.approvedAt))
     || !isValidDateString(value.asOf)
@@ -102,17 +105,20 @@ function validBacktestAcceptance(value: BacktestAcceptance): boolean {
     || value.evaluatedThrough < value.latestEligibleTransactionDate
     || !thresholds || !metrics) return false;
   if (!finiteRatio(thresholds.medianApeMax) || !finiteRatio(thresholds.p75ApeMax)
+    || !finiteRatio(thresholds.minimumEstimateCoverage) || thresholds.minimumEstimateCoverage > 1
     || !Number.isInteger(thresholds.minimumConfidenceSliceCases) || thresholds.minimumConfidenceSliceCases <= 0
     || !finiteRatio(thresholds.minimumHighConfidenceImprovement)
     || !approvedBacktestThresholds(thresholds)) return false;
   if (!finiteRatio(metrics.estimateCoverage) || metrics.estimateCoverage > 1
-    || !finiteRatio(metrics.medianApe) || !finiteRatio(metrics.p75Ape)
+    || !Number.isInteger(metrics.reliableEstimatedCount) || metrics.reliableEstimatedCount < 0
+    || !finiteRatio(metrics.reliableMedianApe) || !finiteRatio(metrics.reliableP75Ape)
     || !Number.isInteger(metrics.highConfidenceEstimatedCount)
     || !Number.isInteger(metrics.mediumConfidenceEstimatedCount)
     || !finiteRatio(metrics.highConfidenceMedianApe)
     || !finiteRatio(metrics.mediumConfidenceMedianApe)) return false;
-  return metrics.medianApe <= thresholds.medianApeMax
-    && metrics.p75Ape <= thresholds.p75ApeMax
+  return metrics.estimateCoverage >= thresholds.minimumEstimateCoverage
+    && metrics.reliableMedianApe <= thresholds.medianApeMax
+    && metrics.reliableP75Ape <= thresholds.p75ApeMax
     && metrics.highConfidenceEstimatedCount >= thresholds.minimumConfidenceSliceCases
     && metrics.mediumConfidenceEstimatedCount >= thresholds.minimumConfidenceSliceCases
     && metrics.highConfidenceMedianApe + thresholds.minimumHighConfidenceImprovement
@@ -128,6 +134,9 @@ export function readBacktestAcceptance(root: string): BacktestAcceptance | null 
 export async function writeBacktestAcceptance(root: string, acceptance: BacktestAcceptance): Promise<void> {
   if (acceptance.estimatorPolicyVersion !== ESTIMATOR_POLICY_VERSION) {
     throw new Error('Backtest acceptance estimator policy does not match the runtime policy');
+  }
+  if (acceptance.policyId !== ACTIVE_ESTIMATOR_POLICY.id) {
+    throw new Error('Backtest acceptance policy does not match the active estimator policy');
   }
   if (!approvedBacktestThresholds(acceptance.thresholds)) {
     throw new Error('Backtest acceptance must use the approved quality thresholds');

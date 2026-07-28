@@ -10,7 +10,12 @@ import {
   evaluateBacktestGate,
   type BacktestReport,
 } from './lib/market-data/backtest.ts';
-import { MARKET_DATA_ROOT } from './lib/market-data/config.ts';
+import {
+  ACTIVE_ESTIMATOR_POLICY,
+  estimatorPolicyById,
+  MARKET_DATA_ROOT,
+  type PolicyId,
+} from './lib/market-data/config.ts';
 import {
   loadMarketData,
   marketDataFreshness,
@@ -24,7 +29,7 @@ export class CliInputError extends Error {}
 
 export type MarketDataCommand =
   | { command: 'update'; city: typeof SUPPORTED_CITY; asOf: string }
-  | { command: 'backtest'; city: typeof SUPPORTED_CITY; asOf: string; noGate: boolean };
+  | { command: 'backtest'; city: typeof SUPPORTED_CITY; asOf: string; noGate: boolean; policyId: PolicyId };
 
 function readFlagValue(args: readonly string[], index: number, flag: string): [string, number] {
   const value = args[index + 1];
@@ -36,12 +41,15 @@ function readFlagValue(args: readonly string[], index: number, flag: string): [s
 export function parseMarketDataArgs(args: readonly string[], now: Date = new Date()): MarketDataCommand {
   const command = args[0];
   if (command !== 'update' && command !== 'backtest') {
-    throw new CliInputError('usage: market-data <update|backtest> --city taipei [--as-of YYYY-MM-DD] [--no-gate]');
+    throw new CliInputError(
+      'usage: market-data <update|backtest> --city taipei [--as-of YYYY-MM-DD] [--no-gate] [--policy <baseline|48-month|1000-meter>]',
+    );
   }
 
   let city: string | undefined;
   let asOf: string | undefined;
   let noGate = false;
+  let policyId: PolicyId | undefined;
   for (let index = 1; index < args.length; index += 1) {
     const argument = args[index]!;
     if (argument === '--city') {
@@ -62,6 +70,18 @@ export function parseMarketDataArgs(args: readonly string[], now: Date = new Dat
       if (command !== 'backtest') throw new CliInputError('--no-gate is supported only by backtest');
       if (noGate) throw new CliInputError('--no-gate may be supplied only once');
       noGate = true;
+    } else if (argument === '--policy' || argument.startsWith('--policy=')) {
+      if (command !== 'backtest') throw new CliInputError('--policy is supported only by backtest');
+      if (policyId !== undefined) throw new CliInputError('--policy may be supplied only once');
+      const value = argument === '--policy'
+        ? readFlagValue(args, index, '--policy')
+        : [argument.slice('--policy='.length), index] as const;
+      const selected = value[0];
+      index = value[1];
+      if (selected !== 'baseline' && selected !== '48-month' && selected !== '1000-meter') {
+        throw new CliInputError(`unsupported policy: ${selected}`);
+      }
+      policyId = selected;
     } else {
       throw new CliInputError(`unsupported argument: ${argument}`);
     }
@@ -73,7 +93,7 @@ export function parseMarketDataArgs(args: readonly string[], now: Date = new Dat
   const resolvedAsOf = asOf ?? taipeiDateString(now);
   if (!isValidDateString(resolvedAsOf)) throw new CliInputError('--as-of must be a valid YYYY-MM-DD date');
   if (command === 'update') return { command, city, asOf: resolvedAsOf };
-  return { command, city, asOf: resolvedAsOf, noGate };
+  return { command, city, asOf: resolvedAsOf, noGate, policyId: policyId ?? ACTIVE_ESTIMATOR_POLICY.id };
 }
 
 function percent(value: number | null): string {
@@ -86,7 +106,9 @@ export function backtestExitCode(report: BacktestReport, noGate: boolean): numbe
 }
 
 export function shouldPersistBacktestAcceptance(report: BacktestReport, noGate: boolean): boolean {
-  return !noGate && evaluateBacktestGate(report).passed;
+  return !noGate
+    && report.policyId === ACTIVE_ESTIMATOR_POLICY.id
+    && evaluateBacktestGate(report).passed;
 }
 
 export function marketUpdateExitCode(status: 'updated' | 'not-modified' | 'last-known-good' | undefined): number {
@@ -119,7 +141,8 @@ async function backtest(command: Extract<MarketDataCommand, { command: 'backtest
   // Deliberately load-only: a backtest must not refresh, publish, or otherwise mutate the active build.
   const bundle = await loadMarketData(MARKET_DATA_ROOT);
   if (!bundle) throw new Error(`No validated Taipei market-data build at ${MARKET_DATA_ROOT}; run update first`);
-  const report = backtestTransactions(bundle.transactions, { asOf: command.asOf });
+  const policy = estimatorPolicyById(command.policyId);
+  const report = backtestTransactions(bundle.transactions, { asOf: command.asOf, policy });
   const gate = evaluateBacktestGate(report);
   const exitCode = backtestExitCode(report, command.noGate);
   if (shouldPersistBacktestAcceptance(report, command.noGate)) {
@@ -130,7 +153,8 @@ async function backtest(command: Extract<MarketDataCommand, { command: 'backtest
   process.stdout.write(`${JSON.stringify({ ...report, acceptanceGate: gate }, null, 2)}\n`);
   process.stderr.write(
     `backtest cases=${report.overall.caseCount} coverage=${percent(report.overall.estimateCoverage)} ` +
-    `medianAPE=${percent(report.overall.medianApe)} p75APE=${percent(report.overall.p75Ape)} ` +
+    `policy=${report.policyId} medianAPE=${percent(report.byStatus.reliable.medianApe)} ` +
+    `p75APE=${percent(report.byStatus.reliable.p75Ape)} ` +
     `gate=${command.noGate ? 'disabled' : gate.passed ? 'passed' : `failed(${gate.reasons.join(',')})`}\n`,
   );
   return exitCode;

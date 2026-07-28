@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { gridKey } from './grid.ts';
 import {
+  ACTIVE_ESTIMATOR_POLICY,
+  EXPERIMENTAL_1000_METER_POLICY,
+  MARKET_SCHEMA_VERSION,
+} from './config.ts';
+import {
   backtestAcceptance,
   backtestSubjectFromTransaction,
   backtestTransactions,
@@ -12,7 +17,6 @@ import {
 import {
   backtestExitCode,
   marketUpdateExitCode,
-  parseMarketDataArgs,
   shouldPersistBacktestAcceptance,
 } from '../../market-data.ts';
 import type { BuildingType, MarketTransaction, TransactionIndex } from './types.ts';
@@ -39,9 +43,14 @@ function transaction(id: string, transactionDate: string, price: number, buildin
 }
 
 function indexOf(transactions: MarketTransaction[]): TransactionIndex {
+  const cells: TransactionIndex['cells'] = {};
+  for (const transaction of transactions) {
+    const key = gridKey(transaction.location.coordinate!);
+    (cells[key] ??= []).push(transaction);
+  }
   return {
-    schemaVersion: 1, datasetVersion: 'fixture', builtAt: '2026-07-25T00:00:00.000Z',
-    cells: { [gridKey(coordinate)]: transactions },
+    schemaVersion: MARKET_SCHEMA_VERSION, datasetVersion: 'fixture', builtAt: '2026-07-25T00:00:00.000Z',
+    cells,
   };
 }
 
@@ -118,26 +127,15 @@ test('reports coverage, median APE, P75 APE, bias, interval coverage, and confid
   assert.equal(typeof report.overall.intervalCoverage, 'number');
   assert.ok(report.byBuildingType.apartment);
   assert.ok(report.byConfidence.high);
-});
-
-test('CLI parsing rejects unsupported cities and invalid dates before any market-data operation', () => {
-  assert.throws(() => parseMarketDataArgs(['backtest', '--city', 'invalid']), /supported city: taipei/);
-  assert.throws(() => parseMarketDataArgs(['backtest', '--city', 'taipei', '--as-of', '2026-02-30']), /valid YYYY-MM-DD/);
-  assert.throws(() => parseMarketDataArgs(['update', '--city', 'taipei', '--as-of', '2026-07-25']), /only by backtest/);
-});
-
-test('implicit CLI dates use the Taipei calendar at the 00:00–07:59 window and a quarter boundary', () => {
-  const taipeiEarlyMorning = new Date('2026-06-30T17:30:00.000Z'); // 2026-07-01 01:30 in Taipei
-  const taipeiLateMorning = new Date('2026-06-30T23:59:00.000Z'); // 2026-07-01 07:59 in Taipei
-
-  assert.equal(parseMarketDataArgs(['backtest', '--city', 'taipei'], taipeiEarlyMorning).asOf, '2026-07-01');
-  assert.equal(parseMarketDataArgs(['backtest', '--city', 'taipei'], taipeiLateMorning).asOf, '2026-07-01');
-  assert.equal(parseMarketDataArgs(['update', '--city', 'taipei'], taipeiEarlyMorning).asOf, '2026-07-01');
+  assert.ok(report.byStatus.reliable);
+  assert.ok(report.byStatus.review);
+  assert.ok(report.byStatus.unavailable);
+  assert.equal(report.policyId, ACTIVE_ESTIMATOR_POLICY.id);
 });
 
 test('quality gate fails only completed reports over a target and can be disabled', () => {
   const failed = completeGateReport({
-    overall: { medianApe: 0.13, p75Ape: 0.19 },
+    reliable: { medianApe: 0.13, p75Ape: 0.19 },
   });
 
   assert.equal(backtestExitCode(failed, false), 1);
@@ -146,7 +144,7 @@ test('quality gate fails only completed reports over a target and can be disable
 
 test('incomplete backtests fail the gate unless explicitly diagnostic', () => {
   const incomplete = completeGateReport({
-    overall: { estimatedCount: 0, medianApe: null, p75Ape: null },
+    reliable: { estimatedCount: 0, medianApe: null, p75Ape: null },
   });
 
   assert.equal(evaluateBacktestGate(incomplete).passed, false);
@@ -197,13 +195,78 @@ test('acceptance requires sufficient slices and high confidence to outperform me
   assert.equal(shouldPersistBacktestAcceptance(insufficient, false), false);
 });
 
+test('acceptance requires 70% overall estimate coverage and reliable-cohort accuracy', () => {
+  assert.ok(evaluateBacktestGate(completeGateReport({
+    overall: { estimateCoverage: 0.69 },
+  })).reasons.includes('estimate-coverage-target-missed'));
+  assert.ok(evaluateBacktestGate(completeGateReport({
+    reliable: { medianApe: 0.121 },
+  })).reasons.includes('median-ape-target-missed'));
+  assert.deepEqual(evaluateBacktestGate(completeGateReport({
+    overall: { estimateCoverage: 0.70 },
+    reliable: { medianApe: 0.12, p75Ape: 0.20 },
+  })), { passed: true, complete: true, reasons: [] });
+});
+
+test('review cohort accuracy is diagnostic and does not fail reliable acceptance', () => {
+  const report = completeGateReport({
+    reliable: { medianApe: 0.12, p75Ape: 0.20 },
+    review: { medianApe: 0.40, p75Ape: 0.80 },
+  });
+
+  assert.deepEqual(evaluateBacktestGate(report), { passed: true, complete: true, reasons: [] });
+});
+
 test('passing acceptance records policy identity and complete transaction coverage', () => {
   const passing = completeGateReport({}, '2025-12-01');
   const acceptance = backtestAcceptance(passing, 'transactions-checksum', '2026-07-26T01:00:00.000Z');
 
+  assert.equal(acceptance.schemaVersion, 2);
   assert.equal(acceptance.estimatorPolicyVersion, 2);
+  assert.equal(acceptance.policyId, 'baseline');
   assert.equal(acceptance.evaluatedThrough, '2025-12-01');
   assert.equal(acceptance.latestEligibleTransactionDate, '2025-12-01');
+  assert.equal(acceptance.thresholds.minimumEstimateCoverage, 0.70);
+  assert.equal(acceptance.metrics.reliableMedianApe, 0.08);
+  assert.equal(acceptance.metrics.reliableP75Ape, 0.16);
+});
+
+test('selected backtest policy is passed to estimation without changing the active policy', () => {
+  const subjectCoordinate = { lat: 25.033964, lng: 121.564468 };
+  const distantCoordinate = { lat: 25.033964, lng: 121.5734 };
+  const history = [
+    transaction('one', '2025-01-01', 90),
+    transaction('two', '2025-02-01', 92),
+    transaction('three', '2025-03-01', 94),
+  ];
+  for (const item of history) item.location.coordinate = distantCoordinate;
+  const subject = transaction('subject', '2025-04-01', 96);
+  subject.location.coordinate = subjectCoordinate;
+  const index = indexOf([...history, subject]);
+
+  const baseline = backtestTransactions(index, { asOf: '2026-07-25' });
+  const expanded = backtestTransactions(index, {
+    asOf: '2026-07-25',
+    policy: EXPERIMENTAL_1000_METER_POLICY,
+  });
+
+  assert.equal(baseline.policyId, 'baseline');
+  assert.equal(expanded.policyId, '1000-meter');
+  assert.equal(baseline.cases.at(-1)?.estimatedUnitPriceWan, null);
+  assert.equal(expanded.cases.at(-1)?.estimatedUnitPriceWan, null);
+  assert.equal(ACTIVE_ESTIMATOR_POLICY.id, 'baseline');
+});
+
+test('review-only source transactions are excluded from the held-out denominator', () => {
+  const reviewOnly = transaction('review-only', '2025-12-01', 100);
+  reviewOnly.eligibility = 'review-only';
+  reviewOnly.eligibilityReasons = ['mixed-primary-use'];
+
+  const report = backtestTransactions(indexOf([reviewOnly]), { asOf: '2026-07-25' });
+
+  assert.equal(heldOutTransactionEligible(reviewOnly), false);
+  assert.equal(report.latestEligibleTransactionDate, null);
+  assert.equal(report.overall.caseCount, 0);
 });
 
 test('held-out history is built incrementally with each source transaction inserted once', () => {
@@ -224,6 +287,8 @@ test('retained last-known-good refresh has a distinct nonzero operator exit', ()
 
 function completeGateReport(overrides: {
   overall?: Partial<BacktestReport['overall']>;
+  reliable?: Partial<BacktestReport['byStatus']['reliable']>;
+  review?: Partial<BacktestReport['byStatus']['review']>;
   high?: Partial<BacktestReport['byConfidence']['high']>;
   medium?: Partial<BacktestReport['byConfidence']['medium']>;
 } = {}, asOf = '2026-07-25'): BacktestReport {
@@ -241,6 +306,11 @@ function completeGateReport(overrides: {
   return {
     ...report,
     overall: metric(overrides.overall ?? {}),
+    byStatus: {
+      reliable: metric({ medianApe: 0.08, p75Ape: 0.16, ...overrides.reliable }),
+      review: metric({ caseCount: 0, estimatedCount: 0, estimateCoverage: 0, medianApe: null, p75Ape: null, ...overrides.review }),
+      unavailable: metric({ caseCount: 0, estimatedCount: 0, estimateCoverage: 0, medianApe: null, p75Ape: null }),
+    },
     byConfidence: {
       ...report.byConfidence,
       high: metric({ medianApe: 0.08, ...overrides.high }),
