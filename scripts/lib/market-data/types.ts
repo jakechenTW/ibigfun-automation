@@ -157,6 +157,7 @@ export interface TransactionIndex {
 export interface SelectionResult {
   selectedStage: number | null;
   included: ComparableEvidence[];
+  reviewOnly: ComparableEvidence[];
   excluded: ComparableEvidence[];
   candidates: ComparableEvidence[];
 }

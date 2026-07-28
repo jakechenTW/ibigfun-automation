@@ -29,7 +29,7 @@ const fresh: SourceFreshness = {
   doorplateStale: false,
 };
 
-function transaction(id: string, price: number): MarketTransaction {
+function transaction(id: string, price: number, overrides: Partial<MarketTransaction> = {}): MarketTransaction {
   return {
     id,
     transactionDate: '2026-01-25',
@@ -59,6 +59,11 @@ function transaction(id: string, price: number): MarketTransaction {
     completionDate: '2011-01-01',
     notes: '',
     exclusionFlags: [],
+    eligibility: 'reliable-eligible',
+    eligibilityReasons: [],
+    primaryUse: 'residential',
+    transferredBuildingCount: 1,
+    ...overrides,
   };
 }
 
@@ -139,4 +144,18 @@ test('keeps an eligible address range beyond the final weighting band as exclude
   assert.equal(estimate.comparables.length, 0);
   const excluded = estimate.excludedCandidates.find((candidate) => candidate.transaction.id === 'uncertain-range');
   assert.ok(excluded?.reasons.includes('distance-max-outside-supported-weight'));
+});
+
+test('review-only transactions produce a review estimate without price statistics', () => {
+  const estimate = estimateMarket(subject, indexWithTransactions([
+    transaction('mixed-a', 99, { eligibility: 'review-only' }),
+    transaction('mixed-b', 100, { eligibility: 'review-only' }),
+    transaction('mixed-c', 101, { eligibility: 'review-only' }),
+  ]), fresh, AS_OF);
+
+  assert.equal(estimate.status, 'review');
+  assert.equal(estimate.marketUnitPriceMedian, null);
+  assert.equal(estimate.marketUnitPriceP25, null);
+  assert.equal(estimate.marketUnitPriceP75, null);
+  assert.deepEqual(estimate.unavailableReasons, ['review-only-comparables']);
 });

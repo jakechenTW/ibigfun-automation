@@ -1,6 +1,12 @@
 import { askingPremiumPercent } from '../finance.ts';
 import { neighborGridKeys } from './grid.ts';
-import { HIGH_CONFIDENCE_MIN_COMPARABLES, HIGH_IQR_RATIO, MEDIUM_IQR_RATIO } from './config.ts';
+import {
+  ACTIVE_ESTIMATOR_POLICY,
+  HIGH_CONFIDENCE_MIN_COMPARABLES,
+  HIGH_IQR_RATIO,
+  MEDIUM_IQR_RATIO,
+} from './config.ts';
+import type { EstimatorPolicy } from './config.ts';
 import { selectComparables } from './selector.ts';
 import { weightedMadOutliers, weightedQuantile } from './statistics.ts';
 import type {
@@ -18,6 +24,7 @@ function finitePositive(value: number | null): boolean {
 export interface EstimateMarketOptions {
   /** Backtests intentionally hide the held-out actual price, so premiums are unavailable. */
   allowMissingAskingUnitPrice?: boolean;
+  policy?: EstimatorPolicy;
 }
 
 function subjectHardReasons(subject: MarketSubject, options: EstimateMarketOptions): string[] {
@@ -34,9 +41,9 @@ function subjectHardReasons(subject: MarketSubject, options: EstimateMarketOptio
   return reasons;
 }
 
-function nearbyTransactions(subject: MarketSubject, index: TransactionIndex) {
+function nearbyTransactions(subject: MarketSubject, index: TransactionIndex, radiusM: number) {
   const byId = new Map<string, TransactionIndex['cells'][string][number]>();
-  for (const key of neighborGridKeys(subject.coordinate, 800)) {
+  for (const key of neighborGridKeys(subject.coordinate, radiusM)) {
     for (const transaction of index.cells[key] ?? []) byId.set(transaction.id, transaction);
   }
   return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
@@ -62,6 +69,7 @@ export function estimateMarket(
   asOf: string,
   options: EstimateMarketOptions = {},
 ): MarketEstimate {
+  const policy = options.policy ?? ACTIVE_ESTIMATOR_POLICY;
   const hardReasons = subjectHardReasons(subject, options);
   if (hardReasons.includes('location-unreliable')) {
     return {
@@ -81,7 +89,8 @@ export function estimateMarket(
       excludedCandidates: [],
     };
   }
-  const selection = selectComparables(subject, nearbyTransactions(subject, index), asOf);
+  const maximumRadiusM = Math.max(...policy.stages.map((stage) => stage.radiusM));
+  const selection = selectComparables(subject, nearbyTransactions(subject, index, maximumRadiusM), asOf, policy);
   const initialIncluded = selection.included;
   const unsupportedWeight = initialIncluded.filter((candidate) =>
     !Number.isFinite(candidate.weight.total) || candidate.weight.total <= 0,
@@ -103,6 +112,24 @@ export function estimateMarket(
     ...weightSupported.filter((candidate) => outlierIds.has(candidate.transaction.id)).map(excludedOutlier),
   ];
   const unavailableReasons = [...hardReasons];
+  if (comparables.length === 0 && selection.reviewOnly.length > 0 && hardReasons.length === 0) {
+    return {
+      status: 'review',
+      confidence: 'low',
+      subjectOwnershipEvidence: subject.ownershipEvidence ?? 'unspecified',
+      subjectLocationEvidence: null,
+      marketUnitPriceMedian: null,
+      marketUnitPriceP25: null,
+      marketUnitPriceP75: null,
+      askingPremiumMedian: null,
+      askingPremiumConservative: null,
+      selectedStage: selection.selectedStage,
+      sourceFreshness: freshness,
+      unavailableReasons: ['review-only-comparables'],
+      comparables,
+      excludedCandidates,
+    };
+  }
   if (comparables.length === 0) unavailableReasons.push('no-comparables');
 
   if (hardReasons.length > 0 || comparables.length === 0) {
@@ -135,7 +162,7 @@ export function estimateMarket(
   const iqrRatio = (p75 - p25) / median;
   const stale = freshness.transactionStale || freshness.doorplateStale;
   const high = comparables.length >= HIGH_CONFIDENCE_MIN_COMPARABLES
-    && selection.selectedStage !== 5
+    && selection.selectedStage !== policy.stages.length
     && iqrRatio <= HIGH_IQR_RATIO
     && !stale;
   const medium = comparables.length >= 3 && iqrRatio <= MEDIUM_IQR_RATIO;

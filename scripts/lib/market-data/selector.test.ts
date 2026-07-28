@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { EXPERIMENTAL_48_MONTH_POLICY } from './config.ts';
 import { selectComparables } from './selector.ts';
 import type { LocationEvidence, MarketSubject, MarketTransaction } from './types.ts';
 
@@ -61,9 +62,35 @@ function transaction(id: string, overrides: Partial<MarketTransaction> = {}): Ma
     completionDate: '2011-01-01',
     notes: '',
     exclusionFlags: [],
+    eligibility: 'reliable-eligible',
+    eligibilityReasons: [],
+    primaryUse: 'residential',
+    transferredBuildingCount: 1,
     ...overrides,
   };
 }
+
+test('segregates otherwise matching review-only evidence from reliable comparables', () => {
+  const result = selectComparables(subject, [
+    transaction('reliable', { eligibility: 'reliable-eligible' }),
+    transaction('mixed', { eligibility: 'review-only' }),
+  ], AS_OF);
+
+  assert.deepEqual(result.included.map((item) => item.transaction.id), ['reliable']);
+  assert.deepEqual(result.reviewOnly.map((item) => item.transaction.id), ['mixed']);
+  assert.ok(result.reviewOnly[0]?.reasons.includes('review-only-evidence'));
+});
+
+test('uses a 48-month stage only when that experimental policy is supplied', () => {
+  const olderComparable = transaction('forty-two-months-old', { transactionDate: '2023-01-25' });
+
+  const baseline = selectComparables(subject, [olderComparable], AS_OF);
+  const experimental = selectComparables(subject, [olderComparable], AS_OF, EXPERIMENTAL_48_MONTH_POLICY);
+
+  assert.equal(baseline.included.length, 0);
+  assert.deepEqual(experimental.included.map((item) => item.transaction.id), ['forty-two-months-old']);
+  assert.equal(experimental.selectedStage, 6);
+});
 
 test('stops at the first stage with three comparables', () => {
   const result = selectComparables(subject, [

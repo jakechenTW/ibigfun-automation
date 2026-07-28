@@ -1,5 +1,6 @@
 import { haversineMeters } from '../geo.ts';
-import { SEARCH_STAGES, WEIGHTS } from './config.ts';
+import { ACTIVE_ESTIMATOR_POLICY, WEIGHTS } from './config.ts';
+import type { EstimatorPolicy, SearchStage } from './config.ts';
 import type {
   ComparableEvidence,
   FloorGroup,
@@ -8,8 +9,6 @@ import type {
   SelectionResult,
   WeightBreakdown,
 } from './types.ts';
-
-type SearchStage = typeof SEARCH_STAGES[number];
 
 function finitePositive(value: number): boolean {
   return Number.isFinite(value) && value > 0;
@@ -68,8 +67,10 @@ function hardReasons(
   transaction: MarketTransaction,
   transactionDate: Date,
   asOf: Date,
+  maximumMonths: number,
 ): string[] {
   const reasons: string[] = [];
+  if (transaction.eligibility !== 'reliable-eligible') reasons.push('review-only-evidence');
   if (transaction.district !== subject.district) reasons.push('district-mismatch');
   if (transaction.buildingType !== subject.buildingType) reasons.push('building-type-mismatch');
   if (transaction.ownership !== subject.ownership || transaction.ownership === 'unknown') reasons.push('ownership-mismatch');
@@ -77,7 +78,7 @@ function hardReasons(
   if (!finitePositive(transaction.buildingAreaPing)) reasons.push('invalid-building-area');
   if (!transaction.location.coordinate || transaction.location.method === 'unresolved') reasons.push('location-unresolved');
   if (transactionDate > asOf) reasons.push('transaction-in-future');
-  if (transactionDate < subtractCalendarMonths(asOf, 36)) reasons.push('transaction-too-old');
+  if (transactionDate < subtractCalendarMonths(asOf, maximumMonths)) reasons.push('transaction-too-old');
   if (subject.buildingType !== 'apartment' && (subject.ageYears === null || ageYearsAt(transaction.completionDate, asOf) === null)) {
     reasons.push('missing-building-age');
   }
@@ -160,6 +161,7 @@ export function selectComparables(
   subject: MarketSubject,
   candidates: readonly MarketTransaction[],
   asOf: string,
+  policy: EstimatorPolicy = ACTIVE_ESTIMATOR_POLICY,
 ): SelectionResult {
   const targetDate = parseIsoDate(asOf);
   if (!targetDate) throw new RangeError('Comparable selection requires a valid as-of date');
@@ -167,11 +169,14 @@ export function selectComparables(
     throw new RangeError('Comparable selection requires a finite subject coordinate');
   }
 
+  const maximumMonths = Math.max(...policy.stages.map((stage) => stage.months));
   const states = candidates.map((transaction): CandidateState => {
     const transactionDate = parseIsoDate(transaction.transactionDate);
     const transactionMonths = transactionDate ? completeMonthsBetween(transactionDate, targetDate) : Number.POSITIVE_INFINITY;
     const distances = locationDistances(subject, transaction);
-    const hard = transactionDate ? hardReasons(subject, transaction, transactionDate, targetDate) : ['invalid-transaction-date'];
+    const hard = transactionDate
+      ? hardReasons(subject, transaction, transactionDate, targetDate, maximumMonths)
+      : ['invalid-transaction-date'];
     return {
       evidence: {
         transaction,
@@ -190,18 +195,18 @@ export function selectComparables(
   let selectedStage: number | null = null;
   let selectedStates: CandidateState[] = [];
   const finalStageReasons = new Map<CandidateState, string[]>();
-  for (const [index, stage] of SEARCH_STAGES.entries()) {
+  for (const [index, stage] of policy.stages.entries()) {
     const qualifying = states.filter((state) => {
-      const reasons = state.hardReasons.length > 0 || !state.transactionDate
+      const reasons = !state.transactionDate
         ? state.hardReasons
-        : stageReasons(subject, state.evidence.transaction, stage, {
+        : [...state.hardReasons, ...stageReasons(subject, state.evidence.transaction, stage, {
           min: state.evidence.distanceMinM,
           max: state.evidence.distanceMaxM,
-        }, state.transactionDate, targetDate);
+        }, state.transactionDate, targetDate)];
       finalStageReasons.set(state, reasons);
       return reasons.length === 0;
     });
-    if (qualifying.length >= 3 || index === SEARCH_STAGES.length - 1) {
+    if (qualifying.length >= 3 || index === policy.stages.length - 1) {
       selectedStates = qualifying;
       selectedStage = qualifying.length > 0 ? index + 1 : null;
       break;
@@ -217,6 +222,8 @@ export function selectComparables(
   return {
     selectedStage,
     included: all.filter((candidate) => candidate.included),
+    reviewOnly: all.filter((candidate) => !candidate.included
+      && candidate.reasons.length === 1 && candidate.reasons[0] === 'review-only-evidence'),
     excluded: all.filter((candidate) => !candidate.included),
     candidates: all,
   };

@@ -11,6 +11,15 @@ const bundle = JSON.parse(
   readFileSync(new URL('./fixtures/enriched-market-index.json', import.meta.url), 'utf8'),
 ) as MarketDataBundle;
 
+for (const transactions of Object.values(bundle.transactions.cells)) {
+  for (const transaction of transactions) {
+    transaction.eligibility = 'reliable-eligible';
+    transaction.eligibilityReasons = [];
+    transaction.primaryUse = 'residential';
+    transaction.transferredBuildingCount = 1;
+  }
+}
+
 function bundleWithAcceptance(transactionArtifactSha256 = 'fixture-transactions-index'): MarketDataBundle {
   const accepted = structuredClone(bundle);
   accepted.manifest.artifacts['transactions-index.json'] = {

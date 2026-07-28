@@ -34,6 +34,7 @@ function transaction(id: string, transactionDate: string, price: number, buildin
     parkingPriceNtd: 0, parkingAreaPing: 0, buildingUnitPriceWan: price,
     floor: 3, totalFloors: buildingType === 'apartment' ? 5 : 10, floorGroup: buildingType === 'apartment' ? 'middle' : 'low',
     completionDate: buildingType === 'apartment' ? null : '2011-01-01', notes: '', exclusionFlags: [],
+    eligibility: 'reliable-eligible', eligibilityReasons: [], primaryUse: 'residential', transferredBuildingCount: 1,
   };
 }
 
@@ -200,7 +201,7 @@ test('passing acceptance records policy identity and complete transaction covera
   const passing = completeGateReport({}, '2025-12-01');
   const acceptance = backtestAcceptance(passing, 'transactions-checksum', '2026-07-26T01:00:00.000Z');
 
-  assert.equal(acceptance.estimatorPolicyVersion, 1);
+  assert.equal(acceptance.estimatorPolicyVersion, 2);
   assert.equal(acceptance.evaluatedThrough, '2025-12-01');
   assert.equal(acceptance.latestEligibleTransactionDate, '2025-12-01');
 });
