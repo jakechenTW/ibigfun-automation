@@ -103,26 +103,28 @@ evaluation, and writing the report.
   matching acceptance; this git-ignored local state is never committed.
 - `npm run market-data -- candidate --city taipei --policy
   <baseline|48-month|1000-meter>` — builds and backtests a fresh candidate
-  without publishing it. The command can emit held-out cases; capture it only
-  under `state/market-data/backtests/taipei/`, then retain only aggregate
-  diagnostics, report slices, and gate results—never cases, rows, or addresses.
-  Never commit it. Evaluate `baseline` first. Try `48-month` only when baseline
-  misses the 70% eligible-coverage target and has no accuracy/calibration
-  failure; try `1000-meter` only under the same condition after the 48-month
-  policy. A fallback becomes active only after every gate passes, with an
+  without publishing it. Standard output contains the full held-out report and
+  may include case-level evidence; do not retain or commit raw stdout. If a
+  diagnostic must be preserved, immediately rewrite/redact it to aggregate
+  diagnostics, report slices, and gate results under
+  `state/market-data/backtests/taipei/`—never cases, rows, or addresses.
+  Evaluate `baseline` first. Try `48-month` only when baseline misses the 70%
+  eligible-coverage target and has no accuracy/calibration failure; try
+  `1000-meter` only under the same condition after the 48-month policy. A
+  fallback becomes active only after every gate passes, with an
   `ESTIMATOR_POLICY_VERSION` bump and a normal `update` publication.
 - `npm run market-data -- backtest --city taipei [--as-of YYYY-MM-DD] [--no-gate]`
-  — evaluates the active local build without refreshing it. It prints aggregate,
-  non-identifying accuracy and interval metrics; it needs no credentials. A
-  completed passing gated run covering the complete eligible transaction index
-  writes the checksum-, policy-, and date-keyed local acceptance needed for
-  `reliable` estimates; a historical `--as-of` cannot approve a newer index and
+  — evaluates the active local build without refreshing it. Its stderr summary
+  is aggregate, but stdout is the full `BacktestReport` and may contain
+  case-level evidence. Do not retain or commit raw stdout; any preserved
+  diagnostic must first be rewritten/redacted to aggregate-only JSON under
+  `state/market-data/backtests/taipei/`. It needs no credentials. A completed
+  passing gated run covering the complete eligible transaction index writes
+  the checksum-, policy-, and date-keyed local acceptance needed for `reliable`
+  estimates; a historical `--as-of` cannot approve a newer index and
   `--no-gate` is diagnostic and never approves. Bump
   `ESTIMATOR_POLICY_VERSION` whenever selector, weighting, outlier, confidence,
   status, or backtest semantics change.
-  Preserve optional diagnostic output under
-  `state/market-data/backtests/taipei/`, never inside the checksum-closed active
-  build.
 - `npm run route -- --lat <> --lng <>` — deterministic nearest-walk exit for one
   coordinate (shared ORS cache). Used during triage (step 5) to get a trustworthy
   walking distance after re-locating a listing from its address.

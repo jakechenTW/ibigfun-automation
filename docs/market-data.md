@@ -111,6 +111,18 @@ build when their checksum matches. Thus the first enrichment attempts to build
 the index automatically; it is not an offline-only operation. Run the explicit
 command first when you want to establish or inspect a build deliberately.
 
+The current MOI season is allowed to be temporarily unpublished only in one
+fail-closed branch: that season has no prior source in the active manifest and
+the official ZIP download ends with the explicit `FILE_ENDED` signal. The
+updater emits `market-data.current-season-unavailable`, skips only that current
+season, and builds from completed seasons. Any other current-season error—or
+the same signal when an old source exists—remains a refresh failure. When the
+completed-season source checks succeed, either a completed-season candidate can
+pass validation/acceptance and publish or the previously accepted unchanged
+build can revalidate with advanced successful check timestamps. Both can remain
+fresh; this explicit warning is neither silent stale data nor a last-known-good
+refresh failure.
+
 If a download, source layout, ZIP, CSV, or validation check fails, no staged
 data is published. A valid active build remains the last-known-good build; if
 none exists, enrichment continues with independent fields and sets
@@ -177,21 +189,21 @@ write the required `valuation-review.json` when it changes a report bucket.
 
 The production refresh evaluates a freshly staged candidate before publication.
 For an explicit fresh-data calibration, run the non-publishing `candidate`
-command and capture its JSON only under the git-ignored diagnostics directory:
+command:
 
 ```bash
-mkdir -p state/market-data/backtests/taipei
-npm run market-data -- candidate --city taipei --policy baseline \
-  > state/market-data/backtests/taipei/2026-07-28-baseline.json
+npm run market-data -- candidate --city taipei --policy baseline
 ```
 
 `candidate` downloads or reuses public official sources, builds and validates
 new indexes in staging, runs the complete backtest, emits aggregate
 normalization diagnostics plus the held-out report, then removes staging. It
-never changes the active build or acceptance. Its initial output can contain
-held-out `cases`; after reading the gate, rewrite the local diagnostic to retain
-only aggregate diagnostics, report slices, and gate results. Never retain or
-commit cases, transaction/address rows, or listing details.
+never changes the active build or acceptance. Stdout is the full report and can
+contain held-out `cases`; do not retain or commit raw stdout. If a local
+diagnostic is required, capture it only as a transient input, immediately
+rewrite/redact it to aggregate diagnostics, report slices, and gate results
+under `state/market-data/backtests/taipei/`, then delete the raw input. Never
+retain cases, transaction/address rows, or listing details.
 
 The policy decision is deliberately sequential:
 
@@ -278,24 +290,24 @@ format-shaped impossible dates such as `2026-02-30` are rejected. During
 enrichment, acceptance and complete-index coverage are evaluated once for the
 loaded bundle before listings are mapped, not once per listing.
 
-`--no-gate` is for recording or diagnosing a baseline; it returns diagnostic
-metrics without writing or updating acceptance and does not make failed or
-incomplete quality acceptable:
+`--no-gate` is for diagnosing a baseline; it returns a full diagnostic report
+without writing or updating acceptance and does not make failed or incomplete
+quality acceptable:
 
 ```bash
-mkdir -p state/market-data/backtests/taipei
-npm run market-data -- backtest --city taipei --as-of 2026-07-26 --no-gate \
-  > state/market-data/backtests/taipei/2026-07-26.json
+npm run market-data -- backtest --city taipei --as-of 2026-07-26 --no-gate
 ```
 
-The CLI prints the full report to standard output. Redirect it as above when
-preserving per-case diagnostic evidence; the automatically managed acceptance
-file remains aggregate-only and separate. The diagnostics path is deliberately
-outside the checksum-closed active build. Keep both under git-ignored `state/`,
-summarize only aggregate metrics in handoff, and never commit transaction rows.
-If targets are missed or high-confidence cases do not outperform weaker
-evidence, keep results in review and recalibrate selection/weight constants
-with tests and backtest evidence.
+The CLI prints the full `BacktestReport` to stdout, including `cases`; only the
+one-line stderr summary is aggregate. Do not retain or commit raw stdout. If a
+diagnostic must be preserved, use the raw output only as a transient input,
+rewrite/redact it to aggregate-only JSON under
+`state/market-data/backtests/taipei/`, and delete the raw input. The
+automatically managed acceptance file remains aggregate-only and separate, and
+the diagnostics path stays outside the checksum-closed active build. Summarize
+only aggregate metrics in handoff. If targets are missed or high-confidence
+cases do not outperform weaker evidence, keep results in review and
+recalibrate selection/weight constants with tests and backtest evidence.
 
 ## Troubleshooting
 
