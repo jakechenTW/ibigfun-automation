@@ -3,9 +3,13 @@
 ## Goal
 
 Evaluate whether RealPing's cleaned transaction feed improves Taipei market
-estimates when it is used with this repository's existing geospatial comparable
-selector. The experiment must not change daily enrichment, reporting,
-notification, recommendation buckets, or the authoritative `marketEstimate`.
+estimates when it is used by an isolated reduced-feature geospatial challenger.
+The challenger uses the repository's existing distance, time, building-type,
+area, building-age, outlier, weighting, and confidence concepts, but it cannot
+apply floor-group matching because RealPing's public records do not expose the
+transferred floor or total floors. The experiment must not change daily
+enrichment, reporting, notification, recommendation buckets, or the
+authoritative `marketEstimate`.
 
 RealPing may replace the official production estimator only in a later,
 separately approved change after the challenger improves both median APE and P75
@@ -18,11 +22,11 @@ The first phase adds one standalone benchmark command. It:
 - reads `REALPING_API_KEY` from the environment or project-local `.env`;
 - obtains RealPing transaction records through its documented
   `GET /transactions` endpoint;
-- validates that the live response contains the fields needed for a fair
-  comparison;
-- adapts eligible RealPing records into the existing market transaction model;
-- applies the existing GPS, distance, time, area, age, floor, building-type,
-  ownership, outlier, weighting, and confidence logic;
+- validates the live response against the observed public API contract;
+- adapts eligible RealPing records into a dedicated challenger transaction
+  model;
+- applies GPS, distance, time, area, age, building-type, outlier, weighting,
+  and confidence logic without inventing floor evidence;
 - evaluates the challenger and current official estimator on identical held-out
   cases; and
 - writes an aggregate-only diagnostic report.
@@ -65,22 +69,37 @@ matching the existing conservative production rule.
 ## Live Contract Validation
 
 RealPing's public OpenAPI document does not describe its response body schema.
-Before downloading a benchmark corpus, the command performs a small authenticated
-request and validates the returned records.
+An authenticated schema-only probe on 2026-07-29 established that
+`GET /transactions` returns the envelope fields `count`, `total`, `limit`,
+`offset`, `data`, and `source`. Each `data` record exposes:
 
-Each usable record must expose values that can be normalized into:
+- `縣市`, `區`, `門牌`, `交易日`, `建物型態`, and `主要用途`;
+- `屋齡`, `總價`, `淨建坪`, and `去車位單價_萬元坪`;
+- `實坪`, `實坪單價_萬元坪`, `原始單價_萬元坪`, and `公設比`;
+- `房`, `廳`, and `衛`;
+- `是否特殊`, `含車位無價`, `多物件`, `單價可用`, `實坪可用`, and
+  `日期異常`; and
+- `來源期別`.
 
-- a stable transaction identifier;
-- transaction date;
-- city and district;
-- disclosed doorplate or address range;
-- building type;
-- registered building area;
-- floor and total-floor evidence;
-- building completion date or age;
-- transaction eligibility or quality flags;
-- separable-parking evidence; and
-- `去車位單價_萬元坪`.
+The endpoint does not expose a transaction identifier, transferred floor, total
+floors, completion date, parking area, or parking price. The challenger must not
+guess those fields or coerce a record into the production `MarketTransaction`
+type.
+
+Before downloading a benchmark corpus, the command performs a small
+authenticated request and validates the envelope and record keys against this
+observed contract. Each usable challenger record requires:
+
+- a valid transaction date;
+- Taipei city, district, and a locatable disclosed doorplate or address range;
+- a supported building type and residential primary use;
+- finite, nonnegative reported age;
+- positive registered net building area;
+- positive `去車位單價_萬元坪`;
+- `是否特殊 === false`, `含車位無價 === false`,
+  `多物件 === false`, `單價可用 === true`, and
+  `日期異常 === false`; and
+- a nonempty source period.
 
 The command stops with a concise contract error if any required field is absent,
 malformed, or semantically ambiguous. It must not silently substitute an
@@ -112,15 +131,40 @@ aggregate report.
 
 ## Adapter and Geospatial Selection
 
-A focused adapter converts validated provider records to the existing
-`MarketTransaction` interface. Address disclosure is resolved using the active
+A focused adapter converts validated provider records to a new
+`RealPingComparable` interface. Address disclosure is resolved using the active
 Taipei doorplate index and the same uncertainty representation used by official
 transactions.
 
-The challenger invokes the existing `estimateMarket` implementation and active
-estimator policy. This deliberately holds the model constant so the first
-experiment answers one question: does RealPing's cleaned transaction corpus
-improve the results?
+Because the provider omits floor evidence, the challenger has a separate
+estimator rather than weakening or adding optional branches to the production
+selector. It uses the active policy's search radii, date windows, area
+tolerances, distance weights, time weights, and confidence-class boundaries.
+It applies these candidate checks:
+
+- same district and building type;
+- transaction date on or before the case cutoff;
+- distance within the current stage radius, including address uncertainty;
+- net building area within the current stage tolerance; and
+- for midrise/highrise, building age at the held-out date within the current
+  10/15-year tolerance.
+
+For age comparison, the provider's reported age at sale is advanced by the
+elapsed whole months between the comparable transaction and held-out date.
+Apartment candidates retain the production rule that does not require building
+age. No floor weight is applied and no synthetic floor group is assigned.
+
+The challenger reuses the production weighted-MAD outlier and weighted-quantile
+helpers. Its total candidate weight is distance × time × location precision ×
+area × building age. Confidence and status use the same comparable-count, IQR,
+fallback-stage, and freshness thresholds as production, except that the
+benchmark report always labels this as a reduced-feature challenger.
+
+Since RealPing does not expose its internal transaction ID, the adapter creates
+a deterministic local key from the complete provider record. Exact duplicate
+records collapse to one. A key collision with unequal records is a contract
+error and makes the run inconclusive; records must never silently overwrite one
+another.
 
 Provider records remain excluded when their address cannot be located,
 district/building type is inconsistent, parking is inseparable, the transaction
@@ -137,12 +181,11 @@ For each held-out case:
 
 1. The as-of cutoff is the calendar day before that transaction.
 2. Both estimators may use only transactions on or before that cutoff.
-3. The held-out transaction is removed from both corpora by stable transaction
-   identifier.
-4. If RealPing does not expose a stable identifier that can be matched to the
-   official source, the benchmark stops. It must not rely on a weak
-   address/date/price heuristic that could leak the answer.
-5. Existing production eligibility rules determine which cases belong in the
+3. All transactions on the held-out transaction date are absent from both
+   historical corpora. This prevents target leakage without needing RealPing's
+   unexposed source identifier and matches the production backtest's existing
+   same-date isolation.
+4. Existing production eligibility rules determine which cases belong in the
    denominator.
 
 A command-level `--as-of` may limit the maximum held-out date but cannot approve
@@ -206,10 +249,13 @@ Coverage includes:
 - pagination and bounded transient retry;
 - 401/403, 429, 5xx, timeout, and malformed JSON behavior;
 - live-contract validation and schema fingerprinting;
-- exact mapping to `MarketTransaction`;
-- rejection of ambiguous price basis, address, identifier, quality, and parking
+- exact mapping to `RealPingComparable`;
+- rejection of ambiguous price basis, address, age, quality, and parking
   records;
-- cutoff enforcement and held-out ID exclusion;
+- deterministic local keys, exact deduplication, and collision rejection;
+- cutoff enforcement and exclusion of the complete held-out date;
+- absence of synthetic floor evidence and floor weights;
+- age-at-held-out-date adjustment for midrise/highrise candidates;
 - identical evaluation denominators;
 - metric and gate calculations;
 - cache invalidation after schema drift; and
