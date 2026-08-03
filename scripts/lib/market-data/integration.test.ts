@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { attachMarketEstimates } from '../steps.ts';
+import { attachMarketEstimates, listingParkingFamily } from '../steps.ts';
 import type { PreMarketEnrichedListing } from '../types.ts';
 import { ACTIVE_ESTIMATOR_POLICY, ESTIMATOR_POLICY_VERSION } from './config.ts';
+import type { OfficialComparableLocator } from './evidence.ts';
 import type { BacktestAcceptance, MarketDataBundle } from './types.ts';
 
 const AS_OF = '2026-07-25';
@@ -15,6 +16,17 @@ for (const transactions of Object.values(bundle.transactions.cells)) {
   for (const transaction of transactions) {
     transaction.eligibility = 'reliable-eligible';
     transaction.eligibilityReasons = [];
+    transaction.totalAreaPing = transaction.buildingAreaPing!;
+    transaction.parkingEvidence = {
+      grade: 'A',
+      family: 'none',
+      originalType: '無車位',
+      officialPriceNtd: null,
+      officialAreaPing: null,
+      imputation: null,
+      reasons: [],
+    };
+    transaction.originalPrimaryUse = '住家用';
     transaction.primaryUse = 'residential';
     transaction.transferredBuildingCount = 1;
   }
@@ -99,6 +111,13 @@ function listing(overrides: Partial<PreMarketEnrichedListing> = {}): PreMarketEn
     ...overrides,
   };
 }
+
+test('maps listing parking labels to strict scenario families', () => {
+  assert.equal(listingParkingFamily('平面'), 'flat');
+  assert.equal(listingParkingFamily('機械'), 'mechanical');
+  assert.equal(listingParkingFamily('無車位'), 'none');
+  assert.equal(listingParkingFamily(null), 'unknown');
+});
 
 test('production estimate stays review before approval and becomes reliable only for matching acceptance', () => {
   const [unapproved] = attachMarketEstimates([listing()], bundle, AS_OF);
@@ -186,17 +205,60 @@ test('incomplete unresolved listing address stays review-only when the reverse r
   assert.equal(evidence?.nearestDoorplate.matchedAddress, '台北市中正區測試路1號');
 });
 
-test('untyped, unreliable GPS, and inseparable listing parking stay unavailable or review', () => {
+test('untyped and unreliable GPS listings stay unavailable', () => {
   const untyped = attachMarketEstimates([listing({ queryHouseType: null, buildingType: null })], bundle, AS_OF)[0]!;
   const unreliable = attachMarketEstimates([
     listing({ reliability: { coordPresent: true, coordConsistent: false, routeOk: null, ratio: null, reason: 'district mismatch' } }),
   ], bundle, AS_OF)[0]!;
-  const parking = attachMarketEstimates([listing({ parking: '平面車位' })], bundle, AS_OF)[0]!;
 
   assert.deepEqual(untyped.marketEstimate.unavailableReasons, ['listing-building-type-unavailable']);
   assert.deepEqual(unreliable.marketEstimate.unavailableReasons, ['listing-coordinate-unreliable']);
-  assert.equal(parking.marketEstimate.status, 'review');
-  assert.deepEqual(parking.marketEstimate.unavailableReasons, ['listing-parking-not-separable']);
+});
+
+test('known listing parking gets a parallel one-space scenario while legacy authority stays review', () => {
+  const [result] = attachMarketEstimates([listing({ parking: '平面' })], bundle, AS_OF);
+
+  assert.equal(result.marketEstimate.status, 'review');
+  assert.deepEqual(result.marketEstimate.unavailableReasons, ['listing-parking-not-separable']);
+  assert.equal(result.marketScenarios.parkingFamily, 'flat');
+  assert.equal(result.marketScenarios.parkingCountAssumption, 1);
+  assert.ok(result.marketScenarios.scenarios.length > 0);
+});
+
+test('no-parking listing gets an explicit zero-space scenario assumption', () => {
+  const [result] = attachMarketEstimates([listing({ parking: '無車位' })], bundle, AS_OF);
+
+  assert.equal(result.marketScenarios.parkingFamily, 'none');
+  assert.equal(result.marketScenarios.parkingCountAssumption, 0);
+});
+
+test('local scenario comparables carry official query locators', () => {
+  const [result] = attachMarketEstimates([listing()], bundle, AS_OF);
+  const comparable = result.marketScenarios.scenarios
+    .flatMap((scenario) => [...scenario.comparables, ...scenario.bundleComparables])[0] as
+      | { officialLocator?: OfficialComparableLocator }
+      | undefined;
+
+  assert.deepEqual(comparable?.officialLocator, {
+    queryUrl: 'https://lvr.land.moi.gov.tw/',
+    district: '中正區',
+    addressOrRoad: '台北市中正區測試路1號',
+    transactionMonth: '2026-01',
+    floor: 5,
+    totalPriceNtd: 28_800_000,
+    totalAreaPing: 30,
+  });
+});
+
+test('unknown listing parking keeps count and price unknown with low-confidence evidence', () => {
+  const [result] = attachMarketEstimates([listing({ parking: '另洽' })], bundle, AS_OF);
+
+  assert.equal(result.marketScenarios.parkingFamily, 'unknown');
+  assert.equal(result.marketScenarios.parkingCountAssumption, null);
+  assert.ok(result.marketScenarios.reasons.includes('parking-family-unknown'));
+  assert.ok(result.marketScenarios.scenarios.every((scenario) => scenario.confidence === 'low'));
+  assert.ok(result.marketScenarios.scenarios.every((scenario) => scenario.parkingEstimate === null));
+  assert.ok(result.marketScenarios.scenarios.every((scenario) => scenario.bundleValue === null));
 });
 
 test('explicit non-freehold title is retained as listing evidence', () => {

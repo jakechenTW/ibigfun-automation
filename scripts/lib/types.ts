@@ -1,6 +1,6 @@
 import type { Coordinate } from './coords.ts';
 import type { RegionGate } from './region.ts';
-import type { BuildingType, MarketEstimate } from './market-data/types.ts';
+import type { BuildingType, MarketEstimate, MarketScenarioEstimate } from './market-data/types.ts';
 
 /** One row of iBigFun's 刊登紀錄: this property's appearance on one source/date. */
 export interface ListingHistoryEntry {
@@ -113,10 +113,12 @@ export interface EnrichedListing extends Listing {
   hardExclusion: { excluded: boolean; reasons: string[] };
   tenure: ListingTenure;
   marketEstimate: MarketEstimate;
+  /** Parallel candidate scenarios; `marketEstimate` remains authoritative until activation. */
+  marketScenarios: MarketScenarioEstimate;
 }
 
 /** Internal deterministic enrichment shape before market evidence is attached. */
-export type PreMarketEnrichedListing = Omit<EnrichedListing, 'marketEstimate'>;
+export type PreMarketEnrichedListing = Omit<EnrichedListing, 'marketEstimate' | 'marketScenarios'>;
 
 /** Output document written to state/runs/<label>/enriched.json and stdout. */
 export interface EnrichResult {

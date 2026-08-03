@@ -343,7 +343,9 @@ function estimateScenario(
   const p25 = weighted.marketUnitPriceP25!;
   const median = weighted.marketUnitPriceMedian!;
   const p75 = weighted.marketUnitPriceP75!;
-  const confidence = confidenceFor(weighted.comparables.length, p25, median, p75, selection.selectedStage, freshness);
+  const confidence = commonReasons.includes('parking-family-unknown')
+    ? 'low'
+    : confidenceFor(weighted.comparables.length, p25, median, p75, selection.selectedStage, freshness);
   const bundleValue = bundleFor(subject, weighted.comparables, parking);
   const relationship = bundleRelationship(bundleValue, bundleComparables);
   scenarioReasons.push(`bundle-evidence-${relationship}`);
