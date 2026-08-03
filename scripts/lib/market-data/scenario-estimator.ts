@@ -39,13 +39,12 @@ const SCENARIO_USE_ORDER: ReadonlyArray<Exclude<NormalizedPrimaryUse, 'unknown'>
 type ScenarioRole = UseScenarioEstimate['role'];
 type BundleRelationship = 'corroborates' | 'conflicts' | 'insufficient';
 
-interface FutureScenarioAcceptance {
-  useCohorts?: Partial<Record<Exclude<NormalizedPrimaryUse, 'unknown'>, { status: string }>>;
-  parkingImputationAccepted?: boolean;
-}
-
 function finitePositive(value: number | null): value is number {
   return value !== null && Number.isFinite(value) && value > 0;
+}
+
+function validParkingCount(value: unknown): value is 0 | 1 | 2 | null {
+  return value === null || value === 0 || value === 1 || value === 2;
 }
 
 function subjectReasons(subject: ScenarioMarketSubject): string[] {
@@ -58,10 +57,16 @@ function subjectReasons(subject: ScenarioMarketSubject): string[] {
   if (subject.buildingType !== 'apartment' && subject.ageYears === null) reasons.push('missing-subject-building-age');
   if (subject.registeredUse.value === 'unknown' || subject.registeredUse.source === 'unknown') reasons.push('registered-use-unverified');
   if (subject.parkingFamily === 'unknown') reasons.push('parking-family-unknown');
-  if (subject.parkingFamily !== 'none' && subject.parkingCount === null) reasons.push('parking-count-unknown');
-  if (subject.parkingFamily === 'none' && subject.parkingCount !== 0) reasons.push('parking-count-family-conflict');
-  if ((subject.parkingFamily === 'flat' || subject.parkingFamily === 'mechanical') && subject.parkingCount === 0) {
-    reasons.push('parking-count-family-conflict');
+  const parkingCount: unknown = subject.parkingCount;
+  if (!validParkingCount(parkingCount)) {
+    reasons.push('invalid-parking-count');
+  } else {
+    if (subject.parkingFamily !== 'none' && parkingCount === null) reasons.push('parking-count-unknown');
+    if (subject.parkingFamily === 'none' && parkingCount !== 0) reasons.push('parking-count-family-conflict');
+    if ((subject.parkingFamily === 'flat' || subject.parkingFamily === 'mechanical') && parkingCount === 0) {
+      reasons.push('parking-count-family-conflict');
+    }
+    if (subject.parkingFamily === 'unknown' && parkingCount !== null) reasons.push('parking-count-family-conflict');
   }
   return reasons;
 }
@@ -79,17 +84,13 @@ function useCohortAccepted(
   acceptance: BacktestAcceptance | null,
   primaryUse: Exclude<NormalizedPrimaryUse, 'unknown'>,
 ): boolean {
-  if (!acceptance) return false;
-  const future = acceptance as BacktestAcceptance & FutureScenarioAcceptance;
-  if (future.useCohorts) return future.useCohorts[primaryUse]?.status === 'accepted';
   // Schema-2 acceptance proves only the authoritative legacy residential cohort.
-  return primaryUse === 'residential';
+  return acceptance !== null && primaryUse === 'residential';
 }
 
-function parkingImputationAccepted(acceptance: BacktestAcceptance | null): boolean {
-  if (!acceptance) return false;
-  const future = acceptance as BacktestAcceptance & FutureScenarioAcceptance;
-  return future.parkingImputationAccepted === true;
+function parkingImputationAccepted(_acceptance: BacktestAcceptance | null): boolean {
+  // Schema-2 has no validated parking activation. Task 6 introduces that contract.
+  return false;
 }
 
 function scenarioRequests(subject: ScenarioMarketSubject): Array<{
@@ -255,7 +256,7 @@ function insufficientScenario(
     selectedStage,
     comparables,
     bundleComparables,
-    reasons: [...reasons, 'insufficient-comparables'],
+    reasons: [...reasons, 'insufficient-comparables', 'bundle-evidence-insufficient'],
   };
 }
 
@@ -407,6 +408,8 @@ export function estimateMarketScenarios(
     'ownership-unknown',
     'invalid-total-area',
     'missing-subject-building-age',
+    'invalid-parking-count',
+    'parking-count-family-conflict',
   ].includes(reason));
   const requests = scenarioRequests(subject);
   const candidates = blocking ? [] : nearbyTransactions(subject, index);

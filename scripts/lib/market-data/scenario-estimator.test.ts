@@ -178,6 +178,66 @@ test('verified non-residential use emits its primary scenario before a residenti
   ]);
 });
 
+test('schema-2 extras cannot activate office cohorts or grade-B building evidence', () => {
+  const injectedSchema2 = {
+    ...acceptance,
+    useCohorts: {
+      residential: { status: 'accepted' },
+      office: { status: 'accepted' },
+    },
+    parkingImputationAccepted: true,
+  } as BacktestAcceptance & {
+    useCohorts: Record<string, { status: string }>;
+    parkingImputationAccepted: boolean;
+  };
+  const office = estimateMarketScenarios(
+    {
+      ...unknownUseSubject,
+      registeredUse: { value: 'office', source: 'official', detail: '使用執照' },
+    },
+    indexWithTransactions(allUseTransactions()),
+    fresh,
+    AS_OF,
+    injectedSchema2,
+  );
+  assert.equal(office.scenarios[0]?.status, 'diagnostic-only');
+  assert.ok(office.scenarios[0]?.reasons.includes('use-cohort-not-accepted'));
+
+  const imputation = {
+    asOf: '2025-12-15',
+    stage: 'nearby-500m' as const,
+    comparableIds: ['parking-a', 'parking-b', 'parking-c'],
+    comparableCount: 3,
+    priceP25Ntd: 1_800_000,
+    priceP50Ntd: 2_000_000,
+    priceP75Ntd: 2_200_000,
+    areaP25Ping: 9,
+    areaP50Ping: 10,
+    areaP75Ping: 11,
+  };
+  const gradeB = [99, 100, 101].map((price, index) => transaction(`grade-b-${index}`, 'residential', price, {
+    eligibility: 'review-only',
+    eligibilityReasons: ['parking-not-separable'],
+    parkingEvidence: {
+      grade: 'B', family: 'flat', originalType: '坡道平面',
+      officialPriceNtd: null, officialAreaPing: null, imputation, reasons: ['parking-not-separable'],
+    },
+  }));
+  const residential = estimateMarketScenarios(
+    {
+      ...unknownUseSubject,
+      registeredUse: { value: 'residential', source: 'official', detail: '使用執照' },
+    },
+    indexWithTransactions(gradeB),
+    fresh,
+    AS_OF,
+    injectedSchema2,
+  );
+  assert.equal(residential.scenarios[0]?.status, 'insufficient-sample');
+  assert.equal(residential.scenarios[0]?.marketUnitPriceMedian, null);
+  assert.equal(residential.scenarios[0]?.gradeCounts.B, 0);
+});
+
 test('insufficient exact-use cohorts stay visible with null quantiles', () => {
   const result = estimateMarketScenarios(
     unknownUseSubject,
@@ -194,6 +254,7 @@ test('insufficient exact-use cohorts stay visible with null quantiles', () => {
     assert.equal(scenario.marketUnitPriceMedian, null);
     assert.equal(scenario.marketUnitPriceP75, null);
     assert.equal(scenario.bundleValue, null);
+    assert.ok(scenario.reasons.includes('bundle-evidence-insufficient'));
   }
 });
 
@@ -268,6 +329,56 @@ test('a required but unavailable parking model prevents a reliable scenario', ()
   assert.equal(result.scenarios[0]?.bundleValue, null);
   assert.ok(result.scenarios[0]?.reasons.includes('parking-estimate-unavailable'));
   assert.equal(result.scenarios[0]?.status, 'review');
+});
+
+test('invalid runtime parking counts fail closed before scenario derivation', () => {
+  const transactions = [99, 100, 101].map((price, index) =>
+    transaction(`residential-${index}`, 'residential', price),
+  );
+  for (const parkingCount of [Number.NaN, -1, 0.5, 3]) {
+    const malformedSubject = {
+      ...unknownUseSubject,
+      registeredUse: { value: 'residential', source: 'official', detail: '使用執照' },
+      parkingFamily: 'flat',
+      parkingCount,
+    } as unknown as ScenarioMarketSubject;
+    const result = estimateMarketScenarios(
+      malformedSubject,
+      indexWithTransactions(transactions),
+      fresh,
+      AS_OF,
+      acceptance,
+    );
+    assert.ok(result.scenarios.every((scenario) => scenario.status === 'unavailable'), String(parkingCount));
+    assert.ok(result.scenarios.every((scenario) => scenario.reasons.includes('invalid-parking-count')), String(parkingCount));
+  }
+});
+
+test('parking-family-incompatible counts fail closed before scenario derivation', () => {
+  const transactions = [99, 100, 101].map((price, index) =>
+    transaction(`residential-${index}`, 'residential', price),
+  );
+  const invalidPairs = [
+    { parkingFamily: 'none', parkingCount: 1 },
+    { parkingFamily: 'flat', parkingCount: 0 },
+    { parkingFamily: 'mechanical', parkingCount: 0 },
+    { parkingFamily: 'unknown', parkingCount: 1 },
+  ] as const;
+  for (const pair of invalidPairs) {
+    const result = estimateMarketScenarios(
+      {
+        ...unknownUseSubject,
+        registeredUse: { value: 'residential', source: 'official', detail: '使用執照' },
+        ...pair,
+      },
+      indexWithTransactions(transactions),
+      fresh,
+      AS_OF,
+      acceptance,
+    );
+    assert.ok(result.scenarios.every((scenario) => scenario.status === 'unavailable'), JSON.stringify(pair));
+    assert.ok(result.scenarios.every((scenario) => scenario.reasons.includes('parking-count-family-conflict')), JSON.stringify(pair));
+  }
 });
 
 test('three grade-C bundle observations outside the paired interval force review', () => {
