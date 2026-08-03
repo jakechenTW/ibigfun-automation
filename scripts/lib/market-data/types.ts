@@ -411,7 +411,7 @@ export interface ParkingFamilyAcceptance {
   reasons: string[];
 }
 
-/** Aggregate-only schema-5 / policy-6 challenger proof; never runtime authority. */
+/** Aggregate-only schema-5 / policy-7 challenger proof; never runtime authority. */
 export interface CandidateBacktestAcceptance extends BacktestAcceptanceIdentity {
   schemaVersion: 3;
   thresholds: BacktestAcceptanceThresholds & {
@@ -453,7 +453,7 @@ export interface MarketDataBundle {
   doorplates: DoorplateIndex;
   transactions: TransactionIndex;
   /** Present only when a passing artifact matches transactions-index.json exactly. */
-  backtestAcceptance?: BacktestAcceptance;
+  backtestAcceptance?: BacktestAcceptance | CandidateBacktestAcceptance;
   refresh?: {
     status: 'updated' | 'not-modified' | 'last-known-good';
     failure?: string;

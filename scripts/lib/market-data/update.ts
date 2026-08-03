@@ -4,17 +4,18 @@ import path from 'node:path';
 import { parse } from 'csv-parse';
 import type { Logger } from '../journal.ts';
 import {
-  backtestTransactions,
+  backtestCandidateTransactions,
   candidateBacktestAcceptance,
   evaluateCandidateBacktestGate,
   type BacktestGateResult,
-  type BacktestReport,
+  type CandidateBacktestReport,
 } from './backtest.ts';
 import { buildDoorplateIndex } from './doorplates.ts';
 import { gridKey } from './grid.ts';
 import {
   CANDIDATE_ESTIMATOR_POLICY_VERSION,
   CANDIDATE_MARKET_SCHEMA_VERSION,
+  ACTIVE_ESTIMATOR_POLICY,
   MARKET_DATA_ROOT,
   PARKING_POLICY,
   type EstimatorPolicy,
@@ -28,6 +29,7 @@ import {
   loadMarketData,
   publishStagedBuildWithAcceptance,
   recoverInterruptedMarketDataPublication,
+  assertNoPendingMarketDataPublication,
   sha256File,
   validateCandidateStagedBuild,
   writeStableJson,
@@ -60,13 +62,13 @@ export interface EnsureTaipeiMarketDataOptions {
   lockTimeoutMs?: number;
   lockStaleMs?: number;
   lockPollMs?: number;
-  /** Test seam may reject or throw, but cannot override the production gate. */
-  gateEvaluator?: (report: BacktestReport) => BacktestGateResult;
+  /** Test seam may reject or throw, but cannot override the candidate gate. */
+  gateEvaluator?: (report: CandidateBacktestReport) => BacktestGateResult;
   publisher?: typeof publishStagedBuildWithAcceptance;
 }
 
 export interface CandidateEvaluation {
-  report: BacktestReport;
+  report: CandidateBacktestReport;
   gate: BacktestGateResult;
   acceptance: CandidateBacktestAcceptance | null;
   diagnostics: TransactionBuildDiagnostics;
@@ -76,7 +78,7 @@ export interface EvaluateTaipeiMarketDataCandidateOptions {
   asOf: string;
   policy: EstimatorPolicy;
   publish: boolean;
-  gateEvaluator?: (report: BacktestReport) => BacktestGateResult;
+  gateEvaluator?: (report: CandidateBacktestReport) => BacktestGateResult;
   rootPath?: string;
   fetch?: FetchLike;
   clock?: () => Date;
@@ -94,6 +96,7 @@ export interface EvaluateTaipeiMarketDataCandidateOptions {
 interface CandidateExecution {
   policy: EstimatorPolicy;
   rethrowErrors: boolean;
+  publish: boolean;
   capture?: { evaluation?: CandidateEvaluation };
 }
 
@@ -475,10 +478,7 @@ async function evaluateTaipeiMarketDataCandidateUnlocked(
   const fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
   const clock = options.clock ?? (() => new Date());
   const openZip = options.openZip ?? zipEntriesFromFile;
-  await recoverInterruptedMarketDataPublication(root, {
-    minDoorplates: options.minDoorplates,
-    minTransactions: options.minTransactions,
-  });
+  await assertNoPendingMarketDataPublication(root);
   const existing = await loadMarketData(root, {
     minDoorplates: options.minDoorplates,
     minTransactions: options.minTransactions,
@@ -614,7 +614,7 @@ async function evaluateTaipeiMarketDataCandidateUnlocked(
       minTransactions: options.minTransactions,
     });
     const transactionArtifactSha256 = await sha256File(path.join(stage, 'transactions-index.json'));
-    const report = backtestTransactions(staged.transactions, {
+    const report = backtestCandidateTransactions(staged.transactions, {
       asOf: options.asOf,
       policy: execution.policy,
     });
@@ -638,6 +638,17 @@ async function evaluateTaipeiMarketDataCandidateUnlocked(
     }
     if (!acceptance) {
       throw new Error('candidate backtest passed without a candidate acceptance');
+    }
+    if (execution.publish) {
+      const published = await (options.publisher ?? publishStagedBuildWithAcceptance)(
+        root,
+        stage,
+        acceptance,
+        { minDoorplates: options.minDoorplates, minTransactions: options.minTransactions },
+      );
+      stage = null;
+      published.refresh = { status: 'updated' };
+      return published;
     }
     await fs.rm(stage, { recursive: true, force: true });
     stage = null;
@@ -664,26 +675,11 @@ export async function ensureTaipeiMarketData(options: EnsureTaipeiMarketDataOpti
           minDoorplates: options.minDoorplates,
           minTransactions: options.minTransactions,
         });
-        const existing = await loadMarketData(root, {
-          minDoorplates: options.minDoorplates,
-          minTransactions: options.minTransactions,
+        return evaluateTaipeiMarketDataCandidateUnlocked(options, {
+          policy: ACTIVE_ESTIMATOR_POLICY,
+          rethrowErrors: false,
+          publish: true,
         });
-        log(
-          options.logger,
-          existing ? 'warn' : 'error',
-          existing ? 'market-data.last-known-good' : 'market-data.unavailable',
-          existing
-            ? 'challenger activation is withheld; retaining last-known-good build'
-            : 'market-data is unavailable while challenger activation is withheld',
-          { reason: 'challenger-activation-withheld' },
-        );
-        if (existing) {
-          existing.refresh = {
-            status: 'last-known-good',
-            failure: 'challenger-activation-withheld',
-          };
-        }
-        return existing;
       },
       { timeoutMs: options.lockTimeoutMs, staleMs: options.lockStaleMs, pollMs: options.lockPollMs },
     );
@@ -731,6 +727,7 @@ export async function evaluateTaipeiMarketDataCandidate(
       {
         policy: options.policy,
         rethrowErrors: true,
+        publish: false,
         capture,
       },
     ),

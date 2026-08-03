@@ -371,7 +371,11 @@ export function attachMarketEstimates(
         ageYears: listing.ageNum,
         parkingSeparable: true,
       }, bundle.transactions, freshness, asOf), acceptanceDecision!), locationEvidence);
-    const marketScenarios = attachOfficialComparableLocators(estimateMarketScenarios({
+    const marketScenarios = bundle.backtestAcceptance?.schemaVersion === 2
+      ? unavailableMarketScenarios(freshness, parking, [
+        'legacy-compatibility-scenario-unavailable',
+      ])
+      : attachOfficialComparableLocators(estimateMarketScenarios({
       listingId: listing.id,
       coordinate: listing.coordinate,
       district: listing.district ?? '',
@@ -389,7 +393,7 @@ export function attachMarketEstimates(
       parkingCount: parking.count,
       matchedAddress: locationEvidence.address.matchedAddress,
       subjectLocationEvidence: locationEvidence,
-    }, bundle.transactions, freshness, asOf, null));
+      }, bundle.transactions, freshness, asOf, bundle.backtestAcceptance ?? null));
 
     return {
       ...listing,

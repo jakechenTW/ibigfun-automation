@@ -5,10 +5,10 @@
 import { pathToFileURL } from 'node:url';
 import { isValidDateString, taipeiDateString } from './lib/date.ts';
 import {
-  backtestAcceptance,
-  backtestTransactions,
-  evaluateBacktestGate,
-  type BacktestReport,
+  candidateBacktestAcceptance,
+  backtestCandidateTransactions,
+  evaluateCandidateBacktestGate,
+  type CandidateBacktestReport,
 } from './lib/market-data/backtest.ts';
 import {
   ACTIVE_ESTIMATOR_POLICY,
@@ -53,7 +53,7 @@ export interface MarketDataCommandDependencies {
     recover?: typeof recoverInterruptedMarketDataPublication;
     load?: typeof loadMarketData;
     readManifest?: typeof readManifest;
-    evaluate?: typeof backtestTransactions;
+    evaluate?: typeof backtestCandidateTransactions;
     persistAcceptance?: typeof writeBacktestAcceptance;
   };
 }
@@ -129,14 +129,14 @@ function percent(value: number | null): string {
 }
 
 /** Returns the post-report quality-gate exit status without changing local state. */
-export function backtestExitCode(report: BacktestReport, noGate: boolean): number {
-  return noGate || evaluateBacktestGate(report).passed ? 0 : 1;
+export function backtestExitCode(report: CandidateBacktestReport, noGate: boolean): number {
+  return noGate || evaluateCandidateBacktestGate(report).passed ? 0 : 1;
 }
 
-export function shouldPersistBacktestAcceptance(report: BacktestReport, noGate: boolean): boolean {
+export function shouldPersistBacktestAcceptance(report: CandidateBacktestReport, noGate: boolean): boolean {
   return !noGate
     && report.policyId === ACTIVE_ESTIMATOR_POLICY.id
-    && evaluateBacktestGate(report).passed;
+    && evaluateCandidateBacktestGate(report).passed;
 }
 
 export function marketUpdateExitCode(status: 'updated' | 'not-modified' | 'last-known-good' | undefined): number {
@@ -186,24 +186,25 @@ async function backtest(
     }
     assertCurrentMarketDataIndexPolicy(bundle.manifest);
     const policy = estimatorPolicyById(command.policyId);
-    const report = (dependencies.evaluate ?? backtestTransactions)(
+    const report = (dependencies.evaluate ?? backtestCandidateTransactions)(
       bundle.transactions,
       { asOf: command.asOf, policy },
     );
-    const gate = evaluateBacktestGate(report);
+    const gate = evaluateCandidateBacktestGate(report);
     const exitCode = backtestExitCode(report, command.noGate);
     if (shouldPersistBacktestAcceptance(report, command.noGate)) {
       const checksum = transactionArtifactChecksum(bundle.manifest);
       if (!checksum) throw new Error('Active build lacks transactions-index.json checksum');
       await (dependencies.persistAcceptance ?? writeBacktestAcceptance)(
         root,
-        backtestAcceptance(report, checksum, now.toISOString()),
+        candidateBacktestAcceptance(report, checksum, now.toISOString()),
       );
     }
     return { report, gate, exitCode };
   });
   const { report, gate, exitCode } = result;
-  process.stdout.write(`${JSON.stringify({ ...report, acceptanceGate: gate }, null, 2)}\n`);
+  const { cases: _cases, ...aggregateReport } = report;
+  process.stdout.write(`${JSON.stringify({ ...aggregateReport, acceptanceGate: gate }, null, 2)}\n`);
   process.stderr.write(
     `backtest cases=${report.overall.caseCount} coverage=${percent(report.overall.estimateCoverage)} ` +
     `policy=${report.policyId} medianAPE=${percent(report.byStatus.reliable.medianApe)} ` +
@@ -224,7 +225,7 @@ async function candidate(
   });
   process.stdout.write(`${JSON.stringify({
     diagnostics: evaluation.diagnostics,
-    report: evaluation.report,
+    report: (({ cases: _cases, ...aggregate }) => aggregate)(evaluation.report),
     acceptanceGate: evaluation.gate,
   }, null, 2)}\n`);
   process.stderr.write(

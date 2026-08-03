@@ -10,6 +10,8 @@ const AS_OF = '2026-07-25';
 const bundle = JSON.parse(
   readFileSync(new URL('./fixtures/enriched-market-index.json', import.meta.url), 'utf8'),
 ) as MarketDataBundle;
+bundle.manifest.schemaVersion = 5;
+bundle.manifest.estimatorPolicyVersion = ESTIMATOR_POLICY_VERSION;
 
 for (const transactions of Object.values(bundle.transactions.cells)) {
   for (const transaction of transactions) {
@@ -20,8 +22,8 @@ for (const transactions of Object.values(bundle.transactions.cells)) {
       grade: 'A',
       family: 'none',
       originalType: '無車位',
-      officialPriceNtd: null,
-      officialAreaPing: null,
+      officialPriceNtd: 0,
+      officialAreaPing: 0,
       imputation: null,
       reasons: [],
     };
@@ -151,6 +153,32 @@ test('production estimate stays review before approval and becomes reliable only
     ),
     false,
   );
+});
+
+test('untouched schema-3 rows keep legacy valuation authoritative without entering challenger selectors', () => {
+  const legacy = structuredClone(bundleWithAcceptance());
+  for (const transactions of Object.values(legacy.transactions.cells)) {
+    for (const transaction of transactions) {
+      const row = transaction as unknown as Record<string, unknown>;
+      for (const challengerField of [
+        'totalAreaPing',
+        'buildingUnitPriceBoundsWan',
+        'parkingEvidence',
+        'originalPrimaryUse',
+        'transferredParkingCount',
+      ]) delete row[challengerField];
+    }
+  }
+
+  const [result] = attachMarketEstimates([listing()], legacy, AS_OF);
+
+  assert.equal(result.marketEstimate.status, 'reliable');
+  assert.equal(result.marketEstimate.comparables.length, 5);
+  assert.ok(result.marketScenarios.reasons.includes('legacy-compatibility-scenario-unavailable'));
+  assert.ok(result.marketScenarios.scenarios.every((scenario) =>
+    scenario.status === 'unavailable'
+      && scenario.comparables.length === 0
+      && scenario.bundleComparables.length === 0));
 });
 
 test('one listing batch scans acceptance coverage exactly once', () => {

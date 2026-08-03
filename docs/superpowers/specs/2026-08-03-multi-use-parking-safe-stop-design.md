@@ -1,5 +1,9 @@
 # Multi-use Parking Valuation Safe-stop Design
 
+> Historical record: superseded by the policy-7 activation documented in
+> `../../../.superpowers/sdd/final-fix-wave-report.md`. The safe-stop constraints
+> below describe the pre-activation state and are not the current runbook.
+
 ## Outcome
 
 Keep the corrected multi-use and parking valuation work as a challenger, but

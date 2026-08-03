@@ -6,15 +6,13 @@ enrichment. It currently supports **Taipei City only** and is designed for the
 [`reporting-rules.md`](reporting-rules.md): an estimate with weak evidence stays
 in review rather than becoming an automatic recommendation.
 
-## Current challenger safe-stop
+## Current production contract
 
-Policy-6 `marketScenarios` is diagnostic-only after the 2026-08-03 candidate
-failed its frozen flat-parking gate. It must not control report buckets, and
-automatic official-data refresh is withheld; stale legacy evidence is `warn`.
-`marketEstimate` remains the production authority under build schema 3,
-estimator policy 4, and acceptance schema 2. See the aggregate-only
-[safe-stop design](superpowers/specs/2026-08-03-multi-use-parking-safe-stop-design.md)
-for the failed gates, version boundary, and reactivation requirements.
+The activated contract is build schema 5, estimator policy 7, and acceptance
+schema 3. `marketEstimate` remains the conservative report authority;
+`marketScenarios` supplies approved exact-use and parking-family evidence only
+when the matching acceptance authorizes those cohorts. The earlier safe-stop
+design remains as historical rationale for the fail-closed boundary.
 
 ## Sources, scope, and credentials
 
@@ -23,8 +21,8 @@ The build uses two public official sources:
 - Taipei City Government's [臺北市門牌位置數值資料](https://data.taipei/dataset/detail?id=b7c8e724-1e98-45ee-a0bd-f3840623ed97), the local doorplate geocoder. Check the dataset page for its current release terms and comply with the official [Government Open Data License, version 1.0](https://data.gov.tw/license) when that is the release's stated license.
 - Ministry of the Interior [real-price open-data download](https://plvr.land.moi.gov.tw/DownloadOpenData) and its [data.gov.tw dataset record](https://data.gov.tw/dataset/139700), for official sale transactions. The official [Government Open Data License, version 1.0](https://data.gov.tw/license) is the license text; confirm the dataset record's current license and attribution requirement before reuse.
 
-No API key, TGOS key, or online geocoder is required. Candidate evaluation uses
-the public sources directly; the frozen `update` command is load-only. iBigFun
+No API key, TGOS key, or online geocoder is required. Update and candidate evaluation use
+the public sources directly. iBigFun
 credentials and `ORS_API_KEY` are unrelated to either command. Do not add a
 market-data credential to `.env`.
 
@@ -103,32 +101,29 @@ selection:
   invalid or contradictory required values, inseparable parking, and other
   hard failures. Excluded rows do not enter the transaction index.
 
-The schema-3 manifest publishes only aggregate normalization totals:
+The schema-5 manifest publishes only aggregate normalization totals:
 `rawRows`, `reliableEligible`, `reviewOnly`, `excluded`, and
 `excludedByReason`, plus the required `estimatorPolicyVersion` provenance that
 identifies the normalization/eligibility semantics used to build both indexes.
 Full rows and addresses remain only in git-ignored local evidence.
 
-Inspect the frozen production pair with:
+Refresh and validate the production pair with:
 
 ```bash
 npm run market-data -- update --city taipei
 ```
 
-The command recovers an interrupted legacy publication, validates and loads the
-existing schema-3 / policy-4 build plus schema-2 acceptance, prints the retained
-build identity and freshness, and exits `3` with
-`challenger-activation-withheld`. It performs no download or write, does not
-advance check timestamps, and cannot bootstrap missing production data. A
-schema-1, schema-2, schema-4, or schema-5 build is not silently migrated into
-production authority.
+The command recovers an interrupted publication, refreshes public sources,
+builds schema-5/policy-7 indexes in staging, runs every global, use-cohort,
+Grade-B comparison, and parking-family gate, then atomically publishes the
+build with its schema-3 acceptance. Failure retains the last-known-good pair
+and exits `3`; an invalid older build is never silently promoted.
 
-Enrichment calls the same load-only path once per run before estimates are
-attached. It never evaluates or publishes the challenger implicitly. If the
-legacy pair is missing or invalid, `marketEstimate` is unavailable; it is not
-reconstructed from policy-6 data.
+Enrichment calls this update path once per run before estimates are attached.
+If refresh fails it may use only a still-valid accepted pair; otherwise
+`marketEstimate` is unavailable.
 
-Candidate downloads, parsing, indexing, and validation occur only under the
+Candidate downloads, parsing, indexing, and validation occur under the
 explicit `candidate` command in a disposable sibling staging directory. Gate
 failure or success both remove that directory without calling a production
 publisher. The active manifest, transaction checksum, acceptance bytes, build
@@ -205,13 +200,10 @@ npm run market-data -- candidate --city taipei --policy baseline
 
 `candidate` downloads or reuses public official sources, builds and validates
 new indexes in staging, runs the complete backtest, emits aggregate
-normalization diagnostics plus the held-out report, then removes staging. It
-never changes the active build or acceptance. Stdout is the full report and can
-contain held-out `cases`; do not retain or commit raw stdout. If a local
-diagnostic is required, capture it only as a transient input, immediately
-rewrite/redact it to aggregate diagnostics, report slices, and gate results
-under `state/market-data/backtests/taipei/`, then delete the raw input. Never
-retain cases, transaction/address rows, or listing details.
+normalization diagnostics plus aggregate held-out slices, then removes staging.
+It never changes the active build or acceptance, and never emits held-out
+cases, transaction/address rows, or listing details. Preserved aggregate
+diagnostics belong under `state/market-data/backtests/taipei/`.
 
 The policy decision is deliberately sequential:
 
@@ -222,11 +214,8 @@ The policy decision is deliberately sequential:
    misses that same coverage target.
 
 Any accuracy, confidence-slice, confidence-ordering, or completeness failure
-stops expansion. Passing diagnostic gates is necessary but cannot activate a
-fallback while the safe-stop is in force. Activation requires an explicit code
-and provenance review, version changes, tests, and restoration of a deliberate
-publication path. Thresholds are never lowered; `update` cannot publish a
-future data-only pass automatically.
+stops expansion. A fallback policy requires an explicit policy-version change;
+the `candidate` command never publishes. Thresholds are never lowered.
 
 The 2026-07-29 policy-v4 recalibration selected `baseline`: 73,803 raw rows
 produced 33,667 reliable-eligible and 629 review-only retained transactions.
@@ -238,7 +227,8 @@ evaluated. That initial rollout kept the baseline policy, used manifest/index
 schema 2, and advanced the compatibility version from 3 to 4 for the stricter
 address/location eligibility semantics. The subsequent provenance migration
 rebuilt those same policy-v4 semantics into manifest/index schema 3; the
-independent acceptance artifact remains schema 2.
+independent acceptance artifact used schema 2. It remains supported for one
+release as read-only legacy audit evidence, not as current production authority.
 
 That full candidate measured a peak resident set of 2,781,609,984 bytes
 (2.59 GiB). Count validation no longer creates `.flat()` copies of complete
@@ -266,7 +256,7 @@ confidence, and status. Interpret them as follows:
 - `bias` is signed `(estimate - actual) / actual`; a persistent positive or negative value signals calibration drift.
 - `intervalCoverage` is the fraction of actual prices inside the P25--P75 interval.
 - `latestEligibleTransactionDate` is computed from the complete deduplicated active index before `--as-of` filtering.
-- `cases` is local audit evidence, including the strictly earlier comparable dates used for each held-out sale.
+- Held-out cases remain internal to evaluation; CLI output is aggregate-only.
 
 Held-out eligibility is intrinsic to each sale and is evaluated at that
 subject's transaction date, including building completion consistency.
@@ -290,22 +280,22 @@ cutoffs remain useful with `--no-gate`, but they cannot approve a newer active
 index. A completed run also exits non-zero when any accuracy/calibration target
 fails. Only a completed passing active-policy gated run atomically writes
 `state/market-data/taipei-backtest-acceptance.json`. That aggregate-only artifact
-uses schema 2 and records the exact `transactions-index.json` SHA-256, active
+uses schema 3 and records the exact `transactions-index.json` SHA-256, active
 policy id, estimator policy version, `evaluatedThrough`,
-`latestEligibleTransactionDate`, thresholds, slice counts, and reliable-cohort
-summary metrics. Enrichment treats estimates as review-only until this artifact
+`latestEligibleTransactionDate`, thresholds, global/use-cohort metrics,
+Grade-B comparison, and parking-family decisions. Enrichment treats estimates as review-only until this artifact
 matches the active transaction checksum, runtime estimator policy, manifest's
 index-policy provenance, and complete index's latest eligible date. Publishing
 a different transaction index or adding a newer eligible transaction therefore
 invalidates prior acceptance automatically.
 
-Standalone `backtest` checks the active manifest's schema-3 policy provenance
+Standalone `backtest` checks the active manifest's schema-5 policy provenance
 before held-out evaluation or case output; `--no-gate` cannot bypass this
 compatibility check. The acceptance writer repeats the active manifest,
 transaction-artifact checksum, acceptance policy/version, and complete-index
 coverage checks immediately before its atomic write. A provenance failure never
-creates or replaces acceptance; while the safe-stop is active, `update` cannot
-repair or republish that state automatically.
+creates or replaces acceptance. `update` repairs that state only through a new
+fully gated atomic publication.
 
 `ESTIMATOR_POLICY_VERSION` is the intentional valuation compatibility
 contract. Any change to transaction eligibility, comparable selection stages,
@@ -327,11 +317,9 @@ quality acceptable:
 npm run market-data -- backtest --city taipei --as-of 2026-07-26 --no-gate
 ```
 
-The CLI prints the full `BacktestReport` to stdout, including `cases`; only the
-one-line stderr summary is aggregate. Do not retain or commit raw stdout. If a
-diagnostic must be preserved, use the raw output only as a transient input,
-rewrite/redact it to aggregate-only JSON under
-`state/market-data/backtests/taipei/`, and delete the raw input. The
+The CLI emits aggregate-only JSON and a one-line aggregate stderr summary; it
+never emits held-out cases. A preserved diagnostic belongs under
+`state/market-data/backtests/taipei/`. The
 automatically managed acceptance file remains aggregate-only and separate, and
 the diagnostics path stays outside the checksum-closed active build. Summarize
 only aggregate metrics in handoff. If targets are missed or high-confidence
@@ -343,8 +331,8 @@ recalibrate selection/weight constants with tests and backtest evidence.
 | Symptom | Safe response |
 | --- | --- |
 | Source schema drift or missing CSV headers | Do not map a changed field by guesswork. The staged build will not publish; retain the active build, record only header/error metadata, update the adapter and sanitized fixture, then rerun tests before retrying. |
-| `market-data-unavailable` | Use `npm run market-data -- update --city taipei` only to confirm whether a validated legacy pair can be loaded. It cannot bootstrap during the safe-stop; continue with market estimates unavailable and use `warn`, without substituting a guessed price. |
+| `market-data-unavailable` | Run `npm run market-data -- update --city taipei`. If rebuilding or any gate fails and no valid prior pair exists, continue with market estimates unavailable and use `warn`, without substituting a guessed price. |
 | `listing-coordinate-unavailable` or `listing-coordinate-unreliable` | Use the existing listing location-triage procedure. Do not force a coordinate into the market index; the listing stays unavailable until reliable. |
 | `no-comparables`, low confidence, or `review` | Read included and excluded evidence. Fewer than three retained comparables, a wide interval, stale data, or a hard conflict is review-only; do not relax criteria in report prose. |
 | `listing-parking-not-separable` | Do not estimate a parking adjustment. The listing stays review-only unless the asking building and parking amounts/areas can be separated according to the reporting rules. |
-| Active build appears corrupt | Do not edit it. Use a previously verified local snapshot if one was retained; otherwise keep market evidence unavailable and require an explicit recovery/activation change. The frozen updater cannot publish a replacement. |
+| Active build appears corrupt | Do not edit it. Run the updater so journal recovery and a fresh fully gated build can replace it atomically; if that fails, keep market evidence unavailable. |

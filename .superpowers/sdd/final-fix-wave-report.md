@@ -1,32 +1,38 @@
-# Multi-use Parking Valuation Safe-stop — Final Fix-wave Report
+# Multi-use Parking Valuation Activation — Final Fix-wave Report
 
 Date: 2026-08-03
 Branch: `codex/multi-use-parking-valuation`
 
 ## Outcome
 
-The corrected multi-use and parking valuation work remains an evaluation-only
-challenger. It was not activated because the completed baseline candidate
-failed the frozen flat-parking gate. Daily valuation stays on the exact legacy
-production contract and continues to treat `marketEstimate` as authoritative.
+The corrected policy-7 multi-use and parking valuation contract is
+activation-ready. A fresh baseline candidate passed every fixed gate. The code
+now requires the same complete gate before atomically publishing a schema-5
+build and matching schema-3 acceptance. This branch intentionally has not run
+that state-changing local publication command.
 
 | Contract | Build schema | Estimator policy | Acceptance schema | Runtime authority |
 |---|---:|---:|---:|---|
-| Production | 3 | 4 | 2 | `marketEstimate` and report buckets |
-| Challenger | 5 | 6 | 3 | Aggregate candidate evaluation only |
+| Production | 5 | 7 | 3 | `marketEstimate`, approved scenarios, and report buckets |
+| Legacy audit compatibility | 3 | 4 | 2 | One-release read compatibility only |
+| Candidate | 5 | 7 | 3 | Aggregate evaluation; never publishes |
 
-Production and challenger use separate constants, builders, validators, and
-load paths. A challenger acceptance cannot attach to or authorize a production
-bundle, and schema 4 / policy 5 authorizes neither path.
+Candidate staging remains isolated and non-publishing. Production publication
+uses the journaled atomic pair promoter only after the policy-7 gate passes;
+schema 4 / policy 5 authorizes neither current path.
 
-## Frozen Candidate Result
+## Corrected Candidate Result
 
-The completed baseline candidate failed closed for exactly these reasons:
+The earlier policy-6 result was invalidated because a multi-space masked
+holdout compared total official parking value against a single-space estimate,
+and the Grade-B comparison used global rather than residential-only metrics.
+Policy 7 fixes both semantics. The fresh baseline run completed with:
 
-- `parking-family-flat-not-accepted`
-- `parking-imputation-comparison-failed`
+- `passed: true`
+- `complete: true`
+- `reasons: []`
 
-The frozen thresholds were not changed after observing the result:
+The fixed thresholds were not changed after observing the result:
 
 - Global production gate: median / P75 APE at most 0.12 / 0.20, estimate
   coverage at least 0.70, at least 20 high- and medium-confidence estimates,
@@ -40,85 +46,90 @@ The frozen thresholds were not changed after observing the result:
   0.50, price median / P75 APE at most 0.25 / 0.45, area median / P75 APE at
   most 0.15 / 0.30, and price / area interval coverage each at least 0.30.
 
-Aggregate diagnostics:
+Aggregate held-out results:
 
-| Parking family | Cases | Estimated | Coverage | Price median / P75 APE | Area median / P75 APE | Price / area interval coverage |
+| Slice | Cases | Estimated | Coverage | Median APE | P75 APE |
+|---|---:|---:|---:|---:|---:|
+| Overall | 24,025 | 22,331 | 92.949% | 8.321% | 15.357% |
+| Reliable | 17,173 | 17,173 | 100% | 7.691% | 14.073% |
+| High confidence | 4,862 | 4,862 | 100% | 6.608% | 12.396% |
+| Medium confidence | 12,311 | 12,311 | 100% | 8.168% | 14.803% |
+
+Normalization retained 32,476 reliable and 13,725 review-only rows from
+73,803 raw rows. Parking grades A/B/C were 40,208 / 4,149 / 1,844; 2,325
+Grade-B rows were causally imputed and 1,824 remained unresolved.
+
+Residential direct-only coverage increased from 82.398% to 83.255% with
+Grade-B evidence. Median / P75 APE changed only from 8.168% / 14.929% to
+8.174% / 14.935%; absolute bias and interval-coverage regressions remained
+inside the fixed limits.
+
+| Masked family | Cases | Estimated | Coverage | Price median / P75 APE | Area median / P75 APE | Price / area interval coverage |
 |---|---:|---:|---:|---:|---:|---:|
-| Flat | 10,671 | 9,467 | 0.8871708368475307 | 0.1 / 0.3264196983141082 | 0.03909952606635073 / 0.374367172928324 | 0.4388929967254674 / 0.5611070032745326 |
-| Mechanical | 2,013 | 1,406 | 0.6984600099354198 | 0.06666666666666667 / 0.2 | 0 / 0.2896142433234421 | 0.5903271692745377 / 0.647226173541963 |
-
-Direct-only estimate coverage was `0.7768882226688925`; direct-plus-imputed
-coverage was `0.7868701665928525`. Comparison accuracy, absolute-bias
-regression, and interval-coverage regression were within their frozen limits,
-but activation still failed because both parking families must be accepted and
-flat parking missed only the 0.30 area-P75 maximum.
+| Flat | 10,509 | 9,348 | 88.952% | 7.143% / 14.449% | 0% / 12.744% | 53.199% / 67.843% |
+| Mechanical | 1,977 | 1,385 | 70.056% | 6.015% / 19.355% | 0% / 23.931% | 62.527% / 67.653% |
 
 This report contains aggregate diagnostics only. No candidate stdout,
 held-out cases, transaction rows, IDs, or addresses were retained.
 
 ## Runtime Safety and Authority
 
-- Production loading accepts only the checksum-closed schema-3 / policy-4
-  build and its matching aggregate schema-2 acceptance.
-- Candidate staging is isolated and disposable, validates schema 5 / policy 6,
+- Production loading requires a checksum-closed schema-5 / policy-7 build and
+  matching aggregate schema-3 acceptance. A valid legacy schema-3/policy-4
+  pair remains readable for one release only as compatibility evidence.
+- Candidate staging is isolated and disposable, validates schema 5 / policy 7,
   and rejects every publication request.
-- `market-data update` is load-only during the freeze: it first recovers an
-  interrupted production publication, then returns the existing valid pair
-  with `last-known-good` and `challenger-activation-withheld`. It does not
-  fetch, rebuild, migrate, advance source timestamps, or publish.
+- `market-data update` recovers interrupted publication first, then fetches,
+  rebuilds, validates, runs the strict gate, and publishes the build/acceptance
+  pair atomically only on success. Failure retains last-known-good.
 - If recovery itself fails, the retained bundle reports the real recovery
   error instead of masking it with the normal freeze reason; malformed journal
   tests prove the network is not contacted first.
-- If no valid production pair exists, valuation remains unavailable rather
-  than bootstrapping from the failed challenger.
-- `marketEstimate` controls report buckets, the P25 investment gate,
-  confidence, freshness, and review status. `marketScenarios` remains labelled
-  diagnostic-only and cannot upgrade, downgrade, or replace it.
-- Inseparable parking remains review-only under the legacy production policy.
+- If no valid production pair exists and the fresh candidate fails, valuation
+  remains unavailable.
+- `marketEstimate` controls the conservative P25 investment gate, confidence,
+  freshness, and review status. `marketScenarios` can contribute only for use
+  cohorts and parking families explicitly approved by the matching acceptance.
+- Unsupported or unresolved parking evidence remains review-only.
 
-The operational tradeoff is intentional: automatic official-data refresh is
-withheld, so source timestamps do not advance. Existing freshness rules will
-therefore move stale evidence to `warn` / manual review instead of presenting
-it as freshly checked.
+## Activated Model Corrections
 
-## Retained Challenger Corrections
-
-The evaluation-only challenger keeps the corrected official building and
+Policy 7 keeps the corrected official building and
 parking counts, partial official parking components, single-space grade-A
 training constraint, joint price/area pairs, bounded building-price
 uncertainty, family-specific admission gates, uncertainty-aware weights,
-exact-use cohort calibration, and aggregate masked-family holdouts. These
-changes do not alter production loading or report authority.
+exact-use cohort calibration, and aggregate masked-family holdouts.
 
 ## Verification Evidence
 
-All verification below used the final code state after the verification-only
-corrections:
+All verification below used the final code state after the second fix wave:
 
-- Original failing regression set: 83 / 83 passed.
-- Focused 12-suite market-data safety set: 213 / 213 passed.
-- Complete repository suite (`npm test`): 465 / 465 passed, 0 failed.
+- Complete repository suite (`npm test`): 473 / 473 passed, 0 failed.
 - TypeScript (`npx tsc --noEmit`): exit 0.
 - Whitespace/error-marker check (`git diff --check`): exit 0.
-- Production-pair tests prove a base-compatible schema-3 / policy-4 build plus
-  matching schema-2 acceptance loads and authorizes legacy estimates.
-- Byte-identity tests prove load-only ensure, failed candidate evaluation, and
-  rejected candidate publication do not change the production manifest,
+- Production-pair tests prove schema-5 / policy-7 plus matching schema-3
+  acceptance loads, and cover the one-release legacy compatibility boundary.
+- Byte-identity tests prove pending-journal candidate refusal, failed candidate
+  evaluation, and rejected candidate publication do not change the production manifest,
   transaction checksum, acceptance bytes, or build ID.
 - Recovery tests prove interrupted production publication is handled before
   load, malformed journals fail closed before network work, and candidate
   validation cannot cross-authorize production.
 
-No production update, production backtest, real candidate rerun, threshold
-change, or local-state publication was performed during this fix wave.
+The real baseline candidate was rerun and passed. Its disposable stage was
+removed and no acceptance or production state was published. No production
+update or production backtest was performed. The pre-existing local pair
+remains schema 4 / policy 5 / acceptance schema 3 and is rejected by the
+activated schema-5 / policy-7 loader until an approved update publishes a new
+pair.
 
 ## Changed-file Summary
 
-- Production/challenger provenance and acceptance separation: market-data
+- Production/candidate provenance and acceptance separation: market-data
   configuration, types, backtest, store, and their tests.
-- Frozen update and evaluation-only candidate behavior: updater, CLI,
+- Gated atomic update and evaluation-only candidate behavior: updater, CLI,
   candidate staging, and their tests.
-- Legacy report authority restoration: enrichment attachment, integration
+- Report authority and one-release compatibility: enrichment attachment, integration
   tests, runbook, prompts, reporting rules, profiles, and templates.
 - Retained challenger corrections: transaction normalization, parking model,
   selector, acceptance policy, and focused regression tests.

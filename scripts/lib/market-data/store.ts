@@ -22,6 +22,7 @@ import {
   SCENARIO_BACKTEST_GATE,
   TRANSACTION_STALE_DAYS,
 } from './config.ts';
+import type { PolicyId } from './config.ts';
 import {
   latestEligibleTransactionDate,
   latestScenarioInfluencingTransactionDate,
@@ -571,6 +572,7 @@ export function validBacktestAcceptance(value: unknown): value is BacktestAccept
 
 export function validCandidateBacktestAcceptance(
   value: unknown,
+  expectedPolicyId: PolicyId,
 ): value is CandidateBacktestAcceptance {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
@@ -584,7 +586,7 @@ export function validCandidateBacktestAcceptance(
   if (!exactObject(record, topLevelKeys)
     || record.schemaVersion !== 3
     || record.estimatorPolicyVersion !== CANDIDATE_ESTIMATOR_POLICY_VERSION
-    || record.policyId !== ACTIVE_ESTIMATOR_POLICY.id
+    || record.policyId !== expectedPolicyId
     || typeof record.transactionArtifactSha256 !== 'string'
     || !/^[a-f0-9]{64}$/.test(record.transactionArtifactSha256)
     || typeof record.approvedAt !== 'string' || !Number.isFinite(Date.parse(record.approvedAt))
@@ -598,25 +600,27 @@ export function validCandidateBacktestAcceptance(
     && validScenarioAcceptance(record);
 }
 
-export function readBacktestAcceptance(root: string): BacktestAcceptance | null {
+export function readBacktestAcceptance(root: string): CandidateBacktestAcceptance | null {
   const value = readJson<unknown>(backtestAcceptancePath(root));
-  return value && validBacktestAcceptance(value) ? value : null;
+  return value && validCandidateBacktestAcceptance(value, ACTIVE_ESTIMATOR_POLICY.id) ? value : null;
 }
 
 function acceptanceLatestEligibleTransactionDate(
   index: TransactionIndex,
-  _acceptance: BacktestAcceptance,
+  acceptance: BacktestAcceptance | CandidateBacktestAcceptance,
 ): string | null {
-  return latestEligibleTransactionDate(index);
+  return acceptance.schemaVersion === 2
+    ? latestEligibleTransactionDate(index)
+    : latestScenarioInfluencingTransactionDate(index);
 }
 
 /** Atomically replaces the aggregate-only local acceptance artifact. */
-export async function writeBacktestAcceptance(root: string, acceptance: BacktestAcceptance): Promise<void> {
+export async function writeBacktestAcceptance(root: string, acceptance: BacktestAcceptance | CandidateBacktestAcceptance): Promise<void> {
   const active = await validateBuild(root, {
     minDoorplates: 0,
     minTransactions: 0,
   });
-  if (acceptance.schemaVersion !== 2) {
+  if (acceptance.schemaVersion !== 3) {
     throw new Error(
       'Backtest acceptance policy provenance does not match the runtime policy; run update first',
     );
@@ -627,7 +631,7 @@ export async function writeBacktestAcceptance(root: string, acceptance: Backtest
   if (acceptance.policyId !== ACTIVE_ESTIMATOR_POLICY.id) {
     throw new Error('Backtest acceptance policy does not match the active estimator policy');
   }
-  if (!approvedBacktestThresholds(acceptance.thresholds)) {
+  if (!approvedCandidateBacktestThresholds(acceptance.thresholds)) {
     throw new Error('Backtest acceptance must use the approved quality thresholds');
   }
   const latest = acceptanceLatestEligibleTransactionDate(active.transactions, acceptance);
@@ -661,7 +665,8 @@ export function marketDataBacktestAcceptanceDecision(
     : null;
   const accepted = acceptance !== undefined
     && marketDataManifestHasCurrentPolicyProvenance(bundle.manifest)
-    && validBacktestAcceptance(acceptance)
+    && (validCandidateBacktestAcceptance(acceptance, ACTIVE_ESTIMATOR_POLICY.id)
+      || validBacktestAcceptance(acceptance))
     && acceptance.transactionArtifactSha256 === transactionArtifactChecksum(bundle.manifest)
     && latest !== null
     && acceptance.latestEligibleTransactionDate === latest
@@ -752,6 +757,178 @@ function validateIndexes(
   );
 }
 
+const CANDIDATE_TRANSACTION_KEYS = [
+  'buildingAreaPing', 'buildingPriceNtd', 'buildingType', 'buildingUnitPriceBoundsWan',
+  'buildingUnitPriceWan', 'completionDate', 'district', 'eligibility', 'eligibilityReasons',
+  'exclusionFlags', 'floor', 'floorGroup', 'id', 'location', 'notes', 'originalAddress',
+  'originalPrimaryUse', 'ownership', 'parkingAreaPing', 'parkingEvidence', 'parkingPriceNtd',
+  'primaryUse', 'sourceVersion', 'totalAreaPing', 'totalFloors', 'totalPriceNtd',
+  'transactionDate', 'transferredBuildingCount', 'transferredParkingCount',
+] as const;
+
+function nullableSafeCount(value: unknown): boolean {
+  return value === null || (Number.isSafeInteger(value) && (value as number) >= 0);
+}
+
+function positiveNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+function nullablePositive(value: unknown): boolean {
+  return value === null || positiveNumber(value);
+}
+
+function nullableNonnegative(value: unknown): boolean {
+  return value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0);
+}
+
+function validCandidateImputation(value: unknown): boolean {
+  if (!exactObject(value, [
+    'areaIqrRatio', 'areaP25Ping', 'areaP50Ping', 'areaP75Ping', 'asOf',
+    'comparableCount', 'comparableIds', 'pairP25', 'pairP50', 'pairP75',
+    'priceIqrRatio', 'priceP25Ntd', 'priceP50Ntd', 'priceP75Ntd', 'stage',
+  ])) return false;
+  const item = value as Record<string, unknown>;
+  const ordered = (prefix: 'price' | 'area', suffix: 'Ntd' | 'Ping'): boolean => {
+    const p25 = item[`${prefix}P25${suffix}`];
+    const p50 = item[`${prefix}P50${suffix}`];
+    const p75 = item[`${prefix}P75${suffix}`];
+    return positiveNumber(p25) && positiveNumber(p50) && positiveNumber(p75)
+      && p25 <= p50 && p50 <= p75;
+  };
+  const validPair = (pair: unknown): boolean => exactObject(pair, ['areaPing', 'priceNtd'])
+    && positiveNumber((pair as Record<string, unknown>).priceNtd)
+    && positiveNumber((pair as Record<string, unknown>).areaPing);
+  return typeof item.asOf === 'string' && isValidDateString(item.asOf)
+    && (item.stage === 'same-building' || item.stage === 'nearby-500m')
+    && Array.isArray(item.comparableIds) && item.comparableIds.length > 0
+    && item.comparableIds.every((id) => typeof id === 'string' && id.length > 0)
+    && Number.isSafeInteger(item.comparableCount) && item.comparableCount === item.comparableIds.length
+    && ordered('price', 'Ntd') && ordered('area', 'Ping')
+    && validPair(item.pairP25) && validPair(item.pairP50) && validPair(item.pairP75)
+    && typeof item.priceIqrRatio === 'number' && Number.isFinite(item.priceIqrRatio) && item.priceIqrRatio >= 0
+    && typeof item.areaIqrRatio === 'number' && Number.isFinite(item.areaIqrRatio) && item.areaIqrRatio >= 0;
+}
+
+function validBuildingBounds(value: unknown): boolean {
+  if (!exactObject(value, ['p25', 'p50', 'p75', 'relativeIqrRatio'])) return false;
+  const bounds = value as Record<string, unknown>;
+  return positiveNumber(bounds.p25) && positiveNumber(bounds.p50) && positiveNumber(bounds.p75)
+    && bounds.p25 <= bounds.p50 && bounds.p50 <= bounds.p75
+    && typeof bounds.relativeIqrRatio === 'number'
+    && Number.isFinite(bounds.relativeIqrRatio) && bounds.relativeIqrRatio >= 0;
+}
+
+function validateCandidateTransactionRows(
+  transactions: TransactionIndex,
+  expected: TransactionBuildDiagnostics,
+): void {
+  const actual = {
+    reliableEligible: 0,
+    reviewOnly: 0,
+    byPrimaryUse: Object.fromEntries(NORMALIZED_PRIMARY_USES.map((use) => [use, 0])) as Record<string, number>,
+    byParkingGrade: Object.fromEntries(PARKING_GRADES.map((grade) => [grade, 0])) as Record<string, number>,
+    gradeBByComponent: { missingBoth: 0, officialAreaOnly: 0, officialPriceOnly: 0 },
+    gradeBImputed: 0,
+    gradeBUnresolved: 0,
+  };
+
+  for (const rows of Object.values(transactions.cells)) for (const row of rows) {
+    if (!exactObject(row, CANDIDATE_TRANSACTION_KEYS)) {
+      throw new Error('Candidate transaction row does not match the schema-5 contract');
+    }
+    if (!nullableSafeCount(row.transferredBuildingCount)
+      || !nullableSafeCount(row.transferredParkingCount)) {
+      throw new Error('Candidate transaction row has an invalid transferred count');
+    }
+    if (!positiveNumber(row.totalPriceNtd) || !positiveNumber(row.totalAreaPing)
+      || !nullablePositive(row.buildingPriceNtd) || !nullablePositive(row.buildingAreaPing)
+      || !nullablePositive(row.buildingUnitPriceWan)
+      || !nullableNonnegative(row.parkingPriceNtd) || !nullableNonnegative(row.parkingAreaPing)
+      || !Number.isSafeInteger(row.floor) || !Number.isSafeInteger(row.totalFloors) || row.totalFloors <= 0
+      || !Array.isArray(row.exclusionFlags) || !row.exclusionFlags.every((reason) => typeof reason === 'string')
+      || !Array.isArray(row.eligibilityReasons) || !row.eligibilityReasons.every((reason) => typeof reason === 'string')) {
+      throw new Error('Candidate transaction row contains malformed numeric or reason fields');
+    }
+    if (!(NORMALIZED_PRIMARY_USES as readonly string[]).includes(row.primaryUse)
+      || !(PARKING_GRADES as readonly string[]).includes(row.parkingEvidence?.grade)
+      || !['reliable-eligible', 'review-only'].includes(row.eligibility)) {
+      throw new Error('Candidate transaction row contains an invalid category');
+    }
+    if (!exactObject(row.parkingEvidence, [
+      'family', 'grade', 'imputation', 'officialAreaPing', 'officialPriceNtd', 'originalType', 'reasons',
+    ]) || !['flat', 'mechanical', 'none', 'unknown'].includes(row.parkingEvidence.family)
+      || !Array.isArray(row.parkingEvidence.reasons)
+      || !row.parkingEvidence.reasons.every((reason) => typeof reason === 'string')) {
+      throw new Error('Candidate transaction row contains malformed parking evidence');
+    }
+    const grade = row.parkingEvidence.grade;
+    const family = row.parkingEvidence.family;
+    const count = row.transferredParkingCount;
+    const pricePositive = positiveNumber(row.parkingEvidence.officialPriceNtd);
+    const areaPositive = positiveNumber(row.parkingEvidence.officialAreaPing);
+    const buildingComplete = positiveNumber(row.buildingPriceNtd)
+      && positiveNumber(row.buildingAreaPing) && positiveNumber(row.buildingUnitPriceWan);
+    const buildingEmpty = row.buildingPriceNtd === null
+      && row.buildingAreaPing === null && row.buildingUnitPriceWan === null;
+    if (grade === 'A') {
+      const noParking = family === 'none' && count === 0
+        && row.parkingEvidence.officialPriceNtd === 0 && row.parkingEvidence.officialAreaPing === 0;
+      const directParking = (family === 'flat' || family === 'mechanical')
+        && typeof count === 'number' && count > 0 && pricePositive && areaPositive;
+      if ((!noParking && !directParking) || !buildingComplete
+        || row.parkingPriceNtd !== row.parkingEvidence.officialPriceNtd
+        || row.parkingAreaPing !== row.parkingEvidence.officialAreaPing
+        || row.parkingEvidence.imputation !== null || row.buildingUnitPriceBoundsWan !== null) {
+        throw new Error('Candidate grade-A transaction row violates direct-evidence invariants');
+      }
+    } else if (grade === 'B') {
+      if ((family !== 'flat' && family !== 'mechanical')
+        || typeof count !== 'number' || count <= 0 || (pricePositive && areaPositive)) {
+        throw new Error('Candidate grade-B transaction row violates partial-evidence invariants');
+      }
+      const imputed = row.parkingEvidence.imputation !== null;
+      const imputation = row.parkingEvidence.imputation;
+      if (imputed !== (row.buildingUnitPriceBoundsWan !== null)
+        || (imputed && (!validCandidateImputation(imputation)
+          || !validBuildingBounds(row.buildingUnitPriceBoundsWan) || !buildingComplete))
+        || (imputed && (row.parkingPriceNtd !== imputation!.pairP50.priceNtd
+          || row.parkingAreaPing !== imputation!.pairP50.areaPing))
+        || (!imputed && (!buildingEmpty
+          || row.parkingPriceNtd !== row.parkingEvidence.officialPriceNtd
+          || row.parkingAreaPing !== row.parkingEvidence.officialAreaPing))) {
+        throw new Error('Candidate grade-B transaction row has inconsistent imputation evidence');
+      }
+      if (!pricePositive && !areaPositive) actual.gradeBByComponent.missingBoth += 1;
+      else if (areaPositive) actual.gradeBByComponent.officialAreaOnly += 1;
+      else actual.gradeBByComponent.officialPriceOnly += 1;
+      if (imputed) actual.gradeBImputed += 1;
+      else actual.gradeBUnresolved += 1;
+    } else if (!buildingEmpty || row.buildingUnitPriceBoundsWan !== null
+      || row.parkingEvidence.imputation !== null
+      || row.parkingPriceNtd !== null || row.parkingAreaPing !== null) {
+      throw new Error('Candidate grade-C transaction row contains unsupported derived building evidence');
+    }
+
+    actual[row.eligibility === 'reliable-eligible' ? 'reliableEligible' : 'reviewOnly'] += 1;
+    actual.byPrimaryUse[row.primaryUse] += 1;
+    actual.byParkingGrade[grade] += 1;
+  }
+
+  const expectedRetained = {
+    reliableEligible: expected.reliableEligible,
+    reviewOnly: expected.reviewOnly,
+    byPrimaryUse: expected.byPrimaryUse,
+    byParkingGrade: expected.byParkingGrade,
+    gradeBByComponent: expected.gradeBByComponent,
+    gradeBImputed: expected.gradeBImputed,
+    gradeBUnresolved: expected.gradeBUnresolved,
+  };
+  if (stableJson(actual) !== stableJson(expectedRetained)) {
+    throw new Error('Candidate transaction normalization diagnostics do not exactly match persisted rows');
+  }
+}
+
 async function artifactFiles(root: string): Promise<string[]> {
   const results: string[] = [];
   async function visit(directory: string): Promise<void> {
@@ -797,9 +974,7 @@ function validateManifestPolicy(
     }
     return;
   }
-  if (manifest.schemaVersion !== 1
-      && manifest.schemaVersion !== 2
-      && manifest.schemaVersion !== MARKET_SCHEMA_VERSION) {
+  if (![1, 2, 3, 4, MARKET_SCHEMA_VERSION].includes(manifest.schemaVersion)) {
     throw new Error('Market manifest schema version is not restorable');
   }
   const hasPolicyVersion = Object.prototype.hasOwnProperty.call(
@@ -809,8 +984,10 @@ function validateManifestPolicy(
   if ((manifest.schemaVersion === 1 || manifest.schemaVersion === 2) && hasPolicyVersion) {
     throw new Error('Legacy market manifest policy provenance does not match its schema');
   }
-  if (manifest.schemaVersion === MARKET_SCHEMA_VERSION
-      && manifest.estimatorPolicyVersion !== ESTIMATOR_POLICY_VERSION) {
+  const expectedPolicy = manifest.schemaVersion === 3 ? 4
+    : manifest.schemaVersion === 4 ? 5
+      : manifest.schemaVersion === MARKET_SCHEMA_VERSION ? ESTIMATOR_POLICY_VERSION : null;
+  if (expectedPolicy !== null && manifest.estimatorPolicyVersion !== expectedPolicy) {
     throw new Error('Legacy market manifest policy provenance does not match its schema');
   }
 }
@@ -821,7 +998,14 @@ function validateManifestTransactionDiagnostics(
 ): void {
   const transactions = manifest.transactions as unknown as Record<string, unknown>;
   const hasNormalization = Object.prototype.hasOwnProperty.call(transactions, 'normalization');
-  if (mode === 'candidate') {
+  if (mode === 'candidate' || mode === 'current') {
+    validateTransactionBuildDiagnostics(
+      transactions.normalization as TransactionBuildDiagnostics,
+      manifest.transactions.recordCount,
+    );
+    return;
+  }
+  if (mode === 'restorable' && manifest.schemaVersion === MARKET_SCHEMA_VERSION) {
     validateTransactionBuildDiagnostics(
       transactions.normalization as TransactionBuildDiagnostics,
       manifest.transactions.recordCount,
@@ -839,12 +1023,19 @@ function validateManifestTransactionDiagnostics(
   if (mode === 'restorable' && manifest.schemaVersion === 2 && !hasNormalization) {
     return;
   }
-  if (mode === 'current'
-      || (mode === 'restorable'
-        && (manifest.schemaVersion === 2 || manifest.schemaVersion === MARKET_SCHEMA_VERSION))) {
+  if (mode === 'restorable'
+        && (manifest.schemaVersion === 2 || manifest.schemaVersion === 3)) {
     validateLegacyTransactionBuildDiagnostics(
       transactions.normalization,
       manifest.transactions.recordCount,
+    );
+    return;
+  }
+  if (mode === 'restorable' && manifest.schemaVersion === 4) {
+    validateTransactionBuildDiagnostics(
+      transactions.normalization as TransactionBuildDiagnostics,
+      manifest.transactions.recordCount,
+      false,
     );
     return;
   }
@@ -879,6 +1070,10 @@ async function validateBuild(
   if (manifest.doorplates.recordCount !== doorplateCount || manifest.transactions.recordCount !== transactionCount) {
     throw new Error('Manifest record counts do not match validated indexes');
   }
+  if (mode === 'candidate' || mode === 'current'
+    || (mode === 'restorable' && manifest.schemaVersion === MARKET_SCHEMA_VERSION)) {
+    validateCandidateTransactionRows(transactions, manifest.transactions.normalization);
+  }
   await validateArtifacts(root, manifest);
   return { manifest, doorplates, transactions };
 }
@@ -891,7 +1086,7 @@ export async function validateStagedBuild(
   return validateBuild(stageRoot, options);
 }
 
-/** Validates an isolated schema-5 / policy-6 challenger build only. */
+/** Validates an isolated schema-5 / policy-7 challenger build only. */
 export async function validateCandidateStagedBuild(
   stageRoot: string,
   options: PublishOptions = {},
@@ -1111,8 +1306,26 @@ async function readPublicationJournal(activeRoot: string): Promise<PublicationJo
   return parsed;
 }
 
+/**
+ * Candidate evaluation is deliberately non-authoritative: it must never recover
+ * or otherwise mutate a pending production publication.  The frozen production
+ * update path owns recovery under the same refresh lock.
+ */
+export async function assertNoPendingMarketDataPublication(activeRoot: string): Promise<void> {
+  const file = publicationJournalPath(activeRoot);
+  try {
+    await fsp.lstat(file);
+  } catch (error) {
+    if (isMissingFile(error)) return;
+    throw error;
+  }
+  throw new Error(
+    'Pending production publication journal detected; run the frozen update path to recover before candidate evaluation',
+  );
+}
+
 function validateAcceptanceForBundle(
-  acceptance: BacktestAcceptance,
+  acceptance: BacktestAcceptance | CandidateBacktestAcceptance,
   bundle: MarketDataBundle,
 ): void {
   assertCurrentMarketDataIndexPolicy(bundle.manifest);
@@ -1128,7 +1341,7 @@ function validateAcceptanceForBundle(
       || acceptance.evaluatedThrough < latest) {
     throw new Error('Backtest acceptance must cover the complete staged transaction index');
   }
-  if (!validBacktestAcceptance(acceptance)) {
+  if (!validCandidateBacktestAcceptance(acceptance, ACTIVE_ESTIMATOR_POLICY.id)) {
     throw new Error('Refusing to publish a non-passing backtest acceptance');
   }
 }
@@ -1146,9 +1359,9 @@ async function readOptionalFile(ops: PublicationFileOps, file: string): Promise<
   }
 }
 
-function acceptanceFromBytes(bytes: Buffer): BacktestAcceptance | null {
+function acceptanceFromBytes(bytes: Buffer): BacktestAcceptance | CandidateBacktestAcceptance | null {
   try {
-    return JSON.parse(bytes.toString('utf8')) as BacktestAcceptance;
+    return JSON.parse(bytes.toString('utf8')) as BacktestAcceptance | CandidateBacktestAcceptance;
   } catch {
     return null;
   }
@@ -1159,7 +1372,7 @@ async function validatedAcceptanceFile(
   file: string,
   bundle: MarketDataBundle,
   expectedSha256: string | null,
-): Promise<{ acceptance: BacktestAcceptance; bytes: Buffer } | null> {
+): Promise<{ acceptance: BacktestAcceptance | CandidateBacktestAcceptance; bytes: Buffer } | null> {
   const bytes = await readOptionalFile(ops, file);
   if (!bytes || (expectedSha256 !== null && sha256Bytes(bytes) !== expectedSha256)) return null;
   const acceptance = acceptanceFromBytes(bytes);
@@ -1388,7 +1601,7 @@ export async function recoverInterruptedMarketDataPublication(
 async function publishAcceptedBuild(
   activeRoot: string,
   stageRoot: string,
-  acceptance: BacktestAcceptance,
+  acceptance: BacktestAcceptance | CandidateBacktestAcceptance,
   options: PublishOptions,
   ops: PublicationFileOps,
 ): Promise<MarketDataBundle> {
@@ -1490,7 +1703,7 @@ async function publishAcceptedBuild(
 export async function publishStagedBuildWithAcceptance(
   root: string,
   stage: string,
-  acceptance: BacktestAcceptance,
+  acceptance: BacktestAcceptance | CandidateBacktestAcceptance,
   options: PublishOptions = {},
 ): Promise<MarketDataBundle> {
   return publishAcceptedBuild(root, stage, acceptance, options, {

@@ -22,6 +22,8 @@ import {
   BACKTEST_ACCEPTANCE_THRESHOLDS,
   ESTIMATOR_POLICY_VERSION,
   MARKET_SCHEMA_VERSION,
+  PARKING_BACKTEST_GATE,
+  SCENARIO_BACKTEST_GATE,
 } from './config.ts';
 import type { MarketDataManifest, MarketTransaction } from './types.ts';
 
@@ -321,7 +323,11 @@ async function seedValidBuild(root: string): Promise<void> {
       recordCount: 1,
       normalization: {
         rawRows: 1, reliableEligible: 1, reviewOnly: 0, excluded: 0, excludedByReason: {},
-      } as unknown as MarketDataManifest['transactions']['normalization'],
+        byPrimaryUse: { commercial: 0, industrial: 0, 'mixed-industrial': 0, 'mixed-residential': 0, office: 0, residential: 1, unknown: 0 },
+        byParkingGrade: { A: 1, B: 0, C: 0 },
+        gradeBByComponent: { missingBoth: 0, officialAreaOnly: 0, officialPriceOnly: 0 },
+        gradeBImputed: 0, gradeBUnresolved: 0,
+      },
     },
     artifacts, lastFailure: null,
   };
@@ -331,7 +337,7 @@ async function seedValidBuild(root: string): Promise<void> {
 async function seedValidAcceptedBuild(root: string): Promise<void> {
   await seedValidBuild(root);
   await writeBacktestAcceptance(root, {
-    schemaVersion: 2,
+    schemaVersion: 3,
     estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
     policyId: ACTIVE_ESTIMATOR_POLICY.id,
     transactionArtifactSha256: await sha256File(join(root, 'transactions-index.json')),
@@ -339,7 +345,18 @@ async function seedValidAcceptedBuild(root: string): Promise<void> {
     asOf: '2026-07-25',
     evaluatedThrough: '2026-07-25',
     latestEligibleTransactionDate: '2025-12-01',
-    thresholds: { ...BACKTEST_ACCEPTANCE_THRESHOLDS },
+    thresholds: {
+      ...BACKTEST_ACCEPTANCE_THRESHOLDS,
+      ...SCENARIO_BACKTEST_GATE,
+      minimumParkingFamilyCases: PARKING_BACKTEST_GATE.minimumMaskedCases,
+      minimumParkingEstimateCoverage: PARKING_BACKTEST_GATE.minimumEstimateCoverage,
+      parkingPriceMedianApeMax: PARKING_BACKTEST_GATE.priceMedianApeMax,
+      parkingPriceP75ApeMax: PARKING_BACKTEST_GATE.priceP75ApeMax,
+      parkingAreaMedianApeMax: PARKING_BACKTEST_GATE.areaMedianApeMax,
+      parkingAreaP75ApeMax: PARKING_BACKTEST_GATE.areaP75ApeMax,
+      minimumParkingPriceIntervalCoverage: PARKING_BACKTEST_GATE.minimumPriceIntervalCoverage,
+      minimumParkingAreaIntervalCoverage: PARKING_BACKTEST_GATE.minimumAreaIntervalCoverage,
+    },
     metrics: {
       estimateCoverage: 0.8,
       reliableEstimatedCount: 40,
@@ -350,10 +367,32 @@ async function seedValidAcceptedBuild(root: string): Promise<void> {
       mediumConfidenceEstimatedCount: 20,
       mediumConfidenceMedianApe: 0.09,
     },
+    useCohorts: Object.fromEntries(['commercial', 'industrial', 'mixed-industrial', 'mixed-residential', 'office', 'residential'].map((use) => [use, {
+      status: use === 'residential' ? 'accepted' : 'diagnostic-only',
+      scoredCases: use === 'residential' ? 20 : 0,
+      estimateCoverage: use === 'residential' ? 0.8 : 0,
+      medianApe: use === 'residential' ? 0.08 : null,
+      p75Ape: use === 'residential' ? 0.16 : null,
+      bias: use === 'residential' ? 0 : null,
+      intervalCoverage: use === 'residential' ? 0.5 : null,
+      reasons: use === 'residential' ? [] : ['insufficient-use-cohort-cases', 'incomplete-use-cohort-metrics'],
+    }])) as any,
+    parkingImputationAccepted: true,
+    parkingFamilies: Object.fromEntries(['flat', 'mechanical'].map((family) => [family, {
+      status: 'accepted', caseCount: 25, estimatedCount: 20, estimateCoverage: 0.8,
+      priceMedianApe: 0.1, priceP75Ape: 0.2, areaMedianApe: 0.08, areaP75Ape: 0.16,
+      priceIntervalCoverage: 0.5, areaIntervalCoverage: 0.5, reasons: [],
+    }])) as any,
+    parkingComparison: {
+      directCoverage: 0.7, imputedCoverage: 0.71,
+      directMedianApe: 0.1, imputedMedianApe: 0.1,
+      directP75Ape: 0.18, imputedP75Ape: 0.18,
+      biasRegression: 0, intervalCoverageRegression: 0,
+    },
   });
 }
 
-test('production ensure is load-only and leaves the accepted pair byte-identical', async (t) => {
+test('failed production refresh leaves the accepted pair byte-identical', async (t) => {
   const rootPath = join(await mkdtemp(join(tmpdir(), 'market-safe-stop-')), 'taipei');
   t.after(() => rm(join(rootPath, '..'), { recursive: true, force: true }));
   await seedValidAcceptedBuild(rootPath);
@@ -381,8 +420,8 @@ test('production ensure is load-only and leaves the accepted pair byte-identical
 
   assert.equal(bundle?.manifest.buildId, 'known-good');
   assert.equal(bundle?.refresh?.status, 'last-known-good');
-  assert.equal(bundle?.refresh?.failure, 'challenger-activation-withheld');
-  assert.equal(fetchCalls, 0);
+  assert.equal(bundle?.refresh?.failure, 'production ensure must not fetch');
+  assert.equal(fetchCalls, 1);
   assert.equal(publisherCalls, 0);
   assert.deepEqual(await readFile(join(rootPath, 'manifest.json')), beforeManifest);
   assert.deepEqual(await readFile(join(rootPath, 'transactions-index.json')), beforeTransactions);
@@ -398,6 +437,70 @@ test('candidate evaluation rejects every publish request before doing work', asy
     }),
     /challenger activation is withheld/i,
   );
+});
+
+test('candidate evaluation refuses a pending production journal without mutating recovery artifacts', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-candidate-journal-'));
+  const rootPath = join(parent, 'taipei');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await seedValidAcceptedBuild(rootPath);
+  const publicationId = '11111111-1111-4111-8111-111111111111';
+  const stage = join(parent, '.taipei-staging-next');
+  const backup = join(parent, `.taipei-backup-${publicationId}`);
+  const acceptanceTarget = backtestAcceptancePath(rootPath);
+  const candidateAcceptance = `${acceptanceTarget}.candidate-${publicationId}`;
+  const backupAcceptance = `${acceptanceTarget}.backup-${publicationId}`;
+  const journal = join(parent, '.taipei-publication-journal.json');
+  await mkdir(stage);
+  await mkdir(backup);
+  await writeFile(join(stage, 'sentinel'), 'stage-bytes');
+  await writeFile(join(backup, 'sentinel'), 'backup-bytes');
+  await writeFile(candidateAcceptance, 'candidate-acceptance-bytes');
+  await writeFile(backupAcceptance, 'backup-acceptance-bytes');
+  await writeFile(journal, JSON.stringify({
+    schemaVersion: 1,
+    phase: 'prepared',
+    publicationId,
+    activeBasename: 'taipei',
+    stageBasename: '.taipei-staging-next',
+    stagedBuildId: 'next-build',
+    oldBuildId: 'known-good',
+    oldAcceptancePresent: true,
+    candidateAcceptanceSha256: '0'.repeat(64),
+    oldAcceptanceSha256: '1'.repeat(64),
+  }));
+  const trackedFiles = [
+    join(rootPath, 'manifest.json'),
+    join(rootPath, 'transactions-index.json'),
+    acceptanceTarget,
+    join(stage, 'sentinel'),
+    join(backup, 'sentinel'),
+    candidateAcceptance,
+    backupAcceptance,
+    journal,
+  ];
+  const before = await Promise.all(trackedFiles.map((file) => readFile(file)));
+  let fetchCalls = 0;
+
+  await assert.rejects(
+    () => evaluateTaipeiMarketDataCandidate({
+      asOf: '2026-07-25',
+      policy: ACTIVE_ESTIMATOR_POLICY,
+      publish: false,
+      rootPath,
+      minDoorplates: 1,
+      minTransactions: 1,
+      fetch: async () => {
+        fetchCalls += 1;
+        throw new Error('candidate must fail before network work');
+      },
+    }),
+    /frozen update.*recover|recover.*frozen update/i,
+  );
+
+  assert.equal(fetchCalls, 0);
+  const after = await Promise.all(trackedFiles.map((file) => readFile(file)));
+  assert.deepEqual(after, before);
 });
 
 async function downgradeAcceptedBuild(
@@ -488,7 +591,7 @@ async function candidateFixtureInputs(): Promise<{
   };
 }
 
-test('load-only ensure returns null without fetching when production has no valid build', async (t) => {
+test('failed update returns null when production has no valid build', async (t) => {
   const rootPath = join(await mkdtemp(join(tmpdir(), 'market-update-empty-')), 'taipei');
   t.after(() => rm(join(rootPath, '..'), { recursive: true, force: true }));
   const events: string[] = [];
@@ -503,11 +606,11 @@ test('load-only ensure returns null without fetching when production has no vali
     logger: { event: (_level, event) => events.push(event) },
   });
   assert.equal(bundle, null);
-  assert.equal(fetchCalls, 0);
-  assert.deepEqual(events, ['market-data.unavailable']);
+  assert.equal(fetchCalls, 1);
+  assert.deepEqual(events, ['market-data.check', 'market-data.unavailable']);
 });
 
-test('load-only ensure retains a valid active build with the explicit freeze warning', async (t) => {
+test('failed update retains a valid accepted active build', async (t) => {
   const rootPath = join(await mkdtemp(join(tmpdir(), 'market-update-frozen-')), 'taipei');
   t.after(() => rm(join(rootPath, '..'), { recursive: true, force: true }));
   await seedValidBuild(rootPath);
@@ -517,15 +620,16 @@ test('load-only ensure retains a valid active build with the explicit freeze war
     rootPath,
     minDoorplates: 1,
     minTransactions: 1,
+    fetch: async () => { throw new Error('injected refresh failure'); },
     logger: { event: (_level, event) => events.push(event) },
   });
   assert.equal(bundle?.manifest.buildId, 'known-good');
   assert.equal(bundle?.refresh?.status, 'last-known-good');
-  assert.equal(bundle?.refresh?.failure, 'challenger-activation-withheld');
-  assert.deepEqual(events, ['market-data.last-known-good']);
+  assert.equal(bundle?.refresh?.failure, 'injected refresh failure');
+  assert.deepEqual(events, ['market-data.check', 'market-data.last-known-good']);
 });
 
-test('candidate evaluation builds schema-5 evidence in an isolated disposable stage', async (t) => {
+test('candidate evaluation builds schema-5 evidence and disposes a newly failing candidate stage', async (t) => {
   const parent = await mkdtemp(join(tmpdir(), 'market-candidate-isolated-'));
   const rootPath = join(parent, 'taipei');
   t.after(() => rm(parent, { recursive: true, force: true }));
@@ -542,9 +646,9 @@ test('candidate evaluation builds schema-5 evidence in an isolated disposable st
     clock: () => new Date('2026-07-25T01:00:00.000Z'),
   });
 
-  assert.equal(evaluation.gate.passed, true);
-  assert.equal(evaluation.acceptance?.schemaVersion, 3);
-  assert.equal(evaluation.acceptance?.estimatorPolicyVersion, 6);
+  assert.equal(evaluation.gate.passed, false);
+  assert.ok(evaluation.gate.reasons.includes('parking-imputation-comparison-failed'));
+  assert.equal(evaluation.acceptance, null);
   assert.deepEqual(evaluation.diagnostics.gradeBByComponent, {
     missingBoth: 25,
     officialAreaOnly: 1,
@@ -627,7 +731,7 @@ test('load-only ensure never migrates schema-1, schema-2, or schema-4 state', as
         },
       });
       assert.equal(bundle, null);
-      assert.equal(fetchCalls, 0);
+      assert.equal(fetchCalls, 1);
       assert.deepEqual(await readFile(join(rootPath, 'manifest.json')), beforeManifest);
       assert.deepEqual(await readFile(backtestAcceptancePath(rootPath)), beforeAcceptance);
     });

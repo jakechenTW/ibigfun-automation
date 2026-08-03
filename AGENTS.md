@@ -93,43 +93,35 @@ evaluation, and writing the report.
   estimation and final include/exclude judgment stay with the agent. The walk
   decision is `withinWalk` (true ≤10-min walk / false too far / null
   unreliable→manual).
-- `npm run market-data -- update --city taipei` — currently performs a frozen,
-  load-only check. Under the refresh lock it recovers any interrupted legacy
-  publication, loads the existing schema-3 / policy-4 build and matching
-  schema-2 acceptance, and returns `last-known-good` with
-  `challenger-activation-withheld` (exit `3`). It does not fetch, advance source
-  timestamps, rebuild, bootstrap, or publish while the policy-6 challenger is
-  withheld. Missing valid production data remains unavailable.
+- `npm run market-data -- update --city taipei` — refreshes, validates, fully
+  backtests, and atomically publishes a schema-5 / policy-7 build with its
+  matching aggregate schema-3 acceptance. Every global, residential-use,
+  Grade-B, and family-specific parking gate must pass; otherwise the previous
+  accepted pair is retained.
 - `npm run market-data -- candidate --city taipei --policy
   <baseline|48-month|1000-meter>` — builds and backtests a fresh candidate
-  without publishing it. Standard output contains the full held-out report and
-  may include case-level evidence; do not retain or commit raw stdout. If a
-  diagnostic must be preserved, immediately rewrite/redact it to aggregate
-  diagnostics, report slices, and gate results under
-  `state/market-data/backtests/taipei/`—never cases, rows, or addresses.
-  Evaluation is isolated in a disposable schema-5 / policy-6 staging directory
+  without publishing it. Standard output is aggregate-only and omits held-out
+  cases, rows, IDs, and addresses.
+  Evaluation is isolated in a disposable schema-5 / policy-7 staging directory
   and can never publish production state. Evaluate `baseline` first. Try
   `48-month` only when baseline misses the 70%
   eligible-coverage target and has no accuracy/calibration failure; try
   `1000-meter` only under the same condition after the 48-month policy. A
-  fallback still requires every gate to pass, followed by a deliberate future
-  activation change; a data-only pass cannot activate it automatically.
+  fallback still requires every gate to pass plus an explicit production
+  policy change; the candidate command itself can never publish.
 - `npm run market-data -- backtest --city taipei [--as-of YYYY-MM-DD] [--no-gate]`
-  — evaluates the active local build without refreshing it. Its stderr summary
-  is aggregate, but stdout is the full `BacktestReport` and may contain
-  case-level evidence. Do not retain or commit raw stdout; any preserved
-  diagnostic must first be rewritten/redacted to aggregate-only JSON under
-  `state/market-data/backtests/taipei/`. It needs no credentials. A completed
+  — evaluates the active local build without refreshing it. Both stdout and
+  stderr are aggregate-only; held-out cases are omitted. It needs no credentials. A completed
   passing gated run covering the complete eligible transaction index writes
   the checksum-, policy-, and date-keyed local acceptance needed for `reliable`
   estimates; a historical `--as-of` cannot approve a newer index and
   `--no-gate` is diagnostic and never approves. Bump
   `ESTIMATOR_POLICY_VERSION` whenever selector, weighting, outlier, confidence,
   status, or backtest semantics change. A bump that changes transaction
-  normalization or eligibility requires a deliberate future activation and
-  publication change; the frozen `update` command cannot perform it. Never use
-  `backtest` to mint new acceptance for a pre-change index. The
-  schema-3 build manifest records the policy version that created its indexes;
+  normalization or eligibility requires `update` to rebuild, gate, and
+  atomically publish a matching build/acceptance pair. Never use `backtest` to
+  mint new acceptance for a pre-change index. The schema-5 build manifest
+  records the policy version that created its indexes;
   standalone backtest (including `--no-gate`) rejects missing or mismatched
   provenance before evaluating cases, and the acceptance writer revalidates
   that provenance plus the active transaction checksum before persistence.
@@ -237,10 +229,10 @@ ai-notify --tool <codex|claude> --status <ok|warn|fail> \
   source files, indexes, manifest/checksums, and no credentials. It is
   checksum-closed, so undeclared files invalidate it. Its sibling
   `state/market-data/taipei-backtest-acceptance.json` contains only aggregate
-  schema-2 acceptance metrics keyed to the active transaction-index checksum,
+  schema-3 acceptance metrics keyed to the active transaction-index checksum,
   active policy id, estimator policy version, and complete eligible
-  transaction-date coverage. Any future deliberate publication must promote
-  this pair together. Optional
+  transaction-date coverage, approved use cohorts, and parking-family gates.
+  Publication promotes this pair together. Optional
   per-case diagnostic reports belong under
   `state/market-data/backtests/taipei/`, outside the active build.
 - `prompts/daily-run.md`: the committed headless worker prompt for the daily

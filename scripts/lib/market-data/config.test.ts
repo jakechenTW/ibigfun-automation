@@ -35,10 +35,10 @@ test('approved weights and stale windows are centralized', () => {
   assert.equal(DOORPLATE_STALE_DAYS, 60);
 });
 
-test('production and challenger keep separate compatibility versions', () => {
-  assert.equal(ESTIMATOR_POLICY_VERSION, 4);
-  assert.equal(MARKET_SCHEMA_VERSION, 3);
-  assert.equal(CANDIDATE_ESTIMATOR_POLICY_VERSION, 6);
+test('production activates the validated challenger compatibility versions', () => {
+  assert.equal(ESTIMATOR_POLICY_VERSION, 7);
+  assert.equal(MARKET_SCHEMA_VERSION, 5);
+  assert.equal(CANDIDATE_ESTIMATOR_POLICY_VERSION, 7);
   assert.equal(CANDIDATE_MARKET_SCHEMA_VERSION, 5);
 });
 

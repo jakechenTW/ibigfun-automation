@@ -62,7 +62,12 @@ function manifest(buildId: string, recordCount = 1): MarketDataManifest {
         reviewOnly: 0,
         excluded: 0,
         excludedByReason: {},
-      } as unknown as MarketDataManifest['transactions']['normalization'],
+        byPrimaryUse: { commercial: 0, industrial: 0, 'mixed-industrial': 0, 'mixed-residential': 0, office: 0, residential: recordCount, unknown: 0 },
+        byParkingGrade: { A: recordCount, B: 0, C: 0 },
+        gradeBByComponent: { missingBoth: 0, officialAreaOnly: 0, officialPriceOnly: 0 },
+        gradeBImputed: 0,
+        gradeBUnresolved: 0,
+      },
     },
     lastFailure: null,
     artifacts: {},
@@ -240,28 +245,24 @@ async function convertBuildToCandidate(root: string): Promise<void> {
   await writeFile(join(root, 'manifest.json'), `${JSON.stringify(candidateManifest)}\n`);
 }
 
-test('safe stop loads only the legacy production pair and validates the challenger separately', async (t) => {
-  assert.equal(MARKET_SCHEMA_VERSION, 3);
-  assert.equal(ESTIMATOR_POLICY_VERSION, 4);
+test('activation loads only the schema-5 policy-7 pair', async (t) => {
+  assert.equal(MARKET_SCHEMA_VERSION, 5);
+  assert.equal(ESTIMATOR_POLICY_VERSION, 7);
   assert.equal(CANDIDATE_MARKET_SCHEMA_VERSION, 5);
-  assert.equal(CANDIDATE_ESTIMATOR_POLICY_VERSION, 6);
+  assert.equal(CANDIDATE_ESTIMATOR_POLICY_VERSION, 7);
 
   const parent = await mkdtemp(join(tmpdir(), 'market-store-activation-contract-'));
   const root = join(parent, 'taipei');
   const candidateRoot = join(parent, '.taipei-staging-candidate');
   t.after(() => rm(parent, { recursive: true, force: true }));
   await writeBuild(root, 'production-contract');
-  await downgradeBuildToLegacySchema(root, 3);
   const productionAcceptance = await passingAcceptance(root);
   await writeFile(backtestAcceptancePath(root), JSON.stringify(productionAcceptance));
 
   const active = await loadMarketData(root, { minDoorplates: 1, minTransactions: 0 });
-  assert.equal(active?.backtestAcceptance?.schemaVersion, 2);
+  assert.equal(active?.backtestAcceptance?.schemaVersion, 3);
   assert.equal(marketDataBacktestAccepted(active!), true);
-  await assert.rejects(
-    () => validateCandidateStagedBuild(root, { minDoorplates: 1, minTransactions: 0 }),
-    /candidate.*(?:schema|policy)/i,
-  );
+  assert.equal((await validateCandidateStagedBuild(root, { minDoorplates: 1, minTransactions: 0 })).manifest.schemaVersion, 5);
 
   await writeBuild(candidateRoot, 'candidate-contract');
   await convertBuildToCandidate(candidateRoot);
@@ -271,8 +272,8 @@ test('safe stop loads only the legacy production pair and validates the challeng
   });
   const candidateAcceptance = await passingCandidateAcceptance(candidateRoot);
   assert.equal(challenger.manifest.schemaVersion, 5);
-  assert.equal(await loadMarketData(candidateRoot, { minDoorplates: 1, minTransactions: 0 }), null);
-  assert.equal(validCandidateBacktestAcceptance(candidateAcceptance), true);
+  assert.equal((await loadMarketData(candidateRoot, { minDoorplates: 1, minTransactions: 0 }))?.manifest.schemaVersion, 5);
+  assert.equal(validCandidateBacktestAcceptance(candidateAcceptance, 'baseline'), true);
   assert.equal(validBacktestAcceptance(candidateAcceptance), false);
 });
 
@@ -387,7 +388,11 @@ async function passingCandidateAcceptance(root: string): Promise<CandidateBackte
   };
 }
 
-async function passingAcceptance(root: string): Promise<LegacyBacktestAcceptance> {
+async function passingAcceptance(root: string): Promise<CandidateBacktestAcceptance> {
+  return passingCandidateAcceptance(root);
+}
+
+async function passingLegacyAcceptance(root: string): Promise<LegacyBacktestAcceptance> {
   const current = await passingCandidateAcceptance(root);
   return {
     schemaVersion: 2,
@@ -409,14 +414,10 @@ async function passingAcceptance(root: string): Promise<LegacyBacktestAcceptance
   };
 }
 
-async function passingLegacyAcceptance(root: string): Promise<LegacyBacktestAcceptance> {
-  return passingAcceptance(root);
-}
-
 async function crashPublicationAfterRename(
   active: string,
   stage: string,
-  acceptance: BacktestAcceptance,
+  acceptance: BacktestAcceptance | CandidateBacktestAcceptance,
   checkpoint: 1 | 2 | 3,
 ): Promise<void> {
   const storeUrl = new URL('./store.ts', import.meta.url).href;
@@ -747,11 +748,11 @@ test('restart recovery restores schema 1-3 predecessors after the first producti
         minTransactions: 0,
       });
 
-      assert.equal(recovered?.manifest.schemaVersion ?? null, schemaVersion === 3 ? 3 : null);
+      assert.equal(recovered?.manifest.schemaVersion ?? null, null);
       assert.equal(readManifest(active)?.buildId, oldBuildId);
       assert.equal(readManifest(active)?.schemaVersion, schemaVersion);
       const loaded = await loadMarketData(active, { minDoorplates: 1, minTransactions: 0 });
-      assert.equal(loaded?.manifest.schemaVersion ?? null, schemaVersion === 3 ? 3 : null);
+      assert.equal(loaded?.manifest.schemaVersion ?? null, null);
       assert.deepEqual(await readdir(parent), ['taipei']);
     });
   }
@@ -787,7 +788,7 @@ test('production publication validates both historical schema-2 manifest shapes'
 
       assert.equal(published.manifest.schemaVersion, MARKET_SCHEMA_VERSION);
       assert.equal(published.manifest.estimatorPolicyVersion, ESTIMATOR_POLICY_VERSION);
-      assert.equal(published.backtestAcceptance?.schemaVersion, 2);
+      assert.equal(published.backtestAcceptance?.schemaVersion, 3);
       assert.equal(marketDataBacktestAccepted(published), true);
     });
   }
@@ -874,11 +875,11 @@ test('production publication validates a true schema-3 policy-4 predecessor', as
 
   assert.equal(published.manifest.schemaVersion, MARKET_SCHEMA_VERSION);
   assert.equal(published.manifest.estimatorPolicyVersion, ESTIMATOR_POLICY_VERSION);
-  assert.equal(published.backtestAcceptance?.schemaVersion, 2);
+  assert.equal(published.backtestAcceptance?.schemaVersion, 3);
   assert.equal(marketDataBacktestAccepted(published), true);
 });
 
-test('production publication rejects a schema-4 policy-5 predecessor', async (t) => {
+test('production publication recovers a schema-4 policy-5 predecessor', async (t) => {
   const parent = await mkdtemp(join(tmpdir(), 'market-store-schema4-predecessor-'));
   const active = join(parent, 'taipei');
   const stage = join(parent, '.taipei-staging-next');
@@ -893,17 +894,15 @@ test('production publication rejects a schema-4 policy-5 predecessor', async (t)
   );
   await writeBuild(stage, 'schema5-policy6-build');
 
-  await assert.rejects(
-    async () => publishStagedBuildWithAcceptance(
+  const published = await publishStagedBuildWithAcceptance(
       active,
       stage,
       await passingAcceptance(stage),
       { minDoorplates: 1, minTransactions: 0 },
-    ),
-    /schema version is not restorable/i,
   );
-  assert.equal(readManifest(active)?.schemaVersion, 4);
-  assert.equal(readManifest(stage)?.schemaVersion, MARKET_SCHEMA_VERSION);
+  assert.equal(published.manifest.schemaVersion, 5);
+  assert.equal(readManifest(active)?.schemaVersion, 5);
+  assert.equal(readManifest(stage), null);
 });
 
 test('restorable schema 1-3 reject fields from a different manifest generation', async (t) => {
@@ -950,7 +949,7 @@ test('restorable schema 1-3 reject fields from a different manifest generation',
   }
 });
 
-test('current load accepts the schema-3 build and schema-2 acceptance pair', async (t) => {
+test('current load rejects the schema-3 build and schema-2 acceptance pair', async (t) => {
   const parent = await mkdtemp(join(tmpdir(), 'market-store-prior-pair-'));
   const root = join(parent, 'taipei');
   t.after(() => rm(parent, { recursive: true, force: true }));
@@ -962,10 +961,7 @@ test('current load accepts the schema-3 build and schema-2 acceptance pair', asy
   }));
 
   const loaded = await loadMarketData(root, { minDoorplates: 1, minTransactions: 0 });
-  assert.equal(loaded?.manifest.schemaVersion, MARKET_SCHEMA_VERSION);
-  assert.equal(loaded?.manifest.estimatorPolicyVersion, ESTIMATOR_POLICY_VERSION);
-  assert.equal(loaded?.backtestAcceptance?.schemaVersion, 2);
-  assert.equal(marketDataBacktestAccepted(loaded!), true);
+  assert.equal(loaded, null);
 });
 
 test('production backtest recovers an interrupted publication before its locked load', async (t) => {
@@ -1325,7 +1321,7 @@ test('backtest acceptance loads only for the active transaction artifact checksu
 
   const acceptance = await passingAcceptance(root);
   await writeBacktestAcceptance(root, acceptance);
-  assert.equal(readBacktestAcceptance(root)?.schemaVersion, 2);
+  assert.equal(readBacktestAcceptance(root)?.schemaVersion, 3);
   assert.equal(
     (await loadMarketData(root, { minDoorplates: 1, minTransactions: 0 }))?.backtestAcceptance?.transactionArtifactSha256,
     checksum,
@@ -1400,7 +1396,7 @@ test('candidate schema-3 acceptance is exact, aggregate-only, and internally con
   await writeBuild(root, 'scenario-acceptance');
   await convertBuildToCandidate(root);
   const acceptance = await passingCandidateAcceptance(root);
-  assert.equal(validCandidateBacktestAcceptance(acceptance), true);
+  assert.equal(validCandidateBacktestAcceptance(acceptance, 'baseline'), true);
   assert.equal(validBacktestAcceptance(acceptance), false);
 
   await assert.rejects(
@@ -1584,11 +1580,11 @@ test('candidate schema-3 acceptance is exact, aggregate-only, and internally con
     },
   ];
   for (const candidate of invalid) {
-    assert.equal(validCandidateBacktestAcceptance(candidate), false);
+    assert.equal(validCandidateBacktestAcceptance(candidate, 'baseline'), false);
   }
 });
 
-test('candidate schema-3 policy-5 acceptance fails closed while exact policy-6 acceptance validates', async (t) => {
+test('candidate schema-3 prior-policy acceptance fails closed while exact policy-7 acceptance validates', async (t) => {
   const parent = await mkdtemp(join(tmpdir(), 'market-store-policy6-acceptance-'));
   const root = join(parent, 'taipei');
   t.after(() => rm(parent, { recursive: true, force: true }));
@@ -1596,13 +1592,70 @@ test('candidate schema-3 policy-5 acceptance fails closed while exact policy-6 a
   await convertBuildToCandidate(root);
   const acceptance = await passingCandidateAcceptance(root);
 
-  assert.equal(validCandidateBacktestAcceptance(acceptance), true);
+  assert.equal(validCandidateBacktestAcceptance(acceptance, 'baseline'), true);
   assert.equal(validBacktestAcceptance(acceptance), false);
 
   assert.equal(validCandidateBacktestAcceptance({
     ...acceptance,
     estimatorPolicyVersion: 5,
-  }), false);
+  }, 'baseline'), false);
+});
+
+test('candidate acceptance validates only against its explicitly expected estimator policy', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-candidate-policy-identity-'));
+  const root = join(parent, 'taipei');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(root, 'candidate-policy-identity');
+  await convertBuildToCandidate(root);
+  const baseline = await passingCandidateAcceptance(root);
+
+  assert.equal(validCandidateBacktestAcceptance(baseline, 'baseline'), true);
+  assert.equal(validCandidateBacktestAcceptance(baseline, '48-month'), false);
+  assert.equal(validCandidateBacktestAcceptance({ ...baseline, policyId: '48-month' }, 'baseline'), false);
+  assert.equal(validCandidateBacktestAcceptance({ ...baseline, policyId: '48-month' }, '48-month'), true);
+  assert.equal(validCandidateBacktestAcceptance({ ...baseline, policyId: '1000-meter' }, '48-month'), false);
+});
+
+test('candidate validation recomputes exact manifest categories from persisted rows', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-candidate-row-counts-'));
+  const root = join(parent, 'taipei');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(root, 'candidate-row-counts');
+  await convertBuildToCandidate(root);
+  const candidateManifest = JSON.parse(await readFile(join(root, 'manifest.json'), 'utf8')) as MarketDataManifest;
+  candidateManifest.transactions.normalization.byPrimaryUse.residential -= 1;
+  candidateManifest.transactions.normalization.byPrimaryUse.office += 1;
+  candidateManifest.transactions.normalization.byParkingGrade.A -= 1;
+  candidateManifest.transactions.normalization.byParkingGrade.C += 1;
+  await writeFile(join(root, 'manifest.json'), JSON.stringify(candidateManifest));
+
+  await assert.rejects(
+    () => validateCandidateStagedBuild(root, { minDoorplates: 1, minTransactions: 0 }),
+    /diagnostics.*persisted rows|persisted rows.*diagnostics/i,
+  );
+});
+
+test('candidate validation rejects malformed persisted row invariants even with matching checksums', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-candidate-row-invariants-'));
+  const root = join(parent, 'taipei');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(root, 'candidate-row-invariants');
+  await convertBuildToCandidate(root);
+  const indexPath = join(root, 'transactions-index.json');
+  const index = JSON.parse(await readFile(indexPath, 'utf8')) as TransactionIndex;
+  Object.values(index.cells)[0]![0]!.transferredParkingCount = -1;
+  await writeFile(indexPath, JSON.stringify(index));
+  const candidateManifest = JSON.parse(await readFile(join(root, 'manifest.json'), 'utf8')) as MarketDataManifest;
+  candidateManifest.artifacts['transactions-index.json'] = {
+    sha256: await sha256File(indexPath),
+    bytes: (await readFile(indexPath)).byteLength,
+  };
+  await writeFile(join(root, 'manifest.json'), JSON.stringify(candidateManifest));
+
+  await assert.rejects(
+    () => validateCandidateStagedBuild(root, { minDoorplates: 1, minTransactions: 0 }),
+    /candidate transaction row/i,
+  );
 });
 
 test('candidate acceptance rejects an artifact unless residential and both parking families passed', async (t) => {
@@ -1640,23 +1693,23 @@ test('candidate acceptance rejects an artifact unless residential and both parki
       },
     },
   ]) {
-    assert.equal(validCandidateBacktestAcceptance(invalid), false);
+    assert.equal(validCandidateBacktestAcceptance(invalid, 'baseline'), false);
   }
 });
 
-test('schema-2 acceptance authorizes only the legacy production runtime', async (t) => {
+test('schema-2 acceptance cannot authorize the activated production runtime', async (t) => {
   const parent = await mkdtemp(join(tmpdir(), 'market-store-legacy-acceptance-'));
   const root = join(parent, 'taipei');
   t.after(() => rm(parent, { recursive: true, force: true }));
   await writeBuild(root, 'legacy-acceptance');
   const acceptance = await passingLegacyAcceptance(root);
 
-  await writeBacktestAcceptance(root, acceptance);
-  assert.deepEqual(readBacktestAcceptance(root), acceptance);
-  assert.equal(validCandidateBacktestAcceptance(acceptance), false);
+  await assert.rejects(() => writeBacktestAcceptance(root, acceptance), /policy provenance/);
+  assert.equal(readBacktestAcceptance(root), null);
+  assert.equal(validCandidateBacktestAcceptance(acceptance, 'baseline'), false);
   const loaded = await loadMarketData(root, { minDoorplates: 1, minTransactions: 0 });
-  assert.deepEqual(loaded?.backtestAcceptance, acceptance);
-  assert.equal(marketDataBacktestAccepted(loaded!), true);
+  assert.equal(loaded?.backtestAcceptance, undefined);
+  assert.equal(marketDataBacktestAccepted(loaded!), false);
 });
 
 test('acceptance writer rejects old active index provenance before creating an artifact', async (t) => {

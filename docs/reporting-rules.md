@@ -88,7 +88,7 @@ exclusion.
   median/P25/P75；只剩這類 evidence 時估值必須為 `review`。
 - 投資分桶的開價溢價以 **P25 保守行情** 計算/覆核；中位數溢價只能用於說明，不能單獨使物件進入推薦。
 - 只有當本機 backtest acceptance 的 `transactions-index.json` checksum、`ESTIMATOR_POLICY_VERSION`、
-  active policy id、schema-3 manifest 的 index-policy provenance、schema-2 acceptance，以及完整有效
+  active policy id、schema-5 manifest 的 index-policy provenance、schema-3 acceptance，以及完整有效
   交易索引的最新日期覆蓋均與目前執行環境完全相符時，估值才可為 `reliable`。Acceptance 必須同時
   證明：所有 `reliable-eligible` held-out 交易
   中至少 70% 可估價、`reliable` cohort 的 median APE ≤12% 且 P75 APE ≤20%、high／medium
@@ -98,10 +98,10 @@ exclusion.
   已更新時一律降為 `review`，不得自動推薦。任何 eligibility、selector、weight、outlier、
   confidence、status、coverage 或 backtest 語意變更都必須提高 `ESTIMATOR_POLICY_VERSION`
   並重新通過完整 backtest。
-- 2026-08-03 的 policy-6 challenger 未通過固定的平面車位 gate，因此自動 refresh／發佈已暫停。
-  `update` 只在同一 writer lock 下恢復中斷的 legacy publication，並載入 schema-3／policy-4 build
-  與 schema-2 acceptance；不得下載、重建、推進來源時間或發布。`marketScenarios` 僅供診斷，
-  不得升降 `marketEstimate`、決定 bucket 或取代 P25 閘門。來源因暫停更新而過期時必須 `warn`。
+- 2026-08-03 修正兩車位遮罩總額與住宅專屬 Grade-B 比較後，policy-7 baseline challenger 已通過
+  全部固定 gate，之後以明確變更啟用 schema-5／policy-7／acceptance-schema-3 正式契約。
+  `update` 只有在完整 gate 通過後才可原子發布，否則保留 last-known-good。
+  `marketEstimate` 保留一個版本作相容／稽核；`marketScenarios` 依已核准用途與車位家族提供正式情境證據。
   詳見 [safe-stop design](superpowers/specs/2026-08-03-multi-use-parking-safe-stop-design.md)。
 - Challenger coverage 不足只能依序評估 baseline → 48-month → 1000-meter；只有前一政策「單純 coverage
   <70%」時才可擴張，任何 accuracy／confidence calibration failure 都必須停止。Fallback 必須全面

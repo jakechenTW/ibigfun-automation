@@ -1,5 +1,9 @@
 # Multi-use Parking Valuation Safe-stop Implementation Plan
 
+> Historical completed plan: superseded by the policy-7 activation documented
+> in `../../../.superpowers/sdd/final-fix-wave-report.md`. Do not use the
+> load-only instructions below as the current operating procedure.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Preserve the corrected schema-5 / policy-6 parking challenger without activating it, while restoring the exact schema-3 / policy-4 / acceptance-schema-2 legacy production authority and daily operation.

@@ -248,7 +248,7 @@ season download endpoint (`https://plvr.land.moi.gov.tw/DownloadSeason?...`).
 The updater retains `queryHouseType` provenance and uses it to select
 like-for-like comparables.
 
-Frozen-load and offline evaluation commands:
+Refresh and offline evaluation commands:
 
 ```bash
 npm run market-data -- update --city taipei
@@ -256,10 +256,12 @@ npm run market-data -- backtest --city taipei --as-of 2026-07-26
 ```
 
 The build is local, git-ignored `state/market-data/taipei/` (raw source files,
-validated indexes, manifest and checksums). While challenger activation is
-withheld, `update` only recovers and loads the existing legacy pair; it does not
-fetch, rebuild, or publish. Transaction source checks older than 30 days or
+validated indexes, manifest and checksums). `update` fetches, rebuilds, runs the
+complete policy-7 gate, and atomically publishes schema-5 build plus schema-3
+acceptance only after every gate passes; otherwise it retains the prior pair.
+Transaction source checks older than 30 days or
 doorplate checks older than 60 days are stale. Enrich still emits the estimate
 and flags freshness, but reports with stale official data must use `warn` and
-cannot automatically recommend affected listings. Policy-6 `marketScenarios`
-is diagnostic-only and never controls report buckets.
+cannot automatically recommend affected listings. Policy-7 `marketScenarios`
+is authoritative only for acceptance-approved use cohorts and parking families;
+the conservative P25 `marketEstimate` gate remains the report authority.

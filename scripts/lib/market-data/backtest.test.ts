@@ -13,11 +13,13 @@ import {
   backtestAcceptance,
   backtestSubjectFromTransaction,
   backtestTransactions,
+  backtestCandidateTransactions,
   candidateBacktestAcceptance,
+  evaluateCandidateBacktestGate,
   evaluateBacktestGate,
-  evaluateProductionBacktestGate,
   heldOutTransactionEligible,
   type BacktestReport,
+  type CandidateBacktestReport,
 } from './backtest.ts';
 import { estimateMarketScenarios } from './scenario-estimator.ts';
 import {
@@ -170,6 +172,38 @@ const indexWithFutureLeak = indexOf([
   transaction('future', '2025-12-01', 10),
 ]);
 
+test('production backtest consumes untouched merge-base rows and returns only the legacy report contract', () => {
+  const legacy = structuredClone(indexWithFutureLeak);
+  for (const transactions of Object.values(legacy.cells)) {
+    for (const transaction of transactions) {
+      const row = transaction as unknown as Record<string, unknown>;
+      for (const challengerField of [
+        'totalAreaPing',
+        'buildingUnitPriceBoundsWan',
+        'parkingEvidence',
+        'originalPrimaryUse',
+        'transferredParkingCount',
+      ]) delete row[challengerField];
+    }
+  }
+
+  const report = backtestTransactions(legacy, { asOf: '2026-07-25' });
+
+  assert.equal(report.latestEligibleTransactionDate, '2025-12-01');
+  assert.ok(report.cases.length > 0);
+  assert.deepEqual(Object.keys(report).sort(), [
+    'asOf',
+    'byBuildingType',
+    'byConfidence',
+    'byStatus',
+    'cases',
+    'latestEligibleTransactionDate',
+    'overall',
+    'policyId',
+    'work',
+  ]);
+});
+
 test('held-out estimate uses only transactions before subject date', () => {
   const report = backtestTransactions(indexWithFutureLeak, { asOf: '2026-07-25' });
 
@@ -182,7 +216,7 @@ test('legacy held-outs exclude completion inconsistencies while scenario coverag
   const completedAfterSale = transaction('future-completion', '2025-12-01', 100, 'midrise');
   completedAfterSale.completionDate = '2026-01-01';
 
-  const report = backtestTransactions(indexOf([completedAfterSale]), { asOf: '2026-07-25' });
+  const report = backtestCandidateTransactions(indexOf([completedAfterSale]), { asOf: '2026-07-25' });
 
   assert.equal(heldOutTransactionEligible(completedAfterSale), false);
   assert.equal(report.latestEligibleTransactionDate, '2025-12-01');
@@ -266,7 +300,7 @@ test('reports independent exact-use cohorts and direct-plus-imputed coverage fro
     exactUseTransaction(`industrial-${month}`, `2025-0${month}-20`, 60 + month, 'industrial'),
   );
 
-  const report = backtestTransactions(
+  const report = backtestCandidateTransactions(
     indexOf([...parkingTrainers, ...residential, ...office, ...industrial]),
     { asOf: '2026-07-25' },
   );
@@ -288,7 +322,7 @@ test('reports independent exact-use cohorts and direct-plus-imputed coverage fro
 });
 
 test('masked grade-A parking holdouts report aggregate price, area, and interval diagnostics by family', () => {
-  const report = backtestTransactions(indexOf([
+  const report = backtestCandidateTransactions(indexOf([
     directParkingTransaction('parking-1', '2025-01-01', 1_800_000, 9),
     directParkingTransaction('parking-2', '2025-02-01', 2_000_000, 10),
     directParkingTransaction('parking-3', '2025-03-01', 2_200_000, 11),
@@ -303,6 +337,23 @@ test('masked grade-A parking holdouts report aggregate price, area, and interval
   assert.equal(report.parkingMaskedHoldout.overall.areaIntervalCoverage, 1);
   assert.equal(report.parkingMaskedHoldout.byParkingFamily.flat.caseCount, 4);
   assert.equal(report.parkingMaskedHoldout.byParkingFamily.mechanical.caseCount, 0);
+});
+
+test('masked parking compares two-space holdout totals against count-scaled predicted totals', () => {
+  const twoSpace = directParkingTransaction('parking-two-space', '2025-04-01', 4_000_000, 20);
+  twoSpace.transferredParkingCount = 2;
+  const report = backtestCandidateTransactions(indexOf([
+    directParkingTransaction('parking-1', '2025-01-01', 2_000_000, 10),
+    directParkingTransaction('parking-2', '2025-02-01', 2_000_000, 10),
+    directParkingTransaction('parking-3', '2025-03-01', 2_000_000, 10),
+    twoSpace,
+  ]), { asOf: '2026-07-25' });
+
+  assert.equal(report.parkingMaskedHoldout.byParkingFamily.flat.estimatedCount, 1);
+  assert.equal(report.parkingMaskedHoldout.byParkingFamily.flat.priceMedianApe, 0);
+  assert.equal(report.parkingMaskedHoldout.byParkingFamily.flat.areaMedianApe, 0);
+  assert.equal(report.parkingMaskedHoldout.byParkingFamily.flat.priceIntervalCoverage, 1);
+  assert.equal(report.parkingMaskedHoldout.byParkingFamily.flat.areaIntervalCoverage, 1);
 });
 
 test('quality gate fails only completed reports over a target and can be disabled', () => {
@@ -337,7 +388,7 @@ test('historical cutoff cannot approve a newer complete active transaction index
 });
 
 test('scenario acceptance coverage boundary includes newer exact-use grade-A transactions', () => {
-  const report = backtestTransactions(indexOf([
+  const report = backtestCandidateTransactions(indexOf([
     exactUseTransaction('residential-old', '2025-01-01', 100, 'residential'),
     exactUseTransaction('office-newer', '2025-12-15', 80, 'office'),
   ]), { asOf: '2025-06-01' });
@@ -371,9 +422,9 @@ test('scenario coverage boundary includes grade-B, masked-parking, and grade-C r
     },
   });
 
-  const gradeBReport = backtestTransactions(indexOf([older, gradeB]), { asOf: '2025-06-01' });
-  const maskedReport = backtestTransactions(indexOf([older, maskedParkingOnly]), { asOf: '2025-06-01' });
-  const bundleReport = backtestTransactions(indexOf([older, gradeC]), { asOf: '2025-06-01' });
+  const gradeBReport = backtestCandidateTransactions(indexOf([older, gradeB]), { asOf: '2025-06-01' });
+  const maskedReport = backtestCandidateTransactions(indexOf([older, maskedParkingOnly]), { asOf: '2025-06-01' });
+  const bundleReport = backtestCandidateTransactions(indexOf([older, gradeC]), { asOf: '2025-06-01' });
 
   assert.equal(gradeBReport.latestEligibleTransactionDate, '2025-10-01');
   assert.equal(maskedReport.latestEligibleTransactionDate, '2025-11-01');
@@ -406,7 +457,7 @@ test('acceptance requires sufficient slices and high confidence to outperform me
   assert.ok(evaluateBacktestGate(insufficient).reasons.includes('insufficient-high-confidence-cases'));
   assert.ok(evaluateBacktestGate(notMeasurablyBetter).reasons.includes('high-confidence-not-measurably-better'));
   assert.deepEqual(evaluateBacktestGate(passing), { passed: true, complete: true, reasons: [] });
-  assert.equal(shouldPersistBacktestAcceptance(passing, false), true);
+  assert.equal(shouldPersistBacktestAcceptance(passing, false), false);
   assert.equal(shouldPersistBacktestAcceptance(productionReadyReport(), false), true);
   assert.equal(shouldPersistBacktestAcceptance(passing, true), false);
   assert.equal(shouldPersistBacktestAcceptance(insufficient, false), false);
@@ -434,9 +485,9 @@ test('review cohort accuracy is diagnostic and does not fail reliable acceptance
   assert.deepEqual(evaluateBacktestGate(report), { passed: true, complete: true, reasons: [] });
 });
 
-test('production gate requires the legacy global, residential exact-use, and shared parking gates', () => {
+test('candidate gate requires the legacy global, residential exact-use, and shared parking gates', () => {
   const passing = productionReadyReport();
-  assert.deepEqual(evaluateProductionBacktestGate(passing), {
+  assert.deepEqual(evaluateCandidateBacktestGate(passing), {
     passed: true,
     complete: true,
     reasons: [],
@@ -450,7 +501,7 @@ test('production gate requires the legacy global, residential exact-use, and sha
     medianApe: 0.13,
     p75Ape: 0.21,
   });
-  assert.ok(evaluateProductionBacktestGate(residentialFailure).reasons.includes(
+  assert.ok(evaluateCandidateBacktestGate(residentialFailure).reasons.includes(
     'residential-use-cohort-failed',
   ));
 
@@ -466,7 +517,7 @@ test('production gate requires the legacy global, residential exact-use, and sha
     priceIntervalCoverage: null,
     areaIntervalCoverage: null,
   });
-  assert.ok(evaluateProductionBacktestGate(parkingFailure).reasons.includes(
+  assert.ok(evaluateCandidateBacktestGate(parkingFailure).reasons.includes(
     'parking-family-mechanical-not-accepted',
   ));
 
@@ -480,7 +531,7 @@ test('production gate requires the legacy global, residential exact-use, and sha
     bias: 0.50,
     intervalCoverage: 0,
   });
-  assert.equal(evaluateProductionBacktestGate(isolatedOfficeFailure).passed, true);
+  assert.equal(evaluateCandidateBacktestGate(isolatedOfficeFailure).passed, true);
 });
 
 test('exact-use cohort gate rejects catastrophic absolute bias and interval calibration', () => {
@@ -494,7 +545,7 @@ test('exact-use cohort gate rejects catastrophic absolute bias and interval cali
     bias: 0.99,
     intervalCoverage: 0.5,
   });
-  assert.ok(evaluateProductionBacktestGate(catastrophicBias).reasons.includes(
+  assert.ok(evaluateCandidateBacktestGate(catastrophicBias).reasons.includes(
     'residential-use-cohort-failed',
   ));
 
@@ -508,7 +559,7 @@ test('exact-use cohort gate rejects catastrophic absolute bias and interval cali
     bias: 0,
     intervalCoverage: 0,
   });
-  assert.ok(evaluateProductionBacktestGate(catastrophicCalibration).reasons.includes(
+  assert.ok(evaluateCandidateBacktestGate(catastrophicCalibration).reasons.includes(
     'residential-use-cohort-failed',
   ));
 });
@@ -520,7 +571,7 @@ test('parking family gate rejects sparse and poor masked diagnostics independent
     estimatedCount: 19,
     estimateCoverage: 1,
   });
-  assert.ok(evaluateProductionBacktestGate(sparse).reasons.includes(
+  assert.ok(evaluateCandidateBacktestGate(sparse).reasons.includes(
     'parking-family-flat-not-accepted',
   ));
 
@@ -533,7 +584,7 @@ test('parking family gate rejects sparse and poor masked diagnostics independent
     priceIntervalCoverage: 0,
     areaIntervalCoverage: 0,
   });
-  assert.ok(evaluateProductionBacktestGate(poor).reasons.includes(
+  assert.ok(evaluateCandidateBacktestGate(poor).reasons.includes(
     'parking-family-flat-not-accepted',
   ));
 });
@@ -646,8 +697,8 @@ test('a failed non-residential use remains isolated while residential global fai
 
 test('grade-B activation requires strict coverage improvement within accuracy, bias, and interval regressions', () => {
   const acceptanceFor = (
-    direct: Partial<BacktestReport['directOnly']>,
-    imputed: Partial<BacktestReport['directPlusImputed']>,
+    direct: Partial<CandidateBacktestReport['directOnly']>,
+    imputed: Partial<CandidateBacktestReport['directPlusImputed']>,
   ) => {
     const report = productionReadyReport();
     report.directOnly = gateMetric({
@@ -666,6 +717,8 @@ test('grade-B activation requires strict coverage improvement within accuracy, b
       intervalCoverage: 0.75,
       ...imputed,
     });
+    report.byPrimaryUseDirectOnly.residential = { ...report.directOnly };
+    report.byPrimaryUse.residential = { ...report.directPlusImputed };
     return () => candidateBacktestAcceptance(report, 'e'.repeat(64), '2026-07-26T01:00:00.000Z');
   };
 
@@ -681,10 +734,45 @@ test('grade-B activation requires strict coverage improvement within accuracy, b
   assert.throws(acceptanceFor({}, { p75Ape: 0.201 }), /parking-imputation-comparison-failed/);
 });
 
+test('non-residential-only grade-B improvement cannot authorize residential imputation', () => {
+  const report = productionReadyReport();
+  report.byPrimaryUseDirectOnly.residential = gateMetric({
+    estimateCoverage: 0.70,
+    medianApe: 0.10,
+    p75Ape: 0.18,
+    bias: 0.02,
+    intervalCoverage: 0.80,
+  });
+  report.byPrimaryUse.residential = gateMetric({
+    estimateCoverage: 0.70,
+    medianApe: 0.10,
+    p75Ape: 0.18,
+    bias: 0.02,
+    intervalCoverage: 0.80,
+  });
+  report.directOnly = gateMetric({
+    estimateCoverage: 0.70,
+    medianApe: 0.10,
+    p75Ape: 0.18,
+    bias: 0.02,
+    intervalCoverage: 0.80,
+  });
+  report.directPlusImputed = gateMetric({
+    estimateCoverage: 0.80,
+    medianApe: 0.10,
+    p75Ape: 0.18,
+    bias: 0.02,
+    intervalCoverage: 0.80,
+  });
+
+  assert.throws(
+    () => candidateBacktestAcceptance(report, '7'.repeat(64), '2026-07-26T01:00:00.000Z'),
+    /parking-imputation-comparison-failed/,
+  );
+});
+
 test('rejected parking gates cannot produce a production acceptance', () => {
-  const report = completeGateReport({}, '2025-12-01') as BacktestReport & {
-    byPrimaryUseDirectOnly: BacktestReport['byPrimaryUse'];
-  };
+  const report = completeGateReport({}, '2025-12-01');
   report.byPrimaryUse.residential = gateMetric({
     caseCount: 25,
     estimatedCount: 20,
@@ -754,7 +842,7 @@ test('review-only source stays outside legacy held-outs while scenario coverage 
   reviewOnly.eligibility = 'review-only';
   reviewOnly.eligibilityReasons = ['mixed-primary-use'];
 
-  const report = backtestTransactions(indexOf([reviewOnly]), { asOf: '2026-07-25' });
+  const report = backtestCandidateTransactions(indexOf([reviewOnly]), { asOf: '2026-07-25' });
 
   assert.equal(heldOutTransactionEligible(reviewOnly), false);
   assert.equal(report.latestEligibleTransactionDate, '2025-12-01');
@@ -793,8 +881,8 @@ function gateMetric(
 }
 
 function maskedMetric(
-  values: Partial<BacktestReport['parkingMaskedHoldout']['overall']> = {},
-): BacktestReport['parkingMaskedHoldout']['overall'] {
+  values: Partial<CandidateBacktestReport['parkingMaskedHoldout']['overall']> = {},
+): CandidateBacktestReport['parkingMaskedHoldout']['overall'] {
   return {
     caseCount: 25,
     estimatedCount: 20,
@@ -809,7 +897,7 @@ function maskedMetric(
   };
 }
 
-function productionReadyReport(): BacktestReport {
+function productionReadyReport(): CandidateBacktestReport {
   const report = completeGateReport({}, '2025-12-01');
   const residential = gateMetric({
     caseCount: 25,
@@ -820,8 +908,14 @@ function productionReadyReport(): BacktestReport {
     bias: 0,
     intervalCoverage: 0.5,
   });
-  report.byPrimaryUse.residential = residential;
-  report.byPrimaryUseDirectOnly.residential = { ...residential };
+  report.byPrimaryUseDirectOnly.residential = {
+    ...residential,
+    estimateCoverage: 0.70,
+  };
+  report.byPrimaryUse.residential = {
+    ...residential,
+    estimateCoverage: 0.71,
+  };
   report.directOnly = gateMetric({
     estimateCoverage: 0.70,
     medianApe: 0.10,
@@ -847,13 +941,13 @@ function productionReadyReport(): BacktestReport {
 }
 
 function completeGateReport(overrides: {
-  overall?: Partial<BacktestReport['overall']>;
-  reliable?: Partial<BacktestReport['byStatus']['reliable']>;
-  review?: Partial<BacktestReport['byStatus']['review']>;
-  high?: Partial<BacktestReport['byConfidence']['high']>;
-  medium?: Partial<BacktestReport['byConfidence']['medium']>;
-} = {}, asOf = '2026-07-25'): BacktestReport {
-  const report = backtestTransactions(indexWithFutureLeak, { asOf });
+  overall?: Partial<CandidateBacktestReport['overall']>;
+  reliable?: Partial<CandidateBacktestReport['byStatus']['reliable']>;
+  review?: Partial<CandidateBacktestReport['byStatus']['review']>;
+  high?: Partial<CandidateBacktestReport['byConfidence']['high']>;
+  medium?: Partial<CandidateBacktestReport['byConfidence']['medium']>;
+} = {}, asOf = '2026-07-25'): CandidateBacktestReport {
+  const report = backtestCandidateTransactions(indexWithFutureLeak, { asOf });
   return {
     ...report,
     overall: gateMetric({ caseCount: 50, estimatedCount: 40, ...overrides.overall }),

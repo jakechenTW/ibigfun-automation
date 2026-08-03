@@ -96,7 +96,7 @@ function useCohortAccepted(
   primaryUse: Exclude<NormalizedPrimaryUse, 'unknown'>,
 ): boolean {
   return acceptance?.schemaVersion === 3
-    && validCandidateBacktestAcceptance(acceptance)
+    && validCandidateBacktestAcceptance(acceptance, ACTIVE_ESTIMATOR_POLICY.id)
     && acceptance.useCohorts[primaryUse].status === 'accepted';
 }
 
@@ -104,7 +104,7 @@ function acceptedParkingFamilies(
   acceptance: ScenarioAcceptance | null,
 ): Array<'flat' | 'mechanical'> {
   if (acceptance?.schemaVersion !== 3
-    || !validCandidateBacktestAcceptance(acceptance)
+    || !validCandidateBacktestAcceptance(acceptance, ACTIVE_ESTIMATOR_POLICY.id)
     || !acceptance.parkingImputationAccepted) return [];
   return (['flat', 'mechanical'] as const).filter((family) =>
     acceptance.parkingFamilies[family].status === 'accepted',

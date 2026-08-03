@@ -13,11 +13,19 @@ import {
   runMarketDataCommand,
   shouldPersistBacktestAcceptance,
 } from '../../market-data.ts';
-import { backtestTransactions, type BacktestReport } from './backtest.ts';
-import type { BacktestAcceptance, MarketDataBundle, TransactionIndex } from './types.ts';
+import {
+  backtestCandidateTransactions,
+  type BacktestReport,
+  type CandidateBacktestReport,
+} from './backtest.ts';
+import type {
+  CandidateBacktestAcceptance,
+  MarketDataBundle,
+  TransactionIndex,
+} from './types.ts';
 
-function passingBacktestReport(index: TransactionIndex): BacktestReport {
-  const report = backtestTransactions(index, { asOf: '2026-07-25' });
+function passingBacktestReport(index: TransactionIndex): CandidateBacktestReport {
+  const report = backtestCandidateTransactions(index, { asOf: '2026-07-25' });
   const metric = (values: Partial<BacktestReport['overall']> = {}): BacktestReport['overall'] => ({
     caseCount: 25,
     estimatedCount: 20,
@@ -28,7 +36,7 @@ function passingBacktestReport(index: TransactionIndex): BacktestReport {
     intervalCoverage: 0.5,
     ...values,
   });
-  const parkingMetric = (): BacktestReport['parkingMaskedHoldout']['overall'] => ({
+  const parkingMetric = (): CandidateBacktestReport['parkingMaskedHoldout']['overall'] => ({
     caseCount: 25,
     estimatedCount: 20,
     estimateCoverage: 0.8,
@@ -62,6 +70,10 @@ function passingBacktestReport(index: TransactionIndex): BacktestReport {
     byPrimaryUse: {
       ...report.byPrimaryUse,
       residential: metric(),
+    },
+    byPrimaryUseDirectOnly: {
+      ...report.byPrimaryUseDirectOnly,
+      residential: metric({ estimatedCount: 18, estimateCoverage: 0.72 }),
     },
     directOnly: metric({ caseCount: 50, estimatedCount: 35, estimateCoverage: 0.7 }),
     directPlusImputed: metric({ caseCount: 50, estimatedCount: 40, estimateCoverage: 0.8 }),
@@ -121,7 +133,7 @@ test('candidate CLI evaluates 48-month policy diagnostically without requesting 
         requestedPublish = options.publish;
         requestedPolicy = options.policy.id;
         return {
-          report: backtestTransactions(emptyIndex, { asOf: options.asOf, policy: options.policy }),
+          report: backtestCandidateTransactions(emptyIndex, { asOf: options.asOf, policy: options.policy }),
           gate: { passed: true, complete: true, reasons: [] },
           acceptance: null,
           diagnostics: {
@@ -195,48 +207,15 @@ test('non-active diagnostic policy cannot persist canonical acceptance', () => {
     builtAt: '2026-07-25T00:00:00.000Z',
     cells: {},
   };
-  const diagnostic = backtestTransactions(emptyIndex, {
-    asOf: '2026-07-25',
-    policy: estimatorPolicyById('48-month'),
-  });
-  const passingDiagnostic = {
-    ...diagnostic,
-    latestEligibleTransactionDate: '2026-07-25',
-    overall: {
-      caseCount: 25, estimatedCount: 20, estimateCoverage: 0.8,
-      medianApe: 0.08, p75Ape: 0.16, bias: 0, intervalCoverage: 0.5,
-    },
-    byStatus: {
-      reliable: {
-        caseCount: 20, estimatedCount: 20, estimateCoverage: 1,
-        medianApe: 0.08, p75Ape: 0.16, bias: 0, intervalCoverage: 0.5,
-      },
-      review: {
-        caseCount: 5, estimatedCount: 0, estimateCoverage: 0,
-        medianApe: null, p75Ape: null, bias: null, intervalCoverage: null,
-      },
-      unavailable: {
-        caseCount: 0, estimatedCount: 0, estimateCoverage: 0,
-        medianApe: null, p75Ape: null, bias: null, intervalCoverage: null,
-      },
-    },
-    byConfidence: {
-      ...diagnostic.byConfidence,
-      high: {
-        caseCount: 20, estimatedCount: 20, estimateCoverage: 1,
-        medianApe: 0.08, p75Ape: 0.16, bias: 0, intervalCoverage: 0.5,
-      },
-      medium: {
-        caseCount: 20, estimatedCount: 20, estimateCoverage: 1,
-        medianApe: 0.10, p75Ape: 0.18, bias: 0, intervalCoverage: 0.5,
-      },
-    },
+  const passingDiagnostic: CandidateBacktestReport = {
+    ...passingBacktestReport(emptyIndex),
+    policyId: '48-month',
   };
 
   assert.equal(shouldPersistBacktestAcceptance(passingDiagnostic, false), false);
 });
 
-test('production CLI uses only the legacy global gate while challenger slices stay diagnostic', () => {
+test('production CLI enforces activated use and parking challenger gates', () => {
   const index: TransactionIndex = {
     schemaVersion: MARKET_SCHEMA_VERSION,
     datasetVersion: 'fixture',
@@ -247,7 +226,7 @@ test('production CLI uses only the legacy global gate while challenger slices st
   assert.equal(backtestExitCode(passing, false), 0);
   assert.equal(shouldPersistBacktestAcceptance(passing, false), true);
 
-  const residentialFailure: BacktestReport = {
+  const residentialFailure: CandidateBacktestReport = {
     ...passing,
     byPrimaryUse: {
       ...passing.byPrimaryUse,
@@ -258,10 +237,10 @@ test('production CLI uses only the legacy global gate while challenger slices st
       },
     },
   };
-  assert.equal(backtestExitCode(residentialFailure, false), 0);
-  assert.equal(shouldPersistBacktestAcceptance(residentialFailure, false), true);
+  assert.equal(backtestExitCode(residentialFailure, false), 1);
+  assert.equal(shouldPersistBacktestAcceptance(residentialFailure, false), false);
 
-  const mechanicalFailure: BacktestReport = {
+  const mechanicalFailure: CandidateBacktestReport = {
     ...passing,
     parkingMaskedHoldout: {
       ...passing.parkingMaskedHoldout,
@@ -275,8 +254,8 @@ test('production CLI uses only the legacy global gate while challenger slices st
       },
     },
   };
-  assert.equal(backtestExitCode(mechanicalFailure, false), 0);
-  assert.equal(shouldPersistBacktestAcceptance(mechanicalFailure, false), true);
+  assert.equal(backtestExitCode(mechanicalFailure, false), 1);
+  assert.equal(shouldPersistBacktestAcceptance(mechanicalFailure, false), false);
   assert.equal(backtestExitCode(mechanicalFailure, true), 0);
 });
 
@@ -333,14 +312,14 @@ function injectedBundleWithProvenance(
   } as unknown as MarketDataBundle;
 }
 
-test('update command reports the frozen retained build with non-success exit code 3', async () => {
+test('update command reports a retained build after a failed candidate publication', async () => {
   const retained = injectedBundleWithProvenance(
     MARKET_SCHEMA_VERSION,
     ESTIMATOR_POLICY_VERSION,
   );
   retained.refresh = {
     status: 'last-known-good',
-    failure: 'challenger-activation-withheld',
+    failure: 'candidate-gate-failed',
   };
   let updaterCalls = 0;
 
@@ -357,7 +336,7 @@ test('update command reports the frozen retained build with non-success exit cod
 
   assert.equal(exitCode, 3);
   assert.equal(updaterCalls, 1);
-  assert.equal(retained.refresh?.failure, 'challenger-activation-withheld');
+  assert.equal(retained.refresh?.failure, 'candidate-gate-failed');
 });
 
 test('production backtest rejects schema-2 provenance before evaluation or acceptance persistence', async () => {
@@ -500,7 +479,7 @@ test('backtest acceptance writer cannot race a locked update into a stale final 
   const writerCanFinish = new Promise<void>((resolve) => { releaseWriter = resolve; });
   const writerStarted = new Promise<void>((resolve) => { writerReached = resolve; });
   let recoveryRan = false;
-  let capturedAcceptance: BacktestAcceptance | null = null;
+  let capturedAcceptance: CandidateBacktestAcceptance | null = null;
 
   const backtestRun = runMarketDataCommand(
     ['backtest', '--city', 'taipei'],
@@ -521,7 +500,7 @@ test('backtest acceptance writer cannot race a locked update into a stale final 
           assert.equal(criticalSectionDepth, 1);
           return passingBacktestReport(emptyIndex);
         },
-        persistAcceptance: async (_root: string, acceptance: BacktestAcceptance) => {
+        persistAcceptance: async (_root: string, acceptance: CandidateBacktestAcceptance) => {
           assert.equal(criticalSectionDepth, 1);
           capturedAcceptance = acceptance;
           writerReached();
@@ -547,8 +526,8 @@ test('backtest acceptance writer cannot race a locked update into a stale final 
     acceptanceChecksum: 'new-checksum',
   });
   assert.equal(recoveryRan, true);
-  const persisted = capturedAcceptance as BacktestAcceptance | null;
-  assert.equal(persisted?.schemaVersion, 2);
+  const persisted = capturedAcceptance as CandidateBacktestAcceptance | null;
+  assert.equal(persisted?.schemaVersion, 3);
   assert.equal('cases' in (persisted ?? {}), false);
   assert.equal('scenarioCases' in (persisted ?? {}), false);
 });

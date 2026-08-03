@@ -76,6 +76,15 @@ export interface BacktestReport {
   byBuildingType: Record<BuildingType, BacktestMetrics>;
   byConfidence: Record<EstimateConfidence, BacktestMetrics>;
   byStatus: Record<EstimateStatus, BacktestMetrics>;
+  work: {
+    historicalIndexBuilds: number;
+    historicalInsertions: number;
+  };
+  cases: BacktestCase[];
+}
+
+/** Challenger-only diagnostics; never accepted by the production writer. */
+export interface CandidateBacktestReport extends BacktestReport {
   /** Exact-use metrics with grade-B building evidence disabled. */
   byPrimaryUseDirectOnly: Record<Exclude<NormalizedPrimaryUse, 'unknown'>, BacktestMetrics>;
   /** Exact-use metrics with causally imputed grade-B building evidence enabled. */
@@ -400,9 +409,12 @@ function maskedParkingCase(
   const family = transaction.parkingEvidence.family;
   const actualPrice = transaction.parkingEvidence.officialPriceNtd;
   const actualArea = transaction.parkingEvidence.officialAreaPing;
+  const parkingCount = transaction.transferredParkingCount;
   const coordinate = transaction.location.coordinate;
   if (transaction.parkingEvidence.grade !== 'A'
     || (family !== 'flat' && family !== 'mechanical')
+    || transaction.transferredBuildingCount !== 1
+    || !Number.isSafeInteger(parkingCount) || parkingCount === null || parkingCount <= 0
     || !finitePositive(actualPrice) || !finitePositive(actualArea)
     || !coordinate || !Number.isFinite(coordinate.lat) || !Number.isFinite(coordinate.lng)) return null;
   const subject = backtestSubjectFromTransaction(transaction);
@@ -412,12 +424,18 @@ function maskedParkingCase(
     buildingType: transaction.buildingType,
     family,
   }, nearbyHistoricalTransactions(subject, historicalIndex, policy), transaction.transactionDate);
+  const priceP25 = estimate ? estimate.priceP25Ntd * parkingCount : null;
+  const priceP50 = estimate ? estimate.priceP50Ntd * parkingCount : null;
+  const priceP75 = estimate ? estimate.priceP75Ntd * parkingCount : null;
+  const areaP25 = estimate ? estimate.areaP25Ping * parkingCount : null;
+  const areaP50 = estimate ? estimate.areaP50Ping * parkingCount : null;
+  const areaP75 = estimate ? estimate.areaP75Ping * parkingCount : null;
   return {
     family,
-    priceApe: estimate ? Math.abs(estimate.priceP50Ntd - actualPrice) / actualPrice : null,
-    areaApe: estimate ? Math.abs(estimate.areaP50Ping - actualArea) / actualArea : null,
-    priceIntervalHit: estimate ? actualPrice >= estimate.priceP25Ntd && actualPrice <= estimate.priceP75Ntd : null,
-    areaIntervalHit: estimate ? actualArea >= estimate.areaP25Ping && actualArea <= estimate.areaP75Ping : null,
+    priceApe: priceP50 === null ? null : Math.abs(priceP50 - actualPrice) / actualPrice,
+    areaApe: areaP50 === null ? null : Math.abs(areaP50 - actualArea) / actualArea,
+    priceIntervalHit: priceP25 === null || priceP75 === null ? null : actualPrice >= priceP25 && actualPrice <= priceP75,
+    areaIntervalHit: areaP25 === null || areaP75 === null ? null : actualArea >= areaP25 && actualArea <= areaP75,
   };
 }
 
@@ -485,10 +503,10 @@ export function evaluateBacktestGate(report: BacktestReport): BacktestGateResult
 }
 
 function parkingComparisonFor(
-  report: BacktestReport,
+  report: CandidateBacktestReport,
 ): CandidateBacktestAcceptance['parkingComparison'] {
-  const direct = report.directOnly;
-  const imputed = report.directPlusImputed;
+  const direct = report.byPrimaryUseDirectOnly.residential;
+  const imputed = report.byPrimaryUse.residential;
   return {
     directCoverage: direct.estimateCoverage,
     imputedCoverage: imputed.estimateCoverage,
@@ -513,7 +531,7 @@ function parkingFamilyAcceptance(
 }
 
 function parkingFamilyAcceptances(
-  report: BacktestReport,
+  report: CandidateBacktestReport,
 ): CandidateBacktestAcceptance['parkingFamilies'] {
   return {
     flat: parkingFamilyAcceptance(report.parkingMaskedHoldout.byParkingFamily.flat),
@@ -522,7 +540,7 @@ function parkingFamilyAcceptances(
 }
 
 /** Strict challenger gate; it cannot authorize the legacy production runtime. */
-export function evaluateCandidateBacktestGate(report: BacktestReport): BacktestGateResult {
+export function evaluateCandidateBacktestGate(report: CandidateBacktestReport): BacktestGateResult {
   const legacy = evaluateBacktestGate(report);
   const reasons = [...legacy.reasons];
   const residential = scenarioCohortAcceptance(report.byPrimaryUse.residential);
@@ -545,9 +563,6 @@ export function evaluateCandidateBacktestGate(report: BacktestReport): BacktestG
     reasons: [...new Set(reasons)],
   };
 }
-
-/** @deprecated Challenger-only compatibility name. */
-export const evaluateProductionBacktestGate = evaluateCandidateBacktestGate;
 
 /** Builds the active schema-2 / policy-4 aggregate production proof. */
 export function backtestAcceptance(
@@ -587,9 +602,9 @@ export function backtestAcceptance(
   };
 }
 
-/** Builds a strict aggregate challenger proof after every policy-6 gate passes. */
+/** Builds a strict aggregate challenger proof after every policy-7 gate passes. */
 export function candidateBacktestAcceptance(
-  report: BacktestReport,
+  report: CandidateBacktestReport,
   transactionArtifactSha256: string,
   approvedAt: string,
 ): CandidateBacktestAcceptance {
@@ -671,10 +686,96 @@ function scenarioCohortAcceptance(metric: BacktestMetrics): ScenarioCohortAccept
 }
 
 /**
- * Evaluates each historic sale as a held-out subject. Every input index is read
- * only. One incrementally growing index contains strictly earlier-date sales.
+ * Frozen production backtest. This deliberately uses only the merge-base
+ * eligibility, boundary, estimator, and report contract.
  */
 export function backtestTransactions(index: TransactionIndex, options: BacktestOptions): BacktestReport {
+  const asOf = parseIsoDate(options.asOf);
+  if (!asOf) throw new RangeError('Backtest requires a valid as-of date (YYYY-MM-DD)');
+  const policy = options.policy ?? ACTIVE_ESTIMATOR_POLICY;
+
+  const completeEntries = allTransactions(index);
+  const completeLatestEligibleDate = latestEligibleDate(completeEntries);
+  const entries = completeEntries.filter(({ transaction }) => {
+    const date = transactionDate(transaction);
+    return date !== null && date <= asOf;
+  });
+  const historicalCells: TransactionIndex['cells'] = {};
+  const historicalIndex: TransactionIndex = { ...index, cells: historicalCells };
+  const cases: BacktestCase[] = [];
+  let historicalInsertions = 0;
+  for (let start = 0; start < entries.length;) {
+    let end = start + 1;
+    const subjectDate = entries[start]!.transaction.transactionDate;
+    while (end < entries.length && entries[end]!.transaction.transactionDate === subjectDate) end += 1;
+
+    for (const { transaction } of entries.slice(start, end)) {
+      if (!heldOutTransactionEligible(transaction)) continue;
+      const estimate = estimateMarket(
+        backtestSubjectFromTransaction(transaction),
+        historicalIndex,
+        BACKTEST_FRESHNESS,
+        transaction.transactionDate,
+        { allowMissingAskingUnitPrice: true, policy },
+      );
+      const median = estimate.marketUnitPriceMedian;
+      const p25 = estimate.marketUnitPriceP25;
+      const p75 = estimate.marketUnitPriceP75;
+      const actual = transaction.buildingUnitPriceWan;
+      if (!finitePositive(actual)) continue;
+      const canScore = median !== null && p25 !== null && p75 !== null;
+      cases.push({
+        subjectDate: transaction.transactionDate,
+        buildingType: transaction.buildingType,
+        confidence: estimate.confidence,
+        status: estimate.status,
+        actualUnitPriceWan: actual,
+        estimatedUnitPriceWan: median,
+        estimatedP25Wan: p25,
+        estimatedP75Wan: p75,
+        ape: canScore ? Math.abs(median - actual) / actual : null,
+        bias: canScore ? (median - actual) / actual : null,
+        intervalHit: canScore ? actual >= p25 && actual <= p75 : null,
+        comparableDates: estimate.comparables.map((candidate) => candidate.transaction.transactionDate).sort(),
+      });
+    }
+    for (const { cellKey, transaction } of entries.slice(start, end)) {
+      (historicalCells[cellKey] ??= []).push(transaction);
+      historicalInsertions += 1;
+    }
+    start = end;
+  }
+
+  return {
+    asOf: options.asOf,
+    policyId: policy.id,
+    latestEligibleTransactionDate: completeLatestEligibleDate,
+    overall: metrics(cases),
+    byBuildingType: {
+      apartment: metrics(cases.filter((item) => item.buildingType === 'apartment')),
+      midrise: metrics(cases.filter((item) => item.buildingType === 'midrise')),
+      highrise: metrics(cases.filter((item) => item.buildingType === 'highrise')),
+    },
+    byConfidence: {
+      high: metrics(cases.filter((item) => item.confidence === 'high')),
+      medium: metrics(cases.filter((item) => item.confidence === 'medium')),
+      low: metrics(cases.filter((item) => item.confidence === 'low')),
+    },
+    byStatus: {
+      reliable: metrics(cases.filter((item) => item.status === 'reliable')),
+      review: metrics(cases.filter((item) => item.status === 'review')),
+      unavailable: metrics(cases.filter((item) => item.status === 'unavailable')),
+    },
+    work: { historicalIndexBuilds: 1, historicalInsertions },
+    cases,
+  };
+}
+
+/** Challenger backtest with use cohorts, imputation comparison, and masked parking. */
+export function backtestCandidateTransactions(
+  index: TransactionIndex,
+  options: BacktestOptions,
+): CandidateBacktestReport {
   const asOf = parseIsoDate(options.asOf);
   if (!asOf) throw new RangeError('Backtest requires a valid as-of date (YYYY-MM-DD)');
   const policy = options.policy ?? ACTIVE_ESTIMATOR_POLICY;
