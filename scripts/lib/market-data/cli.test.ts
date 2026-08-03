@@ -104,6 +104,13 @@ test('candidate CLI evaluates 48-month policy diagnostically without requesting 
           acceptance: null,
           diagnostics: {
             rawRows: 0, reliableEligible: 0, reviewOnly: 0, excluded: 0, excludedByReason: {},
+            byPrimaryUse: {
+              commercial: 0, industrial: 0, 'mixed-industrial': 0, 'mixed-residential': 0,
+              office: 0, residential: 0, unknown: 0,
+            },
+            byParkingGrade: { A: 0, B: 0, C: 0 },
+            gradeBImputed: 0,
+            gradeBUnresolved: 0,
           },
         };
       },
@@ -354,6 +361,13 @@ test('backtest acceptance writer cannot race a locked update into a stale final 
           reviewOnly: 0,
           excluded: 0,
           excludedByReason: {},
+          byPrimaryUse: {
+            commercial: 0, industrial: 0, 'mixed-industrial': 0, 'mixed-residential': 0,
+            office: 0, residential: 0, unknown: 0,
+          },
+          byParkingGrade: { A: 0, B: 0, C: 0 },
+          gradeBImputed: 0,
+          gradeBUnresolved: 0,
         },
       },
       lastFailure: null,

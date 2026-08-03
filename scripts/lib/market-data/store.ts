@@ -14,6 +14,7 @@ import {
   TRANSACTION_STALE_DAYS,
 } from './config.ts';
 import { latestEligibleTransactionDate } from './backtest.ts';
+import { NORMALIZED_PRIMARY_USES, PARKING_GRADES } from './types.ts';
 import type {
   BacktestAcceptance,
   DoorplateIndex,
@@ -123,18 +124,60 @@ function finiteRatio(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
 
+function validateExactCountRecord(
+  value: unknown,
+  expectedKeys: readonly string[],
+  label: string,
+): number {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`Transaction normalization ${label} diagnostics are missing`);
+  }
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (keys.length !== expectedKeys.length
+      || keys.some((key, index) => key !== expectedKeys[index])) {
+    throw new Error(`Transaction normalization ${label} keys are incomplete or unstable`);
+  }
+  const counts = keys.map((key) => record[key]);
+  if (!counts.every((count) => Number.isSafeInteger(count) && (count as number) >= 0)) {
+    throw new Error(`Transaction normalization ${label} counts are invalid`);
+  }
+  return (counts as number[]).reduce((total, count) => total + count, 0);
+}
+
 function validateTransactionBuildDiagnostics(
   value: TransactionBuildDiagnostics,
   recordCount: number,
 ): void {
   if (!value || typeof value !== 'object') throw new Error('Manifest lacks transaction normalization diagnostics');
-  const counts = [value.rawRows, value.reliableEligible, value.reviewOnly, value.excluded];
+  const counts = [
+    value.rawRows,
+    value.reliableEligible,
+    value.reviewOnly,
+    value.excluded,
+    value.gradeBImputed,
+    value.gradeBUnresolved,
+  ];
   if (!counts.every((count) => Number.isSafeInteger(count) && count >= 0)) {
     throw new Error('Transaction normalization diagnostics contain invalid counts');
   }
   if (value.rawRows !== value.reliableEligible + value.reviewOnly + value.excluded
     || recordCount !== value.reliableEligible + value.reviewOnly) {
     throw new Error('Transaction normalization diagnostics do not match manifest counts');
+  }
+  const primaryUseCount = validateExactCountRecord(
+    value.byPrimaryUse,
+    NORMALIZED_PRIMARY_USES,
+    'primary-use',
+  );
+  const parkingGradeCount = validateExactCountRecord(
+    value.byParkingGrade,
+    PARKING_GRADES,
+    'parking-grade',
+  );
+  if (primaryUseCount !== recordCount || parkingGradeCount !== recordCount
+      || value.gradeBImputed + value.gradeBUnresolved !== value.byParkingGrade.B) {
+    throw new Error('Transaction normalization use or parking diagnostics do not match retained records');
   }
   if (!value.excludedByReason || typeof value.excludedByReason !== 'object'
     || Array.isArray(value.excludedByReason)) {

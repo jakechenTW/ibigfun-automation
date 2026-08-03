@@ -7,16 +7,19 @@ export type LocationMethod = 'exact-doorplate' | 'address-range' | 'nearest-door
 export type EstimateStatus = 'reliable' | 'review' | 'unavailable';
 export type EstimateConfidence = 'high' | 'medium' | 'low';
 export type TransactionEligibility = 'reliable-eligible' | 'review-only';
-export type NormalizedPrimaryUse =
-  | 'residential'
-  | 'mixed-residential'
-  | 'office'
-  | 'commercial'
-  | 'industrial'
-  | 'mixed-industrial'
-  | 'unknown';
+export const NORMALIZED_PRIMARY_USES = [
+  'commercial',
+  'industrial',
+  'mixed-industrial',
+  'mixed-residential',
+  'office',
+  'residential',
+  'unknown',
+] as const;
+export type NormalizedPrimaryUse = typeof NORMALIZED_PRIMARY_USES[number];
 export type ParkingFamily = 'flat' | 'mechanical' | 'none' | 'unknown';
-export type ParkingGrade = 'A' | 'B' | 'C';
+export const PARKING_GRADES = ['A', 'B', 'C'] as const;
+export type ParkingGrade = typeof PARKING_GRADES[number];
 export type SubjectOwnershipEvidence =
   | 'profile-default-freehold'
   | 'title-explicit-non-freehold'
@@ -214,6 +217,10 @@ export interface TransactionBuildDiagnostics {
   reviewOnly: number;
   excluded: number;
   excludedByReason: Record<string, number>;
+  byPrimaryUse: Record<NormalizedPrimaryUse, number>;
+  byParkingGrade: Record<ParkingGrade, number>;
+  gradeBImputed: number;
+  gradeBUnresolved: number;
 }
 
 export interface SelectionResult {

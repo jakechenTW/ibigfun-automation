@@ -47,6 +47,18 @@ function manifest(buildId: string, recordCount = 1): MarketDataManifest {
         reviewOnly: 0,
         excluded: 0,
         excludedByReason: {},
+        byPrimaryUse: {
+          commercial: 0,
+          industrial: 0,
+          'mixed-industrial': 0,
+          'mixed-residential': 0,
+          office: 0,
+          residential: recordCount,
+          unknown: 0,
+        },
+        byParkingGrade: { A: recordCount, B: 0, C: 0 },
+        gradeBImputed: 0,
+        gradeBUnresolved: 0,
       },
     },
     lastFailure: null,
@@ -670,6 +682,7 @@ test('load rejects inconsistent or unstably ordered normalization diagnostics', 
     await readFile(join(unsorted, 'manifest.json'), 'utf8'),
   ) as MarketDataManifest;
   unsortedManifest.transactions.normalization = {
+    ...unsortedManifest.transactions.normalization,
     rawRows: 3,
     reliableEligible: 1,
     reviewOnly: 0,
@@ -700,6 +713,7 @@ test('load rejects inconsistent or unstably ordered normalization diagnostics', 
     await readFile(join(inconsistentReasons, 'manifest.json'), 'utf8'),
   ) as MarketDataManifest;
   inconsistentReasonsManifest.transactions.normalization = {
+    ...inconsistentReasonsManifest.transactions.normalization,
     rawRows: 3,
     reliableEligible: 1,
     reviewOnly: 0,
@@ -721,6 +735,7 @@ test('load rejects inconsistent or unstably ordered normalization diagnostics', 
     await readFile(join(valid, 'manifest.json'), 'utf8'),
   ) as MarketDataManifest;
   validManifest.transactions.normalization = {
+    ...validManifest.transactions.normalization,
     rawRows: 3,
     reliableEligible: 1,
     reviewOnly: 0,
@@ -732,6 +747,39 @@ test('load rejects inconsistent or unstably ordered normalization diagnostics', 
     (await loadMarketData(valid, { minDoorplates: 0, minTransactions: 0 }))?.manifest.buildId,
     'valid-diagnostics',
   );
+});
+
+test('load rejects incomplete, unstable, or inconsistent use and parking diagnostics', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-'));
+  t.after(() => rm(parent, { recursive: true, force: true }));
+
+  async function changeDiagnostics(
+    name: string,
+    change: (normalization: MarketDataManifest['transactions']['normalization']) => void,
+  ): Promise<void> {
+    const root = join(parent, name);
+    await writeBuild(root, name);
+    const value = JSON.parse(await readFile(join(root, 'manifest.json'), 'utf8')) as MarketDataManifest;
+    change(value.transactions.normalization);
+    await writeFile(join(root, 'manifest.json'), JSON.stringify(value));
+    assert.equal(await loadMarketData(root, { minDoorplates: 0, minTransactions: 0 }), null);
+  }
+
+  await changeDiagnostics('use-count-mismatch', (normalization) => {
+    normalization.byPrimaryUse.residential = 0;
+  });
+  await changeDiagnostics('parking-count-mismatch', (normalization) => {
+    normalization.byParkingGrade.A = 0;
+  });
+  await changeDiagnostics('grade-b-resolution-mismatch', (normalization) => {
+    normalization.byParkingGrade = { A: 0, B: 1, C: 0 };
+  });
+  await changeDiagnostics('missing-use-key', (normalization) => {
+    delete (normalization.byPrimaryUse as Partial<typeof normalization.byPrimaryUse>).unknown;
+  });
+  await changeDiagnostics('unstable-parking-key-order', (normalization) => {
+    normalization.byParkingGrade = { B: 0, A: 1, C: 0 };
+  });
 });
 
 test('external diagnostics leave the active build valid while undeclared internal files fail closed', async (t) => {

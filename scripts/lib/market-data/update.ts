@@ -17,8 +17,10 @@ import {
   ESTIMATOR_POLICY_VERSION,
   MARKET_DATA_ROOT,
   MARKET_SCHEMA_VERSION,
+  PARKING_POLICY,
   type EstimatorPolicy,
 } from './config.ts';
+import { estimateParking } from './parking.ts';
 import { extractTaipeiSalesCsv, downloadConditional, moiSeasonUrl, quartersForLookback, resolveTaipeiDoorplateSource, TAIPEI_DOORPLATE_DETAIL_URL, type FetchLike, type ZipEntry, zipEntriesFromFile } from './sources.ts';
 import {
   compareStableText,
@@ -32,11 +34,16 @@ import {
   writeStableJson,
 } from './store.ts';
 import { normalizeSaleTransaction, validateSaleTransactionHeaders, type SaleTransactionRow } from './transactions.ts';
+import { NORMALIZED_PRIMARY_USES, PARKING_GRADES } from './types.ts';
 import type {
   BacktestAcceptance,
   DoorplateIndex,
   MarketDataBundle,
   MarketDataManifest,
+  MarketTransaction,
+  NormalizedPrimaryUse,
+  ParkingGrade,
+  ParkingImputationEvidence,
   TransactionBuildDiagnostics,
   TransactionIndex,
 } from './types.ts';
@@ -184,10 +191,91 @@ async function artifactManifest(root: string): Promise<Record<string, { sha256: 
   return Object.fromEntries(Object.entries(out).sort(([a], [b]) => compareStableText(a, b)));
 }
 
+function acceptedParkingImputation(
+  transaction: MarketTransaction,
+  directGradeA: readonly MarketTransaction[],
+): ParkingImputationEvidence | null {
+  const coordinate = transaction.location.coordinate;
+  const family = transaction.parkingEvidence.family;
+  if (!coordinate || (family !== 'flat' && family !== 'mechanical')) return null;
+  const estimate = estimateParking({
+    coordinate,
+    matchedAddress: transaction.location.matchedAddress,
+    buildingType: transaction.buildingType,
+    family,
+  }, directGradeA, transaction.transactionDate);
+  if (!estimate) return null;
+
+  const buildingPriceNtd = transaction.totalPriceNtd - estimate.priceP50Ntd;
+  const buildingAreaPing = transaction.totalAreaPing - estimate.areaP50Ping;
+  const priceIqrRatio = (estimate.priceP75Ntd - estimate.priceP25Ntd) / estimate.priceP50Ntd;
+  const areaIqrRatio = (estimate.areaP75Ping - estimate.areaP25Ping) / estimate.areaP50Ping;
+  if (buildingPriceNtd <= 0 || buildingAreaPing <= 0
+      || !Number.isFinite(priceIqrRatio) || priceIqrRatio > PARKING_POLICY.maximumPriceIqrRatio
+      || !Number.isFinite(areaIqrRatio) || areaIqrRatio > PARKING_POLICY.maximumAreaIqrRatio) {
+    return null;
+  }
+  return {
+    asOf: estimate.asOf,
+    stage: estimate.stage,
+    comparableIds: estimate.comparableIds,
+    comparableCount: estimate.comparableCount,
+    priceP25Ntd: estimate.priceP25Ntd,
+    priceP50Ntd: estimate.priceP50Ntd,
+    priceP75Ntd: estimate.priceP75Ntd,
+    areaP25Ping: estimate.areaP25Ping,
+    areaP50Ping: estimate.areaP50Ping,
+    areaP75Ping: estimate.areaP75Ping,
+  };
+}
+
+/** Imputes grade-B parking from strictly earlier direct grade-A records. */
+export function augmentParkingEvidenceCausally(
+  transactions: readonly MarketTransaction[],
+): MarketTransaction[] {
+  const chronological = [...transactions].sort((left, right) =>
+    compareStableText(left.transactionDate, right.transactionDate)
+      || compareStableText(left.id, right.id));
+  const directGradeA: MarketTransaction[] = [];
+  const augmented: MarketTransaction[] = [];
+
+  for (let start = 0; start < chronological.length;) {
+    const transactionDate = chronological[start]!.transactionDate;
+    let end = start + 1;
+    while (end < chronological.length && chronological[end]!.transactionDate === transactionDate) end += 1;
+    const dateGroup = chronological.slice(start, end);
+    for (const transaction of dateGroup) {
+      if (transaction.parkingEvidence.grade !== 'B') {
+        augmented.push(transaction);
+        continue;
+      }
+      const imputation = acceptedParkingImputation(transaction, directGradeA);
+      if (!imputation) {
+        augmented.push(transaction);
+        continue;
+      }
+      const buildingPriceNtd = transaction.totalPriceNtd - imputation.priceP50Ntd;
+      const buildingAreaPing = transaction.totalAreaPing - imputation.areaP50Ping;
+      augmented.push({
+        ...transaction,
+        parkingEvidence: { ...transaction.parkingEvidence, imputation },
+        parkingPriceNtd: imputation.priceP50Ntd,
+        parkingAreaPing: imputation.areaP50Ping,
+        buildingPriceNtd,
+        buildingAreaPing,
+        buildingUnitPriceWan: buildingPriceNtd / buildingAreaPing / 10_000,
+      });
+    }
+    directGradeA.push(...dateGroup.filter((transaction) => transaction.parkingEvidence.grade === 'A'));
+    start = end;
+  }
+  return augmented;
+}
+
 async function addTransactionCsv(
   input: NodeJS.ReadableStream,
   doorplates: DoorplateIndex,
-  cells: TransactionIndex['cells'],
+  transactions: MarketTransaction[],
 ): Promise<TransactionBuildDiagnostics> {
   const sourcePath = (input as NodeJS.ReadableStream & { path?: string | Buffer }).path;
   const sourceVersion = typeof sourcePath === 'string'
@@ -199,6 +287,10 @@ async function addTransactionCsv(
     reviewOnly: 0,
     excluded: 0,
     excludedByReason: {},
+    byPrimaryUse: emptyPrimaryUseCounts(),
+    byParkingGrade: emptyParkingGradeCounts(),
+    gradeBImputed: 0,
+    gradeBUnresolved: 0,
   };
   const parser = input.pipe(parse({ bom: true, columns: true, skip_empty_lines: true, trim: true }));
   let checkedHeaders = false;
@@ -214,7 +306,9 @@ async function addTransactionCsv(
         (diagnostics.excludedByReason[primaryReason] ?? 0) + 1;
       continue;
     }
-    (cells[gridKey(normalized.transaction.location.coordinate!)] ??= []).push(normalized.transaction);
+    transactions.push(normalized.transaction);
+    diagnostics.byPrimaryUse[normalized.transaction.primaryUse] += 1;
+    diagnostics.byParkingGrade[normalized.transaction.parkingEvidence.grade] += 1;
     if (normalized.transaction.eligibility === 'reliable-eligible') diagnostics.reliableEligible += 1;
     else diagnostics.reviewOnly += 1;
   }
@@ -225,8 +319,26 @@ async function addTransactionCsv(
   return diagnostics;
 }
 
+function emptyPrimaryUseCounts(): Record<NormalizedPrimaryUse, number> {
+  return Object.fromEntries(NORMALIZED_PRIMARY_USES.map((key) => [key, 0])) as Record<NormalizedPrimaryUse, number>;
+}
+
+function emptyParkingGradeCounts(): Record<ParkingGrade, number> {
+  return Object.fromEntries(PARKING_GRADES.map((key) => [key, 0])) as Record<ParkingGrade, number>;
+}
+
 function emptyTransactionBuildDiagnostics(): TransactionBuildDiagnostics {
-  return { rawRows: 0, reliableEligible: 0, reviewOnly: 0, excluded: 0, excludedByReason: {} };
+  return {
+    rawRows: 0,
+    reliableEligible: 0,
+    reviewOnly: 0,
+    excluded: 0,
+    excludedByReason: {},
+    byPrimaryUse: emptyPrimaryUseCounts(),
+    byParkingGrade: emptyParkingGradeCounts(),
+    gradeBImputed: 0,
+    gradeBUnresolved: 0,
+  };
 }
 
 function mergeTransactionBuildDiagnostics(
@@ -237,6 +349,8 @@ function mergeTransactionBuildDiagnostics(
   aggregate.reliableEligible += next.reliableEligible;
   aggregate.reviewOnly += next.reviewOnly;
   aggregate.excluded += next.excluded;
+  for (const use of NORMALIZED_PRIMARY_USES) aggregate.byPrimaryUse[use] += next.byPrimaryUse[use];
+  for (const grade of PARKING_GRADES) aggregate.byParkingGrade[grade] += next.byParkingGrade[grade];
   for (const [reason, count] of Object.entries(next.excludedByReason)) {
     aggregate.excludedByReason[reason] = (aggregate.excludedByReason[reason] ?? 0) + count;
   }
@@ -390,13 +504,22 @@ async function ensureTaipeiMarketDataUnlocked(
     }
 
     const doorplates = await buildDoorplateIndex(createReadStream(doorplatePath), doorplateSha);
-    const transactionCells: TransactionIndex['cells'] = {};
+    const normalizedTransactions: MarketTransaction[] = [];
     const normalization = emptyTransactionBuildDiagnostics();
     for (const source of stagedCsvPaths) {
       mergeTransactionBuildDiagnostics(
         normalization,
-        await addTransactionCsv(createReadStream(source.path), doorplates, transactionCells),
+        await addTransactionCsv(createReadStream(source.path), doorplates, normalizedTransactions),
       );
+    }
+    const augmentedTransactions = augmentParkingEvidenceCausally(normalizedTransactions);
+    normalization.gradeBImputed = augmentedTransactions.filter((transaction) =>
+      transaction.parkingEvidence.grade === 'B' && transaction.parkingEvidence.imputation !== null,
+    ).length;
+    normalization.gradeBUnresolved = normalization.byParkingGrade.B - normalization.gradeBImputed;
+    const transactionCells: TransactionIndex['cells'] = {};
+    for (const transaction of augmentedTransactions) {
+      (transactionCells[gridKey(transaction.location.coordinate!)] ??= []).push(transaction);
     }
     const transactionCount = normalization.reliableEligible + normalization.reviewOnly;
     const transactions = finishTransactionIndex(

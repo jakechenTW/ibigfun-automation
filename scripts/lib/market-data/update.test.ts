@@ -6,7 +6,11 @@ import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { runMarketDataCommand } from '../../market-data.ts';
-import { ensureTaipeiMarketData, withMarketDataLock } from './update.ts';
+import {
+  augmentParkingEvidenceCausally,
+  ensureTaipeiMarketData,
+  withMarketDataLock,
+} from './update.ts';
 import {
   backtestAcceptancePath,
   loadMarketData,
@@ -16,9 +20,154 @@ import {
 } from './store.ts';
 import { ESTIMATOR_POLICY_VERSION, MARKET_SCHEMA_VERSION } from './config.ts';
 import type { BacktestGateResult } from './backtest.ts';
-import type { MarketDataManifest } from './types.ts';
+import type { MarketDataManifest, MarketTransaction } from './types.ts';
 
 const PASSING_GATE: BacktestGateResult = { passed: true, complete: true, reasons: [] };
+
+function parkingTransaction(
+  id: string,
+  transactionDate: string,
+  grade: 'A' | 'B',
+  parkingPriceNtd: number | null = grade === 'A' ? 2_000_000 : null,
+  parkingAreaPing: number | null = grade === 'A' ? 10 : null,
+): MarketTransaction {
+  const totalPriceNtd = 12_000_000;
+  const totalAreaPing = 40;
+  const separable = grade === 'A';
+  return {
+    id,
+    transactionDate,
+    sourceVersion: 'fixture',
+    originalAddress: '台北市信義區測試路1號',
+    location: {
+      method: 'exact-doorplate',
+      coordinate: { lat: 25.033, lng: 121.565 },
+      normalizedAddress: '台北市信義區測試路1號',
+      matchedAddress: '台北市信義區測試路1號',
+      uncertaintyMeters: 0,
+      confidence: 'high',
+      datasetVersion: 'fixture',
+    },
+    district: '信義區',
+    ownership: 'freehold',
+    buildingType: 'highrise',
+    totalPriceNtd,
+    totalAreaPing,
+    buildingPriceNtd: separable ? totalPriceNtd - parkingPriceNtd! : null,
+    buildingAreaPing: separable ? totalAreaPing - parkingAreaPing! : null,
+    parkingPriceNtd,
+    parkingAreaPing,
+    buildingUnitPriceWan: separable
+      ? (totalPriceNtd - parkingPriceNtd!) / (totalAreaPing - parkingAreaPing!) / 10_000
+      : null,
+    parkingEvidence: {
+      grade,
+      family: 'flat',
+      originalType: '坡道平面',
+      officialPriceNtd: parkingPriceNtd,
+      officialAreaPing: parkingAreaPing,
+      imputation: null,
+      reasons: grade === 'A' ? [] : ['parking-area-unavailable', 'parking-price-unavailable'],
+    },
+    floor: 8,
+    totalFloors: 20,
+    floorGroup: 'middle',
+    completionDate: '2010-01-01',
+    notes: '',
+    exclusionFlags: [],
+    eligibility: grade === 'A' ? 'reliable-eligible' : 'review-only',
+    eligibilityReasons: grade === 'A' ? [] : ['parking-not-separable'],
+    originalPrimaryUse: '住家用',
+    primaryUse: 'residential',
+    transferredBuildingCount: 1,
+  };
+}
+
+test('grade-B augmentation uses three prior grade-A pairs without same-date or future leakage', () => {
+  const priorA = parkingTransaction('prior-a', '2025-10-01', 'A', 1_800_000, 9);
+  const priorB = parkingTransaction('prior-b', '2025-11-01', 'A', 2_000_000, 10);
+  const priorC = parkingTransaction('prior-c', '2025-12-01', 'A', 2_200_000, 11);
+  const subject = parkingTransaction('subject-b', '2026-01-01', 'B');
+  const sameDate = parkingTransaction('same-date-a', '2026-01-01', 'A');
+  const future = parkingTransaction('future-a', '2026-02-01', 'A');
+
+  const unresolved = augmentParkingEvidenceCausally([
+    subject, sameDate, priorA, future, priorB,
+  ]).find((transaction) => transaction.id === subject.id)!;
+  assert.equal(unresolved.parkingEvidence.imputation, null);
+  assert.equal(unresolved.buildingUnitPriceWan, null);
+
+  const imputed = augmentParkingEvidenceCausally([
+    subject, sameDate, priorA, future, priorB, priorC,
+  ]);
+  assert.deepEqual(imputed.map((transaction) => transaction.id), [
+    'prior-a', 'prior-b', 'prior-c', 'same-date-a', 'subject-b', 'future-a',
+  ]);
+  const imputedSubject = imputed.find((transaction) => transaction.id === subject.id)!;
+  assert.deepEqual(imputedSubject.parkingEvidence.imputation?.comparableIds, [
+    'prior-a', 'prior-b', 'prior-c',
+  ]);
+  assert.ok(!imputedSubject.parkingEvidence.imputation?.comparableIds.includes('same-date-a'));
+  assert.ok(!imputedSubject.parkingEvidence.imputation?.comparableIds.includes('future-a'));
+  assert.equal(imputedSubject.parkingPriceNtd, 2_000_000);
+  assert.equal(imputedSubject.parkingAreaPing, 10);
+  assert.equal(imputedSubject.buildingPriceNtd, 10_000_000);
+  assert.equal(imputedSubject.buildingAreaPing, 30);
+  assert.ok(Math.abs((imputedSubject.buildingUnitPriceWan ?? 0) - (100 / 3)) < 1e-12);
+});
+
+test('grade-B augmentation rejects parking estimates wider than the price IQR policy', () => {
+  const subject = parkingTransaction('subject-b', '2026-01-01', 'B');
+  const result = augmentParkingEvidenceCausally([
+    parkingTransaction('prior-a', '2025-10-01', 'A', 1_000_000, 10),
+    parkingTransaction('prior-b', '2025-11-01', 'A', 2_000_000, 10),
+    parkingTransaction('prior-c', '2025-12-01', 'A', 8_000_000, 10),
+    subject,
+  ]).find((transaction) => transaction.id === subject.id)!;
+
+  assert.equal(result.parkingEvidence.imputation, null);
+  assert.equal(result.buildingUnitPriceWan, null);
+});
+
+test('grade-B augmentation rejects parking estimates wider than the area IQR policy', () => {
+  const subject = parkingTransaction('subject-b', '2026-01-01', 'B');
+  const result = augmentParkingEvidenceCausally([
+    parkingTransaction('prior-a', '2025-10-01', 'A', 2_000_000, 5),
+    parkingTransaction('prior-b', '2025-11-01', 'A', 2_000_000, 10),
+    parkingTransaction('prior-c', '2025-12-01', 'A', 2_000_000, 30),
+    subject,
+  ]).find((transaction) => transaction.id === subject.id)!;
+
+  assert.equal(result.parkingEvidence.imputation, null);
+  assert.equal(result.buildingUnitPriceWan, null);
+});
+
+test('grade-B augmentation rejects an imputation with non-positive derived building price or area', () => {
+  const priceSubject = {
+    ...parkingTransaction('subject-b', '2026-01-01', 'B'),
+    totalPriceNtd: 1_000_000,
+  };
+  const areaSubject = {
+    ...parkingTransaction('subject-b', '2026-01-01', 'B'),
+    totalAreaPing: 5,
+  };
+  const directPairs = [
+    parkingTransaction('prior-a', '2025-10-01', 'A'),
+    parkingTransaction('prior-b', '2025-11-01', 'A'),
+    parkingTransaction('prior-c', '2025-12-01', 'A'),
+  ];
+  const priceResult = augmentParkingEvidenceCausally([
+    ...directPairs, priceSubject,
+  ]).find((transaction) => transaction.id === priceSubject.id)!;
+  const areaResult = augmentParkingEvidenceCausally([
+    ...directPairs, areaSubject,
+  ]).find((transaction) => transaction.id === areaSubject.id)!;
+
+  assert.equal(priceResult.parkingEvidence.imputation, null);
+  assert.equal(priceResult.buildingPriceNtd, null);
+  assert.equal(areaResult.parkingEvidence.imputation, null);
+  assert.equal(areaResult.buildingAreaPing, null);
+});
 
 function productionPassingTransactionCsv(base: Buffer): Buffer {
   const rows = base.toString('utf8').trimEnd().split('\n');
@@ -60,6 +209,13 @@ async function seedValidBuild(root: string): Promise<void> {
       recordCount: 1,
       normalization: {
         rawRows: 1, reliableEligible: 1, reviewOnly: 0, excluded: 0, excludedByReason: {},
+        byPrimaryUse: {
+          commercial: 0, industrial: 0, 'mixed-industrial': 0, 'mixed-residential': 0,
+          office: 0, residential: 1, unknown: 0,
+        },
+        byParkingGrade: { A: 1, B: 0, C: 0 },
+        gradeBImputed: 0,
+        gradeBUnresolved: 0,
       },
     },
     artifacts, lastFailure: null,
@@ -210,6 +366,18 @@ test('candidate manifest records aggregate normalization diagnostics without row
     reviewOnly: 2,
     excluded: 0,
     excludedByReason: {},
+    byPrimaryUse: {
+      residential: 74,
+      'mixed-residential': 0,
+      office: 0,
+      commercial: 1,
+      industrial: 0,
+      'mixed-industrial': 0,
+      unknown: 0,
+    },
+    byParkingGrade: { A: 75, B: 0, C: 0 },
+    gradeBImputed: 0,
+    gradeBUnresolved: 0,
   });
 });
 
