@@ -411,7 +411,7 @@ export interface ParkingFamilyAcceptance {
   reasons: string[];
 }
 
-/** Aggregate-only schema-5 / policy-7 challenger proof; never runtime authority. */
+/** Aggregate-only schema-5 / policy-7 acceptance bound to one exact candidate or active index. */
 export interface CandidateBacktestAcceptance extends BacktestAcceptanceIdentity {
   schemaVersion: 3;
   thresholds: BacktestAcceptanceThresholds & {
@@ -445,7 +445,7 @@ export interface CandidateBacktestAcceptance extends BacktestAcceptanceIdentity 
   };
 }
 
-/** @deprecated Use CandidateBacktestAcceptance for challenger-only code. */
+/** @deprecated Use CandidateBacktestAcceptance for schema-5 / policy-7 code. */
 export type ScenarioBacktestAcceptance = CandidateBacktestAcceptance;
 
 export interface MarketDataBundle {

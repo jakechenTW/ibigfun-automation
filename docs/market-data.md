@@ -104,9 +104,12 @@ The schema-5 manifest publishes aggregate normalization totals: `rawRows`,
 `reliableEligible`, `reviewOnly`, `excluded`, `excludedByReason`, exact counts
 by normalized primary use and parking grade, Grade-B missing-component counts,
 and Grade-B imputed/unresolved counts. The strict loader recomputes those totals
-from persisted rows and checks all derivable building/parking arithmetic even
-when file checksums match. Full rows and addresses remain only in git-ignored
-local evidence.
+from persisted rows and checks building/parking arithmetic even when file
+checksums match. For every Grade-B row it also replays the policy derivation in
+date order from only strictly earlier, eligible Grade-A observations, then
+requires an exact match for comparable IDs/order, count scaling, joint pairs,
+quantiles, IQRs, official partial components, and derived building values. Full
+rows and addresses remain only in git-ignored local evidence.
 
 Refresh and validate the production pair with:
 

@@ -29,6 +29,7 @@ import {
   latestScenarioInfluencingTransactionDate,
 } from './backtest.ts';
 import { NORMALIZED_PRIMARY_USES, PARKING_GRADES } from './types.ts';
+import { deriveAcceptedParkingImputation } from './parking-imputation.ts';
 import type {
   BacktestAcceptance,
   CandidateBacktestAcceptance,
@@ -907,6 +908,42 @@ function candidateImputationArithmeticValid(
     && officialAreaConsistent;
 }
 
+function validateCandidateCausalParkingDerivations(transactions: TransactionIndex): void {
+  const chronological: MarketTransaction[] = [];
+  for (const rows of Object.values(transactions.cells)) chronological.push(...rows);
+  chronological.sort((left, right) => compareStableText(left.transactionDate, right.transactionDate)
+    || compareStableText(left.id, right.id));
+  const directGradeA: MarketTransaction[] = [];
+
+  for (let start = 0; start < chronological.length;) {
+    const transactionDate = chronological[start]!.transactionDate;
+    let end = start + 1;
+    while (end < chronological.length && chronological[end]!.transactionDate === transactionDate) end += 1;
+    for (let index = start; index < end; index += 1) {
+      const row = chronological[index]!;
+      if (row.parkingEvidence.grade !== 'B') continue;
+      const expected = deriveAcceptedParkingImputation(row, directGradeA);
+      const persisted = row.parkingEvidence.imputation === null ? null : {
+        imputation: row.parkingEvidence.imputation,
+        parkingPriceNtd: row.parkingPriceNtd,
+        parkingAreaPing: row.parkingAreaPing,
+        buildingPriceNtd: row.buildingPriceNtd,
+        buildingAreaPing: row.buildingAreaPing,
+        buildingUnitPriceWan: row.buildingUnitPriceWan,
+        buildingUnitPriceBoundsWan: row.buildingUnitPriceBoundsWan,
+      };
+      if (stableJson(persisted) !== stableJson(expected)) {
+        throw new Error('Candidate Grade-B derivation does not match causal policy replay');
+      }
+    }
+    for (let index = start; index < end; index += 1) {
+      const row = chronological[index]!;
+      if (row.parkingEvidence.grade === 'A') directGradeA.push(row);
+    }
+    start = end;
+  }
+}
+
 function validateCandidateTransactionRows(
   transactions: TransactionIndex,
   expected: TransactionBuildDiagnostics,
@@ -1012,6 +1049,8 @@ function validateCandidateTransactionRows(
     actual.byPrimaryUse[row.primaryUse] += 1;
     actual.byParkingGrade[grade] += 1;
   }
+
+  validateCandidateCausalParkingDerivations(transactions);
 
   const expectedRetained = {
     reliableEligible: expected.reliableEligible,

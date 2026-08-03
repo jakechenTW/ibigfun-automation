@@ -32,7 +32,7 @@ import {
   validateCandidateStagedBuild,
   writeBacktestAcceptance,
 } from './store.ts';
-import { ensureTaipeiMarketData } from './update.ts';
+import { augmentParkingEvidenceCausally, ensureTaipeiMarketData } from './update.ts';
 import type {
   BacktestAcceptance,
   CandidateBacktestAcceptance,
@@ -196,6 +196,119 @@ function consistentGradeBTransaction(): MarketTransaction {
       },
     },
   };
+}
+
+function causalParkingTransaction(
+  id: string,
+  transactionDate: string,
+  grade: 'A' | 'B',
+  parkingPriceNtd: number | null,
+  parkingAreaPing: number | null,
+): MarketTransaction {
+  const totalPriceNtd = 30_000_000;
+  const totalAreaPing = 30;
+  const direct = grade === 'A';
+  const derivedPrice = direct ? totalPriceNtd - parkingPriceNtd! : null;
+  const derivedArea = direct ? totalAreaPing - parkingAreaPing! : null;
+  return {
+    ...transaction,
+    id,
+    transactionDate,
+    totalPriceNtd,
+    totalAreaPing,
+    transferredParkingCount: 1,
+    parkingPriceNtd,
+    parkingAreaPing,
+    buildingPriceNtd: derivedPrice,
+    buildingAreaPing: derivedArea,
+    buildingUnitPriceWan: direct ? derivedPrice! / derivedArea! / 10_000 : null,
+    buildingUnitPriceBoundsWan: null,
+    eligibility: direct ? 'reliable-eligible' : 'review-only',
+    eligibilityReasons: direct ? [] : ['parking-not-separable'],
+    parkingEvidence: {
+      grade, family: 'flat', originalType: '坡道平面',
+      officialPriceNtd: parkingPriceNtd,
+      officialAreaPing: parkingAreaPing,
+      imputation: null,
+      reasons: direct ? [] : ['parking-components-incomplete'],
+    },
+  };
+}
+
+function causalGradeBFixture(
+  officialPriceNtd: number | null = null,
+  officialAreaPing: number | null = null,
+): MarketTransaction[] {
+  const raw = [
+    causalParkingTransaction('grade-a-1', '2025-01-01', 'A', 1_500_000, 4.5),
+    causalParkingTransaction('grade-a-2', '2025-01-02', 'A', 2_000_000, 5),
+    causalParkingTransaction('grade-a-3', '2025-01-03', 'A', 2_500_000, 5.5),
+    causalParkingTransaction(
+      'grade-b-subject', '2025-02-01', 'B', officialPriceNtd, officialAreaPing,
+    ),
+  ];
+  return augmentParkingEvidenceCausally(raw);
+}
+
+function unresolvedGradeCTransaction(id: string, transactionDate: string): MarketTransaction {
+  return {
+    ...transaction,
+    id,
+    transactionDate,
+    transferredParkingCount: null,
+    parkingPriceNtd: null,
+    parkingAreaPing: null,
+    buildingPriceNtd: null,
+    buildingAreaPing: null,
+    buildingUnitPriceWan: null,
+    buildingUnitPriceBoundsWan: null,
+    eligibility: 'review-only',
+    eligibilityReasons: ['parking-evidence-unsupported'],
+    parkingEvidence: {
+      grade: 'C', family: 'unknown', originalType: '',
+      officialPriceNtd: null, officialAreaPing: null, imputation: null,
+      reasons: ['parking-evidence-unsupported'],
+    },
+  };
+}
+
+async function installCausalGradeBFixture(
+  root: string,
+  rows: MarketTransaction[] = causalGradeBFixture(),
+): Promise<void> {
+  const index = JSON.parse(await readFile(join(root, 'transactions-index.json'), 'utf8')) as TransactionIndex;
+  index.cells[Object.keys(index.cells)[0]!] = [...rows].sort((left, right) => left.id.localeCompare(right.id));
+  const value = JSON.parse(await readFile(join(root, 'manifest.json'), 'utf8')) as MarketDataManifest;
+  const gradeBRows = rows.filter((row) => row.parkingEvidence.grade === 'B');
+  value.transactions.recordCount = rows.length;
+  value.transactions.normalization = {
+    rawRows: rows.length,
+    reliableEligible: rows.filter((row) => row.eligibility === 'reliable-eligible').length,
+    reviewOnly: rows.filter((row) => row.eligibility === 'review-only').length,
+    excluded: 0,
+    excludedByReason: {},
+    byPrimaryUse: {
+      commercial: 0, industrial: 0, 'mixed-industrial': 0, 'mixed-residential': 0,
+      office: 0, residential: rows.length, unknown: 0,
+    },
+    byParkingGrade: {
+      A: rows.filter((row) => row.parkingEvidence.grade === 'A').length,
+      B: rows.filter((row) => row.parkingEvidence.grade === 'B').length,
+      C: rows.filter((row) => row.parkingEvidence.grade === 'C').length,
+    },
+    gradeBByComponent: {
+      missingBoth: gradeBRows.filter((row) => row.parkingEvidence.officialPriceNtd === null
+        && row.parkingEvidence.officialAreaPing === null).length,
+      officialAreaOnly: gradeBRows.filter((row) => row.parkingEvidence.officialPriceNtd === null
+        && row.parkingEvidence.officialAreaPing !== null).length,
+      officialPriceOnly: gradeBRows.filter((row) => row.parkingEvidence.officialPriceNtd !== null
+        && row.parkingEvidence.officialAreaPing === null).length,
+    },
+    gradeBImputed: gradeBRows.filter((row) => row.parkingEvidence.imputation !== null).length,
+    gradeBUnresolved: gradeBRows.filter((row) => row.parkingEvidence.imputation === null).length,
+  };
+  await writeFile(join(root, 'manifest.json'), JSON.stringify(value));
+  await rewriteTransactionIndexChecksum(root, index);
 }
 
 async function downgradeBuildToLegacySchema(
@@ -1804,19 +1917,127 @@ test('schema-5 validation accepts a checksum-consistent arithmetically valid gra
   t.after(() => rm(parent, { recursive: true, force: true }));
   await writeBuild(root, 'arithmetic-valid');
   await convertBuildToCandidate(root);
-  const index = JSON.parse(await readFile(join(root, 'transactions-index.json'), 'utf8')) as TransactionIndex;
-  index.cells[Object.keys(index.cells)[0]!] = [consistentGradeBTransaction()];
-  const value = JSON.parse(await readFile(join(root, 'manifest.json'), 'utf8')) as MarketDataManifest;
-  value.transactions.normalization.byParkingGrade = { A: 0, B: 1, C: 0 };
-  value.transactions.normalization.gradeBByComponent = {
-    missingBoth: 1, officialAreaOnly: 0, officialPriceOnly: 0,
-  };
-  value.transactions.normalization.gradeBImputed = 1;
-  value.transactions.normalization.gradeBUnresolved = 0;
-  await writeFile(join(root, 'manifest.json'), JSON.stringify(value));
-  await rewriteTransactionIndexChecksum(root, index);
+  await installCausalGradeBFixture(root);
 
   await validateCandidateStagedBuild(root, { minDoorplates: 1, minTransactions: 0 });
+});
+
+test('schema-5 validation independently replays causal Grade-B derivation', async (t) => {
+  const cases: Array<{
+    label: string;
+    prepare(rows: MarketTransaction[]): void;
+  }> = [
+    {
+      label: 'changed transferred parking count',
+      prepare(rows) {
+        rows.find((row) => row.id === 'grade-b-subject')!.transferredParkingCount = 2;
+      },
+    },
+    {
+      label: 'nonexistent comparable id',
+      prepare(rows) {
+        rows.find((row) => row.id === 'grade-b-subject')!
+          .parkingEvidence.imputation!.comparableIds[0] = 'does-not-exist';
+      },
+    },
+    {
+      label: 'changed comparable order',
+      prepare(rows) {
+        rows.find((row) => row.id === 'grade-b-subject')!
+          .parkingEvidence.imputation!.comparableIds.reverse();
+      },
+    },
+    {
+      label: 'coordinated modeled totals',
+      prepare(rows) {
+        const row = rows.find((candidate) => candidate.id === 'grade-b-subject')!;
+        const imputation = row.parkingEvidence.imputation!;
+        for (const key of ['priceP25Ntd', 'priceP50Ntd', 'priceP75Ntd'] as const) {
+          imputation[key] += 100_000;
+        }
+        for (const pair of [imputation.pairP25, imputation.pairP50, imputation.pairP75]) {
+          pair.priceNtd += 100_000;
+        }
+        imputation.priceIqrRatio = (imputation.priceP75Ntd - imputation.priceP25Ntd)
+          / imputation.priceP50Ntd;
+        row.parkingPriceNtd = imputation.pairP50.priceNtd;
+        row.buildingPriceNtd = row.totalPriceNtd - row.parkingPriceNtd;
+        row.buildingUnitPriceWan = row.buildingPriceNtd / row.buildingAreaPing! / 10_000;
+        const modeledBuildingUnits = [imputation.pairP25, imputation.pairP50, imputation.pairP75]
+          .map((pair) => (row.totalPriceNtd - pair.priceNtd)
+            / (row.totalAreaPing - pair.areaPing) / 10_000)
+          .sort((left, right) => left - right);
+        row.buildingUnitPriceBoundsWan!.p25 = modeledBuildingUnits[0]!;
+        row.buildingUnitPriceBoundsWan!.p50 = row.buildingUnitPriceWan;
+        row.buildingUnitPriceBoundsWan!.p75 = modeledBuildingUnits.at(-1)!;
+        row.buildingUnitPriceBoundsWan!.relativeIqrRatio = (
+          row.buildingUnitPriceBoundsWan!.p75 - row.buildingUnitPriceBoundsWan!.p25
+        ) / row.buildingUnitPriceBoundsWan!.p50;
+      },
+    },
+    ...([
+      ['same-date Grade-A comparable', causalParkingTransaction(
+        'same-date-grade-a', '2025-02-01', 'A', 2_000_000, 5,
+      )],
+      ['future Grade-A comparable', causalParkingTransaction(
+        'future-grade-a', '2025-03-01', 'A', 2_000_000, 5,
+      )],
+      ['prior non-Grade-A comparable', unresolvedGradeCTransaction(
+        'prior-grade-c', '2025-01-15',
+      )],
+    ] as const).map(([label, extra]) => ({
+      label,
+      prepare(rows: MarketTransaction[]) {
+        rows.push(extra);
+        rows.find((row) => row.id === 'grade-b-subject')!
+          .parkingEvidence.imputation!.comparableIds[0] = extra.id;
+      },
+    })),
+  ];
+
+  for (const { label, prepare } of cases) await t.test(label, async (t) => {
+    const parent = await mkdtemp(join(tmpdir(), 'market-store-causal-tamper-'));
+    const root = join(parent, 'taipei');
+    t.after(() => rm(parent, { recursive: true, force: true }));
+    await writeBuild(root, `causal-${label}`);
+    await convertBuildToCandidate(root);
+    const rows = causalGradeBFixture();
+    prepare(rows);
+    await installCausalGradeBFixture(root, rows);
+
+    await assert.rejects(
+      () => validateCandidateStagedBuild(root, { minDoorplates: 1, minTransactions: 0 }),
+      /causal|Grade-B derivation/i,
+    );
+  });
+});
+
+test('schema-5 causal replay preserves either official partial parking component', async (t) => {
+  for (const component of ['price', 'area'] as const) await t.test(component, async (t) => {
+    const parent = await mkdtemp(join(tmpdir(), 'market-store-causal-partial-'));
+    const root = join(parent, 'taipei');
+    t.after(() => rm(parent, { recursive: true, force: true }));
+    await writeBuild(root, `causal-partial-${component}`);
+    await convertBuildToCandidate(root);
+    const officialPrice = component === 'price' ? 2_100_000 : null;
+    const officialArea = component === 'area' ? 5.1 : null;
+    const rows = causalGradeBFixture(officialPrice, officialArea);
+    const subject = rows.find((row) => row.id === 'grade-b-subject')!;
+    const imputation = subject.parkingEvidence.imputation!;
+    if (officialPrice !== null) {
+      assert.equal(subject.parkingPriceNtd, officialPrice);
+      assert.ok([imputation.pairP25, imputation.pairP50, imputation.pairP75]
+        .every((pair) => pair.priceNtd === officialPrice));
+    }
+    if (officialArea !== null) {
+      assert.equal(subject.parkingAreaPing, officialArea);
+      assert.ok([imputation.pairP25, imputation.pairP50, imputation.pairP75]
+        .every((pair) => pair.areaPing === officialArea));
+    }
+    await installCausalGradeBFixture(root, rows);
+
+    await validateCandidateStagedBuild(root, { minDoorplates: 1, minTransactions: 0 });
+  });
 });
 
 test('schema-5 validation rejects a Grade-B pair that contradicts its official component total', async (t) => {

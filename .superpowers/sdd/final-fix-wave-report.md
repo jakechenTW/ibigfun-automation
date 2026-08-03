@@ -121,9 +121,9 @@ exact-use cohort calibration, and aggregate masked-family holdouts.
 
 ## Verification Evidence
 
-All verification below used the final code state after the third fix wave:
+All verification below used the final code state after the fourth fix wave:
 
-- Complete repository suite (`npm test`): 491 / 491 passed, 0 failed.
+- Complete repository suite (`npm test`): 502 / 502 passed, 0 failed.
 - TypeScript (`npx tsc --noEmit`): exit 0.
 - Whitespace/error-marker check (`git diff --check`): exit 0.
 - Production-pair tests prove schema-5 / policy-7 plus matching schema-3
@@ -137,6 +137,21 @@ All verification below used the final code state after the third fix wave:
 - Arithmetic tamper tests cover nine independent derived-value mutations plus
   contradictory official price/area pair totals; all use checksum-consistent
   files, and a valid Grade-B row remains accepted.
+
+## Fix Wave 4 Causal Replay
+
+- Builder and strict loader now share one pure Grade-B parking derivation. The
+  loader independently walks transactions by date and ID, exposing only
+  strictly earlier Grade-A rows to each date group before comparing the full
+  persisted derivation exactly.
+- Checksum-consistent tests prove rejection of changed parking counts,
+  nonexistent or reordered comparable IDs, coordinated modeled-value changes,
+  and comparable IDs that name same-date, future, or non-Grade-A rows. A valid
+  synthetic derivation created through the production builder remains accepted.
+- The replay retains only existing transaction rows and derived aggregates; it
+  does not write comparable source rows, addresses, or raw diagnostics.
+- This fix wave ran neither a production update nor a production backtest and
+  did not mutate the active local market-data pair.
 
 The real baseline candidate was rerun and passed. Its disposable stage was
 removed and no acceptance or production state was published. No production
