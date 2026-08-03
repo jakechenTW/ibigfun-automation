@@ -78,6 +78,7 @@ const transaction = {
   ownership: 'freehold' as const,
   buildingType: 'apartment' as const,
   totalPriceNtd: 30_000_000,
+  totalAreaPing: 30,
   buildingPriceNtd: 30_000_000,
   buildingAreaPing: 30,
   parkingPriceNtd: 0,
@@ -91,8 +92,13 @@ const transaction = {
   exclusionFlags: [],
   eligibility: 'reliable-eligible' as const,
   eligibilityReasons: [],
+  originalPrimaryUse: '住家用',
   primaryUse: 'residential' as const,
   transferredBuildingCount: 1,
+  parkingEvidence: {
+    grade: 'A' as const, family: 'none' as const, originalType: '無車位',
+    officialPriceNtd: 0, officialAreaPing: 0, imputation: null, reasons: [],
+  },
 };
 const transactions: TransactionIndex = {
   schemaVersion: MARKET_SCHEMA_VERSION,

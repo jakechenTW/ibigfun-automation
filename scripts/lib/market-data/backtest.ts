@@ -86,8 +86,8 @@ function completeMonthsBetween(start: Date, end: Date): number {
   return months;
 }
 
-function finitePositive(value: number): boolean {
-  return Number.isFinite(value) && value > 0;
+function finitePositive(value: number | null): value is number {
+  return value !== null && Number.isFinite(value) && value > 0;
 }
 
 function transactionDate(transaction: MarketTransaction): Date | null {
@@ -117,13 +117,15 @@ export function heldOutTransactionEligible(transaction: MarketTransaction): bool
 /** Builds an evaluation subject without exposing the held-out sale price to the estimator. */
 export function backtestSubjectFromTransaction(transaction: MarketTransaction): MarketSubject {
   const subjectDate = transactionDate(transaction)!;
+  const buildingAreaPing = transaction.buildingAreaPing;
+  if (!finitePositive(buildingAreaPing)) throw new RangeError('Backtest subject requires a positive building area');
   return {
     listingId: null,
     coordinate: transaction.location.coordinate!,
     district: transaction.district,
     ownership: transaction.ownership,
     buildingType: transaction.buildingType,
-    buildingAreaPing: transaction.buildingAreaPing,
+    buildingAreaPing,
     askingUnitPriceWan: null,
     floor: transaction.floor,
     totalFloors: transaction.totalFloors,
@@ -286,6 +288,8 @@ export function backtestTransactions(index: TransactionIndex, options: BacktestO
 
     for (const { transaction } of entries.slice(start, end)) {
       if (!heldOutTransactionEligible(transaction)) continue;
+      const actual = transaction.buildingUnitPriceWan;
+      if (!finitePositive(actual)) continue;
       const estimate = estimateMarket(
         backtestSubjectFromTransaction(transaction),
         historicalIndex,
@@ -296,7 +300,6 @@ export function backtestTransactions(index: TransactionIndex, options: BacktestO
       const median = estimate.marketUnitPriceMedian;
       const p25 = estimate.marketUnitPriceP25;
       const p75 = estimate.marketUnitPriceP75;
-      const actual = transaction.buildingUnitPriceWan;
       const canScore = median !== null && p25 !== null && p75 !== null;
       cases.push({
         subjectDate: transaction.transactionDate,

@@ -81,7 +81,7 @@ test('converts ROC dates and computes building-only unit price', () => {
   assert.equal(tx.kind, 'included');
   if (tx.kind !== 'included') return;
   assert.equal(tx.transaction.transactionDate, '2026-01-05');
-  assert.ok(Math.abs(tx.transaction.buildingAreaPing - 24.2) < 0.1);
+  assert.ok(Math.abs(tx.transaction.buildingAreaPing! - 24.2) < 0.1);
   assert.equal(tx.transaction.buildingPriceNtd, 27_000_000);
 });
 
@@ -177,6 +177,7 @@ test('retains official parking evidence by A/B/C grade without inventing buildin
     assert.equal(tx.kind, 'included', JSON.stringify(patch));
     if (tx.kind !== 'included') continue;
     assert.equal(tx.transaction.parkingEvidence.grade, grade, JSON.stringify(patch));
+    assert.equal(tx.transaction.eligibility, grade === 'A' ? 'reliable-eligible' : 'review-only');
     assert.equal(
       tx.transaction.buildingPriceNtd !== null
       && tx.transaction.buildingAreaPing !== null
@@ -200,7 +201,7 @@ test('treats conventional zero parking fields as no parking', () => {
     assert.equal(tx.kind, 'included', parkingType || 'empty parking type');
     if (tx.kind !== 'included') continue;
     assert.equal(tx.transaction.buildingPriceNtd, 30_000_000);
-    assert.ok(Math.abs(tx.transaction.buildingAreaPing - 30.25) < 0.01);
+    assert.ok(Math.abs(tx.transaction.buildingAreaPing! - 30.25) < 0.01);
     assert.equal(tx.transaction.parkingPriceNtd, 0);
     assert.equal(tx.transaction.parkingAreaPing, 0);
   }

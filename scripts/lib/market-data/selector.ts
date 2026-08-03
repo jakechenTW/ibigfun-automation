@@ -10,8 +10,8 @@ import type {
   WeightBreakdown,
 } from './types.ts';
 
-function finitePositive(value: number): boolean {
-  return Number.isFinite(value) && value > 0;
+function finitePositive(value: number | null): value is number {
+  return value !== null && Number.isFinite(value) && value > 0;
 }
 
 function parseIsoDate(value: string): Date | null {
@@ -94,9 +94,11 @@ function stageReasons(
   asOf: Date,
 ): string[] {
   const reasons: string[] = [];
+  const buildingAreaPing = transaction.buildingAreaPing;
+  if (!finitePositive(buildingAreaPing)) return ['invalid-building-area'];
   if (!distances || distances.min > stage.radiusM) reasons.push('distance-too-far');
   if (transactionDate < subtractCalendarMonths(asOf, stage.months)) reasons.push('transaction-too-old-for-stage');
-  const areaDifference = Math.abs(transaction.buildingAreaPing - subject.buildingAreaPing) / subject.buildingAreaPing;
+  const areaDifference = Math.abs(buildingAreaPing - subject.buildingAreaPing) / subject.buildingAreaPing;
   if (areaDifference > stage.areaTolerance) reasons.push('area-difference-too-large');
 
   const sameFloor = transaction.floorGroup === subject.floorGroup;
@@ -122,6 +124,7 @@ function weightBreakdown(
   asOf: Date,
   policy: EstimatorPolicy,
 ): WeightBreakdown {
+  const buildingAreaPing = transaction.buildingAreaPing;
   const distance = !distances
     ? 0
     : policy.distanceWeightBands.find((band) => distances.max <= band.maxDistanceM)?.weight ?? 0;
@@ -133,8 +136,8 @@ function weightBreakdown(
   const locationPrecision = transaction.location.method === 'address-range'
     ? Math.max(0.5, 1 / (1 + (transaction.location.uncertaintyMeters ?? 0) / 400))
     : transaction.location.coordinate ? 1 : 0;
-  const areaDifference = finitePositive(subject.buildingAreaPing)
-    ? Math.abs(transaction.buildingAreaPing - subject.buildingAreaPing) / subject.buildingAreaPing
+  const areaDifference = finitePositive(subject.buildingAreaPing) && finitePositive(buildingAreaPing)
+    ? Math.abs(buildingAreaPing - subject.buildingAreaPing) / subject.buildingAreaPing
     : Number.POSITIVE_INFINITY;
   const area = areaDifference <= 0.2 ? 1 : areaDifference <= 0.3 ? WEIGHTS.relaxedArea : 0;
   const comparableAge = ageYearsAt(transaction.completionDate, asOf);

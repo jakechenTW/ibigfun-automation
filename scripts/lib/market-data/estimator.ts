@@ -17,8 +17,16 @@ import type {
   TransactionIndex,
 } from './types.ts';
 
-function finitePositive(value: number | null): boolean {
+type PricedComparable = ComparableEvidence & {
+  transaction: ComparableEvidence['transaction'] & { buildingUnitPriceWan: number };
+};
+
+function finitePositive(value: number | null): value is number {
   return value !== null && Number.isFinite(value) && value > 0;
+}
+
+function hasBuildingUnitPrice(candidate: ComparableEvidence): candidate is PricedComparable {
+  return finitePositive(candidate.transaction.buildingUnitPriceWan);
 }
 
 export interface EstimateMarketOptions {
@@ -61,6 +69,14 @@ function excludedUnsupportedWeight(candidate: ComparableEvidence): ComparableEvi
   };
 }
 
+function excludedInvalidBuildingUnitPrice(candidate: ComparableEvidence): ComparableEvidence {
+  return {
+    ...candidate,
+    included: false,
+    reasons: [...candidate.reasons, 'invalid-building-unit-price'],
+  };
+}
+
 /** Produces a reproducible, evidence-carrying price estimate from local official transactions. */
 export function estimateMarket(
   subject: MarketSubject,
@@ -92,10 +108,12 @@ export function estimateMarket(
   const maximumRadiusM = Math.max(...policy.stages.map((stage) => stage.radiusM));
   const selection = selectComparables(subject, nearbyTransactions(subject, index, maximumRadiusM), asOf, policy);
   const initialIncluded = selection.included;
-  const unsupportedWeight = initialIncluded.filter((candidate) =>
+  const invalidUnitPrice = initialIncluded.filter((candidate) => !hasBuildingUnitPrice(candidate));
+  const pricedIncluded = initialIncluded.filter(hasBuildingUnitPrice);
+  const unsupportedWeight = pricedIncluded.filter((candidate) =>
     !Number.isFinite(candidate.weight.total) || candidate.weight.total <= 0,
   );
-  const weightSupported = initialIncluded.filter((candidate) =>
+  const weightSupported = pricedIncluded.filter((candidate) =>
     Number.isFinite(candidate.weight.total) && candidate.weight.total > 0,
   );
   const outlierIds = hardReasons.length === 0
@@ -108,6 +126,7 @@ export function estimateMarket(
   const comparables = weightSupported.filter((candidate) => !outlierIds.has(candidate.transaction.id));
   const excludedCandidates = [
     ...selection.excluded,
+    ...invalidUnitPrice.map(excludedInvalidBuildingUnitPrice),
     ...unsupportedWeight.map(excludedUnsupportedWeight),
     ...weightSupported.filter((candidate) => outlierIds.has(candidate.transaction.id)).map(excludedOutlier),
   ];

@@ -330,6 +330,13 @@ export function normalizeSaleTransaction(
     totalAreaSqM: buildingAreaSqM,
     totalPriceNtd,
   });
+  const transactionEligibility = parkingEvidence.grade === 'A'
+    ? eligibility
+    : {
+      ...eligibility,
+      eligibility: 'review-only' as const,
+      reasons: [...eligibility.reasons, 'parking-not-separable'],
+    };
 
   const parkingAreaSqM = parkingEvidence.grade === 'A'
     ? parkingEvidence.officialAreaPing! * SQUARE_METERS_PER_PING
@@ -384,8 +391,8 @@ export function normalizeSaleTransaction(
       completionDate,
       notes,
       exclusionFlags: [],
-      eligibility: eligibility.eligibility,
-      eligibilityReasons: eligibility.reasons,
+      eligibility: transactionEligibility.eligibility,
+      eligibilityReasons: transactionEligibility.reasons,
       originalPrimaryUse: aliasValue(values, 'primaryUse'),
       primaryUse: eligibility.primaryUse,
       transferredBuildingCount: eligibility.transferredBuildingCount,

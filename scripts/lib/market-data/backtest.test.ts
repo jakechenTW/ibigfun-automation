@@ -34,11 +34,12 @@ function transaction(id: string, transactionDate: string, price: number, buildin
       matchedAddress: `台北市中正區測試路${id}號`, uncertaintyMeters: 0, confidence: 'high', datasetVersion: 'fixture',
     },
     district: '中正區', ownership: 'freehold', buildingType,
-    totalPriceNtd: price * 300_000, buildingPriceNtd: price * 300_000, buildingAreaPing: 30,
+    totalPriceNtd: price * 300_000, totalAreaPing: 30, buildingPriceNtd: price * 300_000, buildingAreaPing: 30,
     parkingPriceNtd: 0, parkingAreaPing: 0, buildingUnitPriceWan: price,
     floor: 3, totalFloors: buildingType === 'apartment' ? 5 : 10, floorGroup: buildingType === 'apartment' ? 'middle' : 'low',
     completionDate: buildingType === 'apartment' ? null : '2011-01-01', notes: '', exclusionFlags: [],
-    eligibility: 'reliable-eligible', eligibilityReasons: [], primaryUse: 'residential', transferredBuildingCount: 1,
+    eligibility: 'reliable-eligible', eligibilityReasons: [], originalPrimaryUse: '住家用', primaryUse: 'residential', transferredBuildingCount: 1,
+    parkingEvidence: { grade: 'A', family: 'none', originalType: '無車位', officialPriceNtd: 0, officialAreaPing: 0, imputation: null, reasons: [] },
   };
 }
 

@@ -54,6 +54,7 @@ function transaction(id: string, overrides: Partial<MarketTransaction> = {}): Ma
     ownership: 'freehold',
     buildingType: 'midrise',
     totalPriceNtd: 30_000_000,
+    totalAreaPing: 30,
     buildingPriceNtd: 30_000_000,
     buildingAreaPing: 30,
     parkingPriceNtd: 0,
@@ -67,8 +68,13 @@ function transaction(id: string, overrides: Partial<MarketTransaction> = {}): Ma
     exclusionFlags: [],
     eligibility: 'reliable-eligible',
     eligibilityReasons: [],
+    originalPrimaryUse: '住家用',
     primaryUse: 'residential',
     transferredBuildingCount: 1,
+    parkingEvidence: {
+      grade: 'A', family: 'none', originalType: '無車位',
+      officialPriceNtd: 0, officialAreaPing: 0, imputation: null, reasons: [],
+    },
     ...overrides,
   };
 }
