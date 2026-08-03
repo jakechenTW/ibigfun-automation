@@ -169,7 +169,18 @@ async function downgradeBuildToLegacySchema(
   legacyManifest.schemaVersion = schemaVersion;
   if (schemaVersion <= 2) delete legacyManifest.estimatorPolicyVersion;
   else legacyManifest.estimatorPolicyVersion = 4;
-  if (schemaVersion === 1) delete legacyManifest.transactions.normalization;
+  if (schemaVersion === 1) {
+    delete legacyManifest.transactions.normalization;
+  } else {
+    const current = legacyManifest.transactions.normalization as Record<string, unknown>;
+    legacyManifest.transactions.normalization = {
+      rawRows: current.rawRows,
+      reliableEligible: current.reliableEligible,
+      reviewOnly: current.reviewOnly,
+      excluded: current.excluded,
+      excludedByReason: current.excludedByReason,
+    };
+  }
   for (const indexFile of ['doorplates-index.json', 'transactions-index.json']) {
     legacyManifest.artifacts[indexFile] = {
       sha256: await sha256File(join(root, indexFile)),
@@ -621,6 +632,82 @@ test('restart recovery restores schema 1-3 predecessors fail-closed after the fi
         null,
       );
       assert.deepEqual(await readdir(parent), ['taipei']);
+    });
+  }
+});
+
+test('first schema-4 publication validates a true schema-3 policy-4 predecessor', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-schema3-predecessor-'));
+  const active = join(parent, 'taipei');
+  const stage = join(parent, '.taipei-staging-next');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(active, 'schema3-policy4-build');
+  await downgradeBuildToLegacySchema(active, 3);
+  const oldManifest = readManifest(active)!;
+  assert.equal(oldManifest.estimatorPolicyVersion, 4);
+  assert.deepEqual(
+    Object.keys(oldManifest.transactions.normalization).sort(),
+    ['excluded', 'excludedByReason', 'rawRows', 'reliableEligible', 'reviewOnly'],
+  );
+  await writeFile(backtestAcceptancePath(active), JSON.stringify({
+    ...await passingLegacyAcceptance(active),
+    estimatorPolicyVersion: 4,
+  }));
+  await writeBuild(stage, 'schema4-policy5-build');
+
+  const published = await publishStagedBuildWithAcceptance(
+    active,
+    stage,
+    await passingAcceptance(stage),
+    { minDoorplates: 1, minTransactions: 0 },
+  );
+
+  assert.equal(published.manifest.schemaVersion, 4);
+  assert.equal(published.manifest.estimatorPolicyVersion, 5);
+  assert.equal(published.backtestAcceptance?.schemaVersion, 3);
+  assert.equal(marketDataBacktestAccepted(published), true);
+});
+
+test('restorable schema 1-3 reject fields from a different manifest generation', async (t) => {
+  for (const schemaVersion of [1, 2, 3] as const) {
+    await t.test(`schema ${schemaVersion}`, async (t) => {
+      const parent = await mkdtemp(
+        join(tmpdir(), `market-store-schema${schemaVersion}-shape-`),
+      );
+      const active = join(parent, 'taipei');
+      const stage = join(parent, '.taipei-staging-next');
+      t.after(() => rm(parent, { recursive: true, force: true }));
+      await writeBuild(active, `schema${schemaVersion}-build`);
+      await downgradeBuildToLegacySchema(active, schemaVersion);
+      const oldManifest = JSON.parse(
+        await readFile(join(active, 'manifest.json'), 'utf8'),
+      ) as Record<string, unknown> & { transactions: Record<string, unknown> };
+      if (schemaVersion === 1) {
+        oldManifest.transactions.normalization = {
+          rawRows: 1,
+          reliableEligible: 1,
+          reviewOnly: 0,
+          excluded: 0,
+          excludedByReason: {},
+        };
+      } else if (schemaVersion === 2) {
+        oldManifest.estimatorPolicyVersion = 4;
+      } else {
+        (oldManifest.transactions.normalization as Record<string, unknown>).byPrimaryUse = {};
+      }
+      await writeFile(join(active, 'manifest.json'), `${JSON.stringify(oldManifest)}\n`);
+      await writeBuild(stage, 'schema4-build');
+      const acceptance = await passingAcceptance(stage);
+
+      await assert.rejects(
+        () => publishStagedBuildWithAcceptance(
+          active,
+          stage,
+          acceptance,
+          { minDoorplates: 1, minTransactions: 0 },
+        ),
+        /legacy .* schema/i,
+      );
     });
   }
 });

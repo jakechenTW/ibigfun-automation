@@ -242,7 +242,18 @@ async function downgradeAcceptedBuild(
   };
   legacyManifest.schemaVersion = schemaVersion;
   delete legacyManifest.estimatorPolicyVersion;
-  if (schemaVersion === 1) delete legacyManifest.transactions.normalization;
+  if (schemaVersion === 1) {
+    delete legacyManifest.transactions.normalization;
+  } else {
+    const current = legacyManifest.transactions.normalization as Record<string, unknown>;
+    legacyManifest.transactions.normalization = {
+      rawRows: current.rawRows,
+      reliableEligible: current.reliableEligible,
+      reviewOnly: current.reviewOnly,
+      excluded: current.excluded,
+      excludedByReason: current.excludedByReason,
+    };
+  }
   for (const indexFile of ['doorplates-index.json', 'transactions-index.json']) {
     legacyManifest.artifacts[indexFile] = {
       sha256: await sha256File(join(root, indexFile)),

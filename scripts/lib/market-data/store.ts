@@ -134,6 +134,45 @@ function finiteRatio(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
 
+function validateExcludedReasonDiagnostics(value: unknown, excluded: number): void {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Transaction normalization diagnostics lack exclusion reasons');
+  }
+  const excludedByReason = value as Record<string, unknown>;
+  const reasons = Object.keys(excludedByReason);
+  const excludedReasonCount = reasons.reduce(
+    (total, reason) => total + (excludedByReason[reason] as number),
+    0,
+  );
+  if (reasons.some((reason) => !reason
+      || !Number.isSafeInteger(excludedByReason[reason])
+      || (excludedByReason[reason] as number) <= 0)
+    || reasons.join('\n') !== [...reasons].sort(compareStableText).join('\n')
+    || excludedReasonCount !== excluded) {
+    throw new Error('Transaction normalization exclusion reasons are invalid or unstable');
+  }
+}
+
+function validateLegacyTransactionBuildDiagnostics(value: unknown, recordCount: number): void {
+  const keys = ['excluded', 'excludedByReason', 'rawRows', 'reliableEligible', 'reviewOnly'];
+  if (!exactObject(value, keys)) {
+    throw new Error('Legacy transaction normalization diagnostics do not match their schema');
+  }
+  const rawRows = value.rawRows;
+  const reliableEligible = value.reliableEligible;
+  const reviewOnly = value.reviewOnly;
+  const excluded = value.excluded;
+  if (![rawRows, reliableEligible, reviewOnly, excluded]
+    .every((count) => Number.isSafeInteger(count) && (count as number) >= 0)) {
+    throw new Error('Legacy transaction normalization diagnostics contain invalid counts');
+  }
+  if (rawRows !== (reliableEligible as number) + (reviewOnly as number) + (excluded as number)
+      || recordCount !== (reliableEligible as number) + (reviewOnly as number)) {
+    throw new Error('Legacy transaction normalization diagnostics do not match manifest counts');
+  }
+  validateExcludedReasonDiagnostics(value.excludedByReason, excluded as number);
+}
+
 function validateExactCountRecord(
   value: unknown,
   expectedKeys: readonly string[],
@@ -189,22 +228,7 @@ function validateTransactionBuildDiagnostics(
       || value.gradeBImputed + value.gradeBUnresolved !== value.byParkingGrade.B) {
     throw new Error('Transaction normalization use or parking diagnostics do not match retained records');
   }
-  if (!value.excludedByReason || typeof value.excludedByReason !== 'object'
-    || Array.isArray(value.excludedByReason)) {
-    throw new Error('Transaction normalization diagnostics lack exclusion reasons');
-  }
-  const reasons = Object.keys(value.excludedByReason);
-  const excludedReasonCount = reasons.reduce(
-    (total, reason) => total + (value.excludedByReason[reason] ?? 0),
-    0,
-  );
-  if (reasons.some((reason) => !reason
-      || !Number.isSafeInteger(value.excludedByReason[reason])
-      || value.excludedByReason[reason]! <= 0)
-    || reasons.join('\n') !== [...reasons].sort(compareStableText).join('\n')
-    || excludedReasonCount !== value.excluded) {
-    throw new Error('Transaction normalization exclusion reasons are invalid or unstable');
-  }
+  validateExcludedReasonDiagnostics(value.excludedByReason, value.excluded);
 }
 
 function exactObject(value: unknown, expectedKeys: readonly string[]): value is Record<string, unknown> {
@@ -627,6 +651,47 @@ function validateManifestPolicy(
       && manifest.schemaVersion !== MARKET_SCHEMA_VERSION) {
     throw new Error('Market manifest schema version is not restorable');
   }
+  const hasPolicyVersion = Object.prototype.hasOwnProperty.call(
+    manifest,
+    'estimatorPolicyVersion',
+  );
+  if ((manifest.schemaVersion === 1 || manifest.schemaVersion === 2) && hasPolicyVersion) {
+    throw new Error('Legacy market manifest policy provenance does not match its schema');
+  }
+  if (manifest.schemaVersion === 3 && manifest.estimatorPolicyVersion !== 4) {
+    throw new Error('Legacy market manifest policy provenance does not match its schema');
+  }
+  if (manifest.schemaVersion === MARKET_SCHEMA_VERSION
+      && (!Number.isSafeInteger(manifest.estimatorPolicyVersion)
+        || manifest.estimatorPolicyVersion <= 0)) {
+    throw new Error('Restorable market manifest policy provenance is invalid');
+  }
+}
+
+function validateManifestTransactionDiagnostics(
+  manifest: MarketDataManifest,
+  mode: BuildValidationMode,
+): void {
+  const transactions = manifest.transactions as unknown as Record<string, unknown>;
+  const hasNormalization = Object.prototype.hasOwnProperty.call(transactions, 'normalization');
+  if (mode === 'restorable' && manifest.schemaVersion === 1) {
+    if (hasNormalization) {
+      throw new Error('Legacy transaction normalization diagnostics do not match their schema');
+    }
+    return;
+  }
+  if (mode === 'restorable'
+      && (manifest.schemaVersion === 2 || manifest.schemaVersion === 3)) {
+    validateLegacyTransactionBuildDiagnostics(
+      transactions.normalization,
+      manifest.transactions.recordCount,
+    );
+    return;
+  }
+  validateTransactionBuildDiagnostics(
+    transactions.normalization as TransactionBuildDiagnostics,
+    manifest.transactions.recordCount,
+  );
 }
 
 async function validateBuild(
@@ -650,14 +715,7 @@ async function validateBuild(
   if (!Number.isInteger(manifest.transactions.recordCount) || manifest.transactions.recordCount < minTransactions) {
     throw new Error(`Transaction count below required threshold (${minTransactions})`);
   }
-  // Schema 1 predates these diagnostics and reaches this branch only as
-  // checksum-closed rollback/replacement material in restorable mode.
-  if (manifest.schemaVersion >= 2) {
-    validateTransactionBuildDiagnostics(
-      manifest.transactions.normalization,
-      manifest.transactions.recordCount,
-    );
-  }
+  validateManifestTransactionDiagnostics(manifest, mode);
   validateIndexes(doorplates, transactions, manifest.schemaVersion);
   const doorplateCount = countIndexEntries(doorplates.cells);
   const transactionCount = countIndexEntries(transactions.cells);

@@ -262,6 +262,28 @@ test('an imputed parking component keeps the legacy baseline non-authoritative e
   ));
 });
 
+test('a known use value from an unknown source keeps the legacy baseline non-authoritative', () => {
+  const [attached] = attachMarketEstimates([listing()], bundleWithAcceptance(), AS_OF);
+  const scenarios = structuredClone(attached.marketScenarios);
+  scenarios.registeredUse = {
+    value: 'residential',
+    source: 'unknown',
+    detail: null,
+  };
+  assert.ok(scenarios.scenarios.every((scenario) => scenario.parkingEstimate === null));
+
+  const legacy = labelLegacyCompatibilityEstimate({
+    ...attached.marketEstimate,
+    status: 'reliable',
+    unavailableReasons: [],
+  }, scenarios);
+
+  assert.equal(legacy.status, 'review');
+  assert.ok(legacy.unavailableReasons.includes(
+    'legacy-residential-baseline-not-authoritative',
+  ));
+});
+
 test('same-district wrong-neighborhood GPS pin cannot receive an automatic estimate', () => {
   const [result] = attachMarketEstimates([
     listing({

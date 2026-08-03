@@ -262,9 +262,10 @@ export function labelLegacyCompatibilityEstimate(
   estimate: MarketEstimate,
   scenarios: LocalMarketScenarioEstimate,
 ): MarketEstimate {
-  const useUnknown = scenarios.registeredUse.value === 'unknown';
+  const useUnverified = scenarios.registeredUse.value === 'unknown'
+    || scenarios.registeredUse.source === 'unknown';
   const parkingImputed = scenarios.scenarios.some((scenario) => scenario.parkingEstimate !== null);
-  if (!useUnknown && !parkingImputed) return estimate;
+  if (!useUnverified && !parkingImputed) return estimate;
   return {
     ...estimate,
     status: estimate.status === 'reliable' ? 'review' : estimate.status,

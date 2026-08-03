@@ -85,8 +85,6 @@ function useCohortAccepted(
   acceptance: BacktestAcceptance | null,
   primaryUse: Exclude<NormalizedPrimaryUse, 'unknown'>,
 ): boolean {
-  // Schema-2 acceptance proves only the authoritative legacy residential cohort.
-  if (acceptance?.schemaVersion === 2) return primaryUse === 'residential';
   return acceptance?.schemaVersion === 3
     && validBacktestAcceptance(acceptance)
     && acceptance.useCohorts[primaryUse].status === 'accepted';

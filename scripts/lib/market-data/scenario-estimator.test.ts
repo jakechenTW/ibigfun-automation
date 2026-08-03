@@ -25,7 +25,7 @@ const fresh: SourceFreshness = {
 
 const acceptance: BacktestAcceptance = {
   schemaVersion: 2,
-  estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
+  estimatorPolicyVersion: 4,
   policyId: 'baseline',
   transactionArtifactSha256: 'fixture',
   approvedAt: '2026-01-31T00:00:00.000Z',
@@ -76,6 +76,7 @@ const acceptedCohort = {
 const scenarioAcceptance: ScenarioBacktestAcceptance = {
   ...acceptance,
   schemaVersion: 3,
+  estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
   transactionArtifactSha256: 'a'.repeat(64),
   evaluatedThrough: AS_OF,
   thresholds: {
@@ -424,22 +425,36 @@ test('insufficient exact-use cohorts stay visible with null quantiles', () => {
   }
 });
 
-test('scenario estimation applies weighted MAD before publishing exact-use quantiles', () => {
+test('scenario authority rejects schema-2 proof and accepts valid schema-3 proof', () => {
   const transactions = [99, 100, 101, 102, 1_000].map((price, index) =>
     transaction(`residential-${index}`, 'residential', price),
   );
-  const result = estimateMarketScenarios(
-    { ...unknownUseSubject, registeredUse: { value: 'residential', source: 'manual', detail: '人工確認' } },
+  const subject = {
+    ...unknownUseSubject,
+    registeredUse: { value: 'residential' as const, source: 'manual' as const, detail: '人工確認' },
+  };
+  const legacy = estimateMarketScenarios(
+    subject,
     indexWithTransactions(transactions),
     fresh,
     AS_OF,
     acceptance,
   );
+  const current = estimateMarketScenarios(
+    subject,
+    indexWithTransactions(transactions),
+    fresh,
+    AS_OF,
+    scenarioAcceptance,
+  );
 
-  assert.equal(result.scenarios[0]?.comparables.length, 4);
-  assert.ok(!result.scenarios[0]?.comparables.some((candidate) => candidate.transaction.id === 'residential-4'));
-  assert.equal(result.scenarios[0]?.marketUnitPriceMedian, 100.5);
-  assert.equal(result.scenarios[0]?.status, 'reliable');
+  assert.equal(legacy.scenarios[0]?.comparables.length, 4);
+  assert.equal(legacy.scenarios[0]?.marketUnitPriceMedian, 100.5);
+  assert.equal(legacy.scenarios[0]?.status, 'diagnostic-only');
+  assert.ok(legacy.scenarios[0]?.reasons.includes('use-cohort-not-accepted'));
+  assert.ok(!current.scenarios[0]?.comparables.some((candidate) => candidate.transaction.id === 'residential-4'));
+  assert.equal(current.scenarios[0]?.marketUnitPriceMedian, 100.5);
+  assert.equal(current.scenarios[0]?.status, 'reliable');
 });
 
 test('invalid subject coordinates return unavailable scenarios without entering geospatial selection', () => {
@@ -448,7 +463,7 @@ test('invalid subject coordinates return unavailable scenarios without entering 
     indexWithTransactions(allUseTransactions()),
     fresh,
     AS_OF,
-    acceptance,
+    scenarioAcceptance,
   );
 
   assert.ok(result.scenarios.every((scenario) => scenario.status === 'unavailable'));
@@ -467,7 +482,7 @@ test('invalid asking totals cannot leak NaN into a scenario premium', () => {
     )),
     fresh,
     AS_OF,
-    acceptance,
+    scenarioAcceptance,
   );
 
   assert.equal(result.scenarios[0]?.askingPremiumConservative, null);
@@ -488,7 +503,7 @@ test('a required but unavailable parking model prevents a reliable scenario', ()
     )),
     fresh,
     AS_OF,
-    acceptance,
+    scenarioAcceptance,
   );
 
   assert.equal(result.scenarios[0]?.parkingEstimate, null);
