@@ -680,6 +680,11 @@ function validateManifestTransactionDiagnostics(
     }
     return;
   }
+  // Schema 2 was published both before and after the legacy five-field
+  // normalization summary was introduced.
+  if (mode === 'restorable' && manifest.schemaVersion === 2 && !hasNormalization) {
+    return;
+  }
   if (mode === 'restorable'
       && (manifest.schemaVersion === 2 || manifest.schemaVersion === 3)) {
     validateLegacyTransactionBuildDiagnostics(

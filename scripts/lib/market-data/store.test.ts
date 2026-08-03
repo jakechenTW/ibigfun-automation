@@ -152,6 +152,7 @@ async function writeBuild(dir: string, buildId: string, count = 1): Promise<void
 async function downgradeBuildToLegacySchema(
   root: string,
   schemaVersion: 1 | 2 | 3,
+  schema2Normalization: 'absent' | 'legacy-five' = 'legacy-five',
 ): Promise<void> {
   for (const indexFile of ['doorplates-index.json', 'transactions-index.json']) {
     const index = JSON.parse(await readFile(join(root, indexFile), 'utf8')) as {
@@ -169,7 +170,8 @@ async function downgradeBuildToLegacySchema(
   legacyManifest.schemaVersion = schemaVersion;
   if (schemaVersion <= 2) delete legacyManifest.estimatorPolicyVersion;
   else legacyManifest.estimatorPolicyVersion = 4;
-  if (schemaVersion === 1) {
+  if (schemaVersion === 1
+      || (schemaVersion === 2 && schema2Normalization === 'absent')) {
     delete legacyManifest.transactions.normalization;
   } else {
     const current = legacyManifest.transactions.normalization as Record<string, unknown>;
@@ -601,16 +603,24 @@ test('restart recovery yields a validated old or new pair after every publicatio
 });
 
 test('restart recovery restores schema 1-3 predecessors fail-closed after the first schema-4 rename', async (t) => {
-  for (const schemaVersion of [1, 2, 3] as const) {
-    await t.test(`schema ${schemaVersion}`, async (t) => {
+  const predecessors = [
+    { schemaVersion: 1 as const, schema2Normalization: 'legacy-five' as const, label: 'schema 1' },
+    { schemaVersion: 2 as const, schema2Normalization: 'absent' as const, label: 'schema 2 without normalization' },
+    { schemaVersion: 2 as const, schema2Normalization: 'legacy-five' as const, label: 'schema 2 with legacy normalization' },
+    { schemaVersion: 3 as const, schema2Normalization: 'legacy-five' as const, label: 'schema 3' },
+  ];
+  for (const predecessor of predecessors) {
+    await t.test(predecessor.label, async (t) => {
+      const { schemaVersion, schema2Normalization } = predecessor;
       const parent = await mkdtemp(
-        join(tmpdir(), `market-store-schema${schemaVersion}-crash-`),
+        join(tmpdir(), `market-store-schema${schemaVersion}-${schema2Normalization}-crash-`),
       );
       const active = join(parent, 'taipei');
       const stage = join(parent, '.taipei-staging-next');
       t.after(() => rm(parent, { recursive: true, force: true }));
-      await writeBuild(active, `schema${schemaVersion}-build`);
-      await downgradeBuildToLegacySchema(active, schemaVersion);
+      const oldBuildId = `schema${schemaVersion}-${schema2Normalization}-build`;
+      await writeBuild(active, oldBuildId);
+      await downgradeBuildToLegacySchema(active, schemaVersion, schema2Normalization);
       await writeBuild(stage, 'schema4-build');
 
       await crashPublicationAfterRename(
@@ -625,13 +635,101 @@ test('restart recovery restores schema 1-3 predecessors fail-closed after the fi
       });
 
       assert.equal(recovered, null);
-      assert.equal(readManifest(active)?.buildId, `schema${schemaVersion}-build`);
+      assert.equal(readManifest(active)?.buildId, oldBuildId);
       assert.equal(readManifest(active)?.schemaVersion, schemaVersion);
       assert.equal(
         await loadMarketData(active, { minDoorplates: 1, minTransactions: 0 }),
         null,
       );
       assert.deepEqual(await readdir(parent), ['taipei']);
+    });
+  }
+});
+
+test('first schema-4 publication validates both historical schema-2 manifest shapes', async (t) => {
+  for (const schema2Normalization of ['absent', 'legacy-five'] as const) {
+    await t.test(schema2Normalization, async (t) => {
+      const parent = await mkdtemp(
+        join(tmpdir(), `market-store-schema2-${schema2Normalization}-publication-`),
+      );
+      const active = join(parent, 'taipei');
+      const stage = join(parent, '.taipei-staging-next');
+      t.after(() => rm(parent, { recursive: true, force: true }));
+      await writeBuild(active, `schema2-${schema2Normalization}-build`);
+      await downgradeBuildToLegacySchema(active, 2, schema2Normalization);
+      const oldManifest = readManifest(active)! as unknown as Record<string, unknown> & {
+        transactions: Record<string, unknown>;
+      };
+      assert.equal(Object.hasOwn(oldManifest, 'estimatorPolicyVersion'), false);
+      assert.equal(
+        Object.hasOwn(oldManifest.transactions, 'normalization'),
+        schema2Normalization === 'legacy-five',
+      );
+      await writeBuild(stage, 'schema4-build');
+
+      const published = await publishStagedBuildWithAcceptance(
+        active,
+        stage,
+        await passingAcceptance(stage),
+        { minDoorplates: 1, minTransactions: 0 },
+      );
+
+      assert.equal(published.manifest.schemaVersion, 4);
+      assert.equal(published.manifest.estimatorPolicyVersion, 5);
+      assert.equal(marketDataBacktestAccepted(published), true);
+    });
+  }
+});
+
+test('restorable schema 2 rejects partial, extra, or incorrectly typed normalization', async (t) => {
+  const mutations = [
+    {
+      label: 'partial',
+      mutate: (normalization: Record<string, unknown>): unknown => {
+        const partial = { ...normalization };
+        delete partial.excludedByReason;
+        return partial;
+      },
+    },
+    {
+      label: 'extra',
+      mutate: (normalization: Record<string, unknown>): unknown => ({
+        ...normalization,
+        byPrimaryUse: {},
+      }),
+    },
+    {
+      label: 'incorrect type',
+      mutate: (_normalization: Record<string, unknown>): unknown => [],
+    },
+  ];
+  for (const mutation of mutations) {
+    await t.test(mutation.label, async (t) => {
+      const parent = await mkdtemp(join(tmpdir(), 'market-store-schema2-invalid-shape-'));
+      const active = join(parent, 'taipei');
+      const stage = join(parent, '.taipei-staging-next');
+      t.after(() => rm(parent, { recursive: true, force: true }));
+      await writeBuild(active, `schema2-${mutation.label}-build`);
+      await downgradeBuildToLegacySchema(active, 2, 'legacy-five');
+      const oldManifest = JSON.parse(
+        await readFile(join(active, 'manifest.json'), 'utf8'),
+      ) as Record<string, unknown> & { transactions: Record<string, unknown> };
+      oldManifest.transactions.normalization = mutation.mutate(
+        oldManifest.transactions.normalization as Record<string, unknown>,
+      );
+      await writeFile(join(active, 'manifest.json'), `${JSON.stringify(oldManifest)}\n`);
+      await writeBuild(stage, 'schema4-build');
+      const acceptance = await passingAcceptance(stage);
+
+      await assert.rejects(
+        () => publishStagedBuildWithAcceptance(
+          active,
+          stage,
+          acceptance,
+          { minDoorplates: 1, minTransactions: 0 },
+        ),
+        /legacy transaction normalization.*schema/i,
+      );
     });
   }
 });
