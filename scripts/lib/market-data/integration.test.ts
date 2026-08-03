@@ -55,7 +55,7 @@ function bundleWithAcceptance(transactionArtifactSha256 = 'a'.repeat(64)): Marke
     },
     metrics: {
       estimateCoverage: 0.8,
-      reliableEstimatedCount: 20,
+      reliableEstimatedCount: 40,
       reliableMedianApe: 0.08,
       reliableP75Ape: 0.16,
       highConfidenceEstimatedCount: 20,

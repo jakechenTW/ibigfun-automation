@@ -4,6 +4,10 @@ import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import { isValidDateString } from '../date.ts';
 import {
+  decideParkingImputation,
+  decideScenarioCohort,
+} from './acceptance-policy.ts';
+import {
   BACKTEST_ACCEPTANCE_THRESHOLDS,
   ACTIVE_ESTIMATOR_POLICY,
   DOORPLATE_STALE_DAYS,
@@ -16,7 +20,7 @@ import {
 } from './config.ts';
 import {
   latestEligibleTransactionDate,
-  latestScenarioEligibleTransactionDate,
+  latestScenarioInfluencingTransactionDate,
 } from './backtest.ts';
 import { NORMALIZED_PRIMARY_USES, PARKING_GRADES } from './types.ts';
 import type {
@@ -296,7 +300,10 @@ function validAcceptanceMetrics(metrics: unknown, thresholds: Record<string, unk
     || !Number.isSafeInteger(value.highConfidenceEstimatedCount) || (value.highConfidenceEstimatedCount as number) < 0
     || !Number.isSafeInteger(value.mediumConfidenceEstimatedCount) || (value.mediumConfidenceEstimatedCount as number) < 0
     || !finiteRatio(value.highConfidenceMedianApe)
-    || !finiteRatio(value.mediumConfidenceMedianApe)) return false;
+    || !finiteRatio(value.mediumConfidenceMedianApe)
+    || value.reliableP75Ape < value.reliableMedianApe
+    || value.reliableEstimatedCount !== (value.highConfidenceEstimatedCount as number)
+      + (value.mediumConfidenceEstimatedCount as number)) return false;
   return value.estimateCoverage >= minimumCoverage
     && value.reliableMedianApe <= medianApeMax
     && value.reliableP75Ape <= p75ApeMax
@@ -314,30 +321,14 @@ function nullableFinite(value: unknown): value is number | null {
   return value === null || (typeof value === 'number' && Number.isFinite(value));
 }
 
-function expectedScenarioCohort(
-  cohort: ScenarioCohortAcceptance,
-): { status: ScenarioCohortAcceptance['status']; reasons: string[] } {
-  const reasons: string[] = [];
-  if (cohort.scoredCases < SCENARIO_BACKTEST_GATE.minimumUseCohortCases) {
-    reasons.push('insufficient-use-cohort-cases');
-  }
-  if (cohort.medianApe === null || cohort.p75Ape === null
-    || cohort.bias === null || cohort.intervalCoverage === null) {
-    reasons.push('incomplete-use-cohort-metrics');
-  } else {
-    if (cohort.medianApe > SCENARIO_BACKTEST_GATE.medianApeMax) {
-      reasons.push('median-ape-target-missed');
-    }
-    if (cohort.p75Ape > SCENARIO_BACKTEST_GATE.p75ApeMax) {
-      reasons.push('p75-ape-target-missed');
-    }
-  }
-  return {
-    status: cohort.scoredCases < SCENARIO_BACKTEST_GATE.minimumUseCohortCases
-      ? 'diagnostic-only'
-      : reasons.length === 0 ? 'accepted' : 'failed',
-    reasons,
-  };
+function coverageHasIntegerDenominator(scoredCases: number, coverage: number): boolean {
+  if (scoredCases === 0) return coverage === 0;
+  if (coverage <= 0) return false;
+  const denominator = scoredCases / coverage;
+  const rounded = Math.round(denominator);
+  return Number.isSafeInteger(rounded)
+    && rounded >= scoredCases
+    && Math.abs(scoredCases / rounded - coverage) <= Number.EPSILON * 8;
 }
 
 function validScenarioCohort(value: unknown): value is ScenarioCohortAcceptance {
@@ -351,6 +342,9 @@ function validScenarioCohort(value: unknown): value is ScenarioCohortAcceptance 
     || !nullableFinite(cohort.bias)
     || !nullableNonnegativeFinite(cohort.intervalCoverage)
     || (cohort.intervalCoverage !== null && cohort.intervalCoverage > 1)
+    || (cohort.medianApe !== null && cohort.p75Ape !== null
+      && cohort.p75Ape < cohort.medianApe)
+    || !coverageHasIntegerDenominator(cohort.scoredCases, cohort.estimateCoverage)
     || !Array.isArray(cohort.reasons)
     || cohort.reasons.some((reason) => typeof reason !== 'string' || reason.length === 0)) return false;
   const hasCompleteMetrics = cohort.medianApe !== null && cohort.p75Ape !== null
@@ -359,24 +353,10 @@ function validScenarioCohort(value: unknown): value is ScenarioCohortAcceptance 
     || cohort.bias !== null || cohort.intervalCoverage !== null;
   if ((cohort.scoredCases === 0 && (cohort.estimateCoverage !== 0 || hasAnyMetrics))
     || (cohort.scoredCases > 0 && (cohort.estimateCoverage === 0 || !hasCompleteMetrics))) return false;
-  const expected = expectedScenarioCohort(cohort);
+  const expected = decideScenarioCohort(cohort);
   return cohort.status === expected.status
     && cohort.reasons.length === expected.reasons.length
     && cohort.reasons.every((reason, index) => reason === expected.reasons[index]);
-}
-
-function parkingComparisonAccepted(
-  comparison: ScenarioBacktestAcceptance['parkingComparison'],
-): boolean {
-  return comparison.imputedCoverage > comparison.directCoverage
-    && comparison.imputedMedianApe !== null
-    && comparison.imputedMedianApe <= SCENARIO_BACKTEST_GATE.medianApeMax
-    && comparison.imputedP75Ape !== null
-    && comparison.imputedP75Ape <= SCENARIO_BACKTEST_GATE.p75ApeMax
-    && comparison.biasRegression !== null
-    && comparison.biasRegression <= SCENARIO_BACKTEST_GATE.maximumAbsoluteBiasRegression + Number.EPSILON
-    && comparison.intervalCoverageRegression !== null
-    && comparison.intervalCoverageRegression <= SCENARIO_BACKTEST_GATE.maximumIntervalCoverageRegression + Number.EPSILON;
 }
 
 function validScenarioAcceptance(value: Record<string, unknown>): boolean {
@@ -395,7 +375,11 @@ function validScenarioAcceptance(value: Record<string, unknown>): boolean {
     || !nullableFinite(comparison.biasRegression)
     || !nullableFinite(comparison.intervalCoverageRegression)
     || (comparison.intervalCoverageRegression !== null
-      && Math.abs(comparison.intervalCoverageRegression) > 1)) return false;
+      && Math.abs(comparison.intervalCoverageRegression) > 1)
+    || (comparison.directMedianApe !== null && comparison.directP75Ape !== null
+      && comparison.directP75Ape < comparison.directMedianApe)
+    || (comparison.imputedMedianApe !== null && comparison.imputedP75Ape !== null
+      && comparison.imputedP75Ape < comparison.imputedMedianApe)) return false;
   const directMetricsComplete = comparison.directMedianApe !== null
     && comparison.directP75Ape !== null;
   const imputedMetricsComplete = comparison.imputedMedianApe !== null
@@ -413,7 +397,7 @@ function validScenarioAcceptance(value: Record<string, unknown>): boolean {
   if ((comparison.directCoverage > 0 && comparison.imputedCoverage > 0) !== regressionsComplete) {
     return false;
   }
-  return value.parkingImputationAccepted === parkingComparisonAccepted(comparison);
+  return value.parkingImputationAccepted === decideParkingImputation(comparison);
 }
 
 export function validBacktestAcceptance(value: unknown): value is BacktestAcceptance {
@@ -450,7 +434,7 @@ function acceptanceLatestEligibleTransactionDate(
   acceptance: BacktestAcceptance,
 ): string | null {
   return acceptance.schemaVersion === 3
-    ? latestScenarioEligibleTransactionDate(index)
+    ? latestScenarioInfluencingTransactionDate(index)
     : latestEligibleTransactionDate(index);
 }
 

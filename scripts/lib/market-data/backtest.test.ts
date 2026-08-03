@@ -15,6 +15,7 @@ import {
   heldOutTransactionEligible,
   type BacktestReport,
 } from './backtest.ts';
+import { estimateMarketScenarios } from './scenario-estimator.ts';
 import {
   backtestExitCode,
   marketUpdateExitCode,
@@ -25,6 +26,7 @@ import {
   type BuildingType,
   type MarketTransaction,
   type NormalizedPrimaryUse,
+  type ScenarioMarketSubject,
   type TransactionIndex,
 } from './types.ts';
 
@@ -162,14 +164,14 @@ test('held-out estimate uses only transactions before subject date', () => {
   ));
 });
 
-test('subject-date eligibility excludes completion inconsistencies from coverage and cases', () => {
+test('legacy held-outs exclude completion inconsistencies while scenario coverage tracks runtime influence', () => {
   const completedAfterSale = transaction('future-completion', '2025-12-01', 100, 'midrise');
   completedAfterSale.completionDate = '2026-01-01';
 
   const report = backtestTransactions(indexOf([completedAfterSale]), { asOf: '2026-07-25' });
 
   assert.equal(heldOutTransactionEligible(completedAfterSale), false);
-  assert.equal(report.latestEligibleTransactionDate, null);
+  assert.equal(report.latestEligibleTransactionDate, '2025-12-01');
   assert.equal(report.cases.length, 0);
 });
 
@@ -330,6 +332,40 @@ test('scenario acceptance coverage boundary includes newer exact-use grade-A tra
   assert.ok(evaluateBacktestGate(report).reasons.includes('incomplete-active-transaction-coverage'));
 });
 
+test('scenario coverage boundary includes grade-B, masked-parking, and grade-C runtime evidence', () => {
+  const older = exactUseTransaction('residential-old', '2025-01-01', 100, 'residential');
+  const gradeB = gradeBComparable('grade-b-newer', '2025-10-01', 101);
+  const maskedParkingOnly = {
+    ...directParkingTransaction('masked-parking-newer', '2025-11-01', 2_000_000, 10),
+    eligibility: 'review-only' as const,
+    eligibilityReasons: ['primary-use-unavailable'],
+    originalPrimaryUse: '',
+    primaryUse: 'unknown' as const,
+  };
+  const gradeC = exactUseTransaction('grade-c-newer', '2025-12-01', 80, 'office', {
+    eligibility: 'review-only',
+    eligibilityReasons: ['scenario-only-primary-use', 'parking-not-separable'],
+    buildingPriceNtd: null,
+    buildingAreaPing: null,
+    buildingUnitPriceWan: null,
+    parkingPriceNtd: null,
+    parkingAreaPing: null,
+    parkingEvidence: {
+      grade: 'C', family: 'unknown', originalType: '其他',
+      officialPriceNtd: null, officialAreaPing: null, imputation: null,
+      reasons: ['parking-family-unknown'],
+    },
+  });
+
+  const gradeBReport = backtestTransactions(indexOf([older, gradeB]), { asOf: '2025-06-01' });
+  const maskedReport = backtestTransactions(indexOf([older, maskedParkingOnly]), { asOf: '2025-06-01' });
+  const bundleReport = backtestTransactions(indexOf([older, gradeC]), { asOf: '2025-06-01' });
+
+  assert.equal(gradeBReport.latestEligibleTransactionDate, '2025-10-01');
+  assert.equal(maskedReport.latestEligibleTransactionDate, '2025-11-01');
+  assert.equal(bundleReport.latestEligibleTransactionDate, '2025-12-01');
+});
+
 test('gate cannot approve a report without an eligible transaction coverage boundary', () => {
   const missingBoundary = {
     ...completeGateReport(),
@@ -416,6 +452,8 @@ test('schema-3 acceptance keeps sparse cohorts diagnostic and accepts a 20-case 
     medianApe: 0.12,
     p75Ape: 0.20,
   });
+  report.byPrimaryUseDirectOnly.office = { ...report.byPrimaryUse.office };
+  report.byPrimaryUseDirectOnly.industrial = { ...report.byPrimaryUse.industrial };
 
   const acceptance = backtestAcceptance(report, 'b'.repeat(64), '2026-07-26T01:00:00.000Z');
 
@@ -440,6 +478,9 @@ test('a failed non-residential use remains isolated while residential global fai
     medianApe: 0.13,
     p75Ape: 0.21,
   });
+  nonResidentialFailure.byPrimaryUseDirectOnly.office = {
+    ...nonResidentialFailure.byPrimaryUse.office,
+  };
   const acceptance = backtestAcceptance(
     nonResidentialFailure,
     'c'.repeat(64),
@@ -499,6 +540,83 @@ test('grade-B activation requires strict coverage improvement within accuracy, b
   assert.equal(acceptanceFor({}, { p75Ape: 0.201 }).parkingImputationAccepted, false);
 });
 
+test('rejected parking gates use acceptance with direct-only results and cannot activate runtime', () => {
+  const report = completeGateReport({}, '2025-12-01') as BacktestReport & {
+    byPrimaryUseDirectOnly: BacktestReport['byPrimaryUse'];
+  };
+  report.byPrimaryUse.residential = gateMetric({
+    caseCount: 25,
+    estimatedCount: 20,
+    estimateCoverage: 0.8,
+    medianApe: 0.08,
+    p75Ape: 0.16,
+  });
+  report.byPrimaryUseDirectOnly = {
+    ...report.byPrimaryUse,
+    residential: gateMetric({
+      caseCount: 25,
+      estimatedCount: 20,
+      estimateCoverage: 0.8,
+      medianApe: 0.13,
+      p75Ape: 0.21,
+    }),
+  };
+  report.directOnly = gateMetric({
+    estimateCoverage: 0.70,
+    medianApe: 0.13,
+    p75Ape: 0.21,
+    bias: 0.02,
+    intervalCoverage: 0.8,
+  });
+  report.directPlusImputed = gateMetric({
+    estimateCoverage: 0.70,
+    medianApe: 0.08,
+    p75Ape: 0.16,
+    bias: 0.01,
+    intervalCoverage: 0.8,
+  });
+
+  const accepted = backtestAcceptance(report, 'f'.repeat(64), '2026-07-26T01:00:00.000Z');
+  assert.equal(accepted.parkingImputationAccepted, false);
+  assert.equal(accepted.useCohorts.residential.status, 'failed');
+
+  const runtimeSubject: ScenarioMarketSubject = {
+    listingId: 1,
+    coordinate,
+    matchedAddress: '台北市中正區測試路1號',
+    district: '中正區',
+    ownership: 'freehold',
+    buildingType: 'apartment',
+    totalAreaPing: 30,
+    askingTotalPriceNtd: 30_000_000,
+    floor: 3,
+    totalFloors: 5,
+    floorGroup: 'middle',
+    ageYears: null,
+    registeredUse: { value: 'residential', source: 'official', detail: '使用執照' },
+    parkingFamily: 'none',
+    parkingCount: 0,
+  };
+  const result = estimateMarketScenarios(
+    runtimeSubject,
+    indexOf([
+      exactUseTransaction('runtime-one', '2025-01-01', 99, 'residential'),
+      exactUseTransaction('runtime-two', '2025-02-01', 100, 'residential'),
+      exactUseTransaction('runtime-three', '2025-03-01', 101, 'residential'),
+    ]),
+    {
+      transactionCheckedAt: '2026-07-25T00:00:00.000Z',
+      doorplateCheckedAt: '2026-07-25T00:00:00.000Z',
+      transactionStale: false,
+      doorplateStale: false,
+    },
+    '2026-07-25',
+    accepted,
+  );
+  assert.notEqual(result.scenarios[0]?.status, 'reliable');
+  assert.ok(result.scenarios[0]?.reasons.includes('use-cohort-not-accepted'));
+});
+
 test('selected backtest policy is passed to estimation without changing the active policy', () => {
   const subjectCoordinate = { lat: 25.033964, lng: 121.564468 };
   const distantCoordinate = { lat: 25.033964, lng: 121.5734 };
@@ -525,7 +643,7 @@ test('selected backtest policy is passed to estimation without changing the acti
   assert.equal(ACTIVE_ESTIMATOR_POLICY.id, 'baseline');
 });
 
-test('review-only source transactions are excluded from the held-out denominator', () => {
+test('review-only source stays outside legacy held-outs while scenario coverage tracks runtime influence', () => {
   const reviewOnly = transaction('review-only', '2025-12-01', 100);
   reviewOnly.eligibility = 'review-only';
   reviewOnly.eligibilityReasons = ['mixed-primary-use'];
@@ -533,7 +651,7 @@ test('review-only source transactions are excluded from the held-out denominator
   const report = backtestTransactions(indexOf([reviewOnly]), { asOf: '2026-07-25' });
 
   assert.equal(heldOutTransactionEligible(reviewOnly), false);
-  assert.equal(report.latestEligibleTransactionDate, null);
+  assert.equal(report.latestEligibleTransactionDate, '2025-12-01');
   assert.equal(report.overall.caseCount, 0);
 });
 
@@ -578,9 +696,9 @@ function completeGateReport(overrides: {
   const report = backtestTransactions(indexWithFutureLeak, { asOf });
   return {
     ...report,
-    overall: gateMetric(overrides.overall ?? {}),
+    overall: gateMetric({ caseCount: 50, estimatedCount: 40, ...overrides.overall }),
     byStatus: {
-      reliable: gateMetric({ medianApe: 0.08, p75Ape: 0.16, ...overrides.reliable }),
+      reliable: gateMetric({ caseCount: 50, estimatedCount: 40, medianApe: 0.08, p75Ape: 0.16, ...overrides.reliable }),
       review: gateMetric({ caseCount: 0, estimatedCount: 0, estimateCoverage: 0, medianApe: null, p75Ape: null, ...overrides.review }),
       unavailable: gateMetric({ caseCount: 0, estimatedCount: 0, estimateCoverage: 0, medianApe: null, p75Ape: null }),
     },

@@ -212,7 +212,7 @@ async function passingAcceptance(root: string): Promise<ScenarioBacktestAcceptan
     },
     metrics: {
       estimateCoverage: 0.8,
-      reliableEstimatedCount: 20,
+      reliableEstimatedCount: 40,
       reliableMedianApe: 0.08,
       reliableP75Ape: 0.16,
       highConfidenceEstimatedCount: 20,
@@ -1088,11 +1088,57 @@ test('schema-3 acceptance is exact, aggregate-only, and internally consistent', 
         office: { ...acceptance.useCohorts.office, scoredCases: 1, estimateCoverage: 0.1 },
       },
     },
+    {
+      ...acceptance,
+      metrics: {
+        ...acceptance.metrics,
+        reliableMedianApe: 0.10,
+        reliableP75Ape: 0.09,
+      },
+    },
+    { ...acceptance, metrics: { ...acceptance.metrics, reliableEstimatedCount: 39 } },
+    { ...acceptance, metrics: { ...acceptance.metrics, reliableEstimatedCount: 41 } },
+    {
+      ...acceptance,
+      useCohorts: {
+        ...acceptance.useCohorts,
+        residential: {
+          ...acceptance.useCohorts.residential,
+          medianApe: 0.10,
+          p75Ape: 0.09,
+        },
+      },
+    },
+    {
+      ...acceptance,
+      useCohorts: {
+        ...acceptance.useCohorts,
+        residential: { ...acceptance.useCohorts.residential, estimateCoverage: 0.81 },
+      },
+    },
+    {
+      ...acceptance,
+      useCohorts: {
+        ...acceptance.useCohorts,
+        residential: {
+          ...acceptance.useCohorts.residential,
+          estimateCoverage: 0.8000000000001,
+        },
+      },
+    },
     { ...acceptance, metrics: { ...acceptance.metrics, reliableEstimatedCount: 0 } },
     { ...acceptance, parkingImputationAccepted: false },
     { ...acceptance, parkingComparison: missingParkingMetric },
     { ...acceptance, parkingComparison: { ...acceptance.parkingComparison, directCoverage: 1.1 } },
     { ...acceptance, parkingComparison: { ...acceptance.parkingComparison, directMedianApe: null } },
+    {
+      ...acceptance,
+      parkingComparison: {
+        ...acceptance.parkingComparison,
+        directMedianApe: 0.10,
+        directP75Ape: 0.09,
+      },
+    },
     {
       ...acceptance,
       parkingImputationAccepted: false,

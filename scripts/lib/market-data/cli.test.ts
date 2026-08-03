@@ -30,9 +30,9 @@ function passingBacktestReport(index: TransactionIndex): BacktestReport {
   return {
     ...report,
     latestEligibleTransactionDate: '2025-12-01',
-    overall: metric(),
+    overall: metric({ caseCount: 50, estimatedCount: 40 }),
     byStatus: {
-      reliable: metric(),
+      reliable: metric({ caseCount: 50, estimatedCount: 40 }),
       review: metric({
         caseCount: 0, estimatedCount: 0, estimateCoverage: 0,
         medianApe: null, p75Ape: null,

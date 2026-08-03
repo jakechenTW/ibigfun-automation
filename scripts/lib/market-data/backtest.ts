@@ -1,5 +1,9 @@
 import { estimateMarket, estimateWeightedBuildingPrices } from './estimator.ts';
 import {
+  decideParkingImputation,
+  decideScenarioCohort,
+} from './acceptance-policy.ts';
+import {
   ACTIVE_ESTIMATOR_POLICY,
   BACKTEST_ACCEPTANCE_THRESHOLDS,
   ESTIMATOR_POLICY_VERSION,
@@ -67,6 +71,9 @@ export interface BacktestReport {
   byBuildingType: Record<BuildingType, BacktestMetrics>;
   byConfidence: Record<EstimateConfidence, BacktestMetrics>;
   byStatus: Record<EstimateStatus, BacktestMetrics>;
+  /** Exact-use metrics with grade-B building evidence disabled. */
+  byPrimaryUseDirectOnly: Record<Exclude<NormalizedPrimaryUse, 'unknown'>, BacktestMetrics>;
+  /** Exact-use metrics with causally imputed grade-B building evidence enabled. */
   byPrimaryUse: Record<Exclude<NormalizedPrimaryUse, 'unknown'>, BacktestMetrics>;
   byParkingGrade: Record<ParkingGrade, BacktestMetrics>;
   directOnly: BacktestMetrics;
@@ -233,9 +240,42 @@ export function latestEligibleTransactionDate(index: TransactionIndex): string |
   return latestEligibleDate(allTransactions(index));
 }
 
-/** Complete coverage boundary for schema-3 exact-use scenario acceptance. */
-export function latestScenarioEligibleTransactionDate(index: TransactionIndex): string | null {
-  return latestDate(allTransactions(index), scenarioHeldOutTransactionEligible);
+function scenarioRuntimeInfluencingTransaction(transaction: MarketTransaction): boolean {
+  const coordinate = transaction.location.coordinate;
+  if (!transactionDate(transaction) || !coordinate
+    || !Number.isFinite(coordinate.lat) || !Number.isFinite(coordinate.lng)) return false;
+
+  const parkingTrainer = transaction.parkingEvidence.grade === 'A'
+    && (transaction.parkingEvidence.family === 'flat'
+      || transaction.parkingEvidence.family === 'mechanical')
+    && finitePositive(transaction.parkingEvidence.officialPriceNtd)
+    && finitePositive(transaction.parkingEvidence.officialAreaPing);
+
+  const scenarioCommon = knownPrimaryUse(transaction.primaryUse)
+    && transaction.transferredBuildingCount === 1
+    && transaction.location.method !== 'unresolved'
+    && transaction.district.length > 0
+    && transaction.ownership !== 'unknown'
+    && (transaction.buildingType === 'apartment'
+      || (transaction.completionDate !== null
+        && parseIsoDate(transaction.completionDate) !== null));
+  const buildingEvidence = scenarioCommon
+    && transaction.parkingEvidence.grade !== 'C'
+    && finitePositive(transaction.buildingPriceNtd)
+    && finitePositive(transaction.buildingAreaPing)
+    && finitePositive(transaction.buildingUnitPriceWan)
+    && (transaction.parkingEvidence.grade !== 'B'
+      || transaction.parkingEvidence.imputation !== null);
+  const bundleEvidence = scenarioCommon
+    && transaction.parkingEvidence.grade === 'C'
+    && finitePositive(transaction.totalPriceNtd)
+    && finitePositive(transaction.totalAreaPing);
+  return parkingTrainer || buildingEvidence || bundleEvidence;
+}
+
+/** Complete-index boundary for every transaction that can influence scenario runtime. */
+export function latestScenarioInfluencingTransactionDate(index: TransactionIndex): string | null {
+  return latestDate(allTransactions(index), scenarioRuntimeInfluencingTransaction);
 }
 
 const BACKTEST_FRESHNESS: SourceFreshness = {
@@ -453,12 +493,6 @@ export function backtestAcceptance(
     || report.latestEligibleTransactionDate === null) {
     throw new Error(`Backtest does not pass acceptance: ${gate.reasons.join(', ')}`);
   }
-  const useCohorts = Object.fromEntries(
-    NORMALIZED_PRIMARY_USES.filter(knownPrimaryUse).map((primaryUse) => [
-      primaryUse,
-      scenarioCohortAcceptance(report.byPrimaryUse[primaryUse]),
-    ]),
-  ) as ScenarioBacktestAcceptance['useCohorts'];
   const direct = report.directOnly;
   const imputed = report.directPlusImputed;
   const biasRegression = direct.bias === null || imputed.bias === null
@@ -477,6 +511,16 @@ export function backtestAcceptance(
     biasRegression,
     intervalCoverageRegression,
   };
+  const parkingImputationAccepted = decideParkingImputation(parkingComparison);
+  const activeUseMetrics = parkingImputationAccepted
+    ? report.byPrimaryUse
+    : report.byPrimaryUseDirectOnly;
+  const useCohorts = Object.fromEntries(
+    NORMALIZED_PRIMARY_USES.filter(knownPrimaryUse).map((primaryUse) => [
+      primaryUse,
+      scenarioCohortAcceptance(activeUseMetrics[primaryUse]),
+    ]),
+  ) as ScenarioBacktestAcceptance['useCohorts'];
   return {
     schemaVersion: 3,
     estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
@@ -498,54 +542,29 @@ export function backtestAcceptance(
       mediumConfidenceMedianApe: medium.medianApe,
     },
     useCohorts,
-    parkingImputationAccepted: parkingComparisonAccepted(parkingComparison),
+    parkingImputationAccepted,
     parkingComparison,
   };
 }
 
 function scenarioCohortAcceptance(metric: BacktestMetrics): ScenarioCohortAcceptance {
-  const reasons: string[] = [];
-  if (metric.estimatedCount < SCENARIO_BACKTEST_GATE.minimumUseCohortCases) {
-    reasons.push('insufficient-use-cohort-cases');
-  }
-  if (metric.medianApe === null || metric.p75Ape === null
-    || metric.bias === null || metric.intervalCoverage === null) {
-    reasons.push('incomplete-use-cohort-metrics');
-  } else {
-    if (metric.medianApe > SCENARIO_BACKTEST_GATE.medianApeMax) {
-      reasons.push('median-ape-target-missed');
-    }
-    if (metric.p75Ape > SCENARIO_BACKTEST_GATE.p75ApeMax) {
-      reasons.push('p75-ape-target-missed');
-    }
-  }
-  const status: ScenarioCohortAcceptance['status'] = metric.estimatedCount < SCENARIO_BACKTEST_GATE.minimumUseCohortCases
-    ? 'diagnostic-only'
-    : reasons.length === 0 ? 'accepted' : 'failed';
+  const decision = decideScenarioCohort({
+    scoredCases: metric.estimatedCount,
+    medianApe: metric.medianApe,
+    p75Ape: metric.p75Ape,
+    bias: metric.bias,
+    intervalCoverage: metric.intervalCoverage,
+  });
   return {
-    status,
+    status: decision.status,
     scoredCases: metric.estimatedCount,
     estimateCoverage: metric.estimateCoverage,
     medianApe: metric.medianApe,
     p75Ape: metric.p75Ape,
     bias: metric.bias,
     intervalCoverage: metric.intervalCoverage,
-    reasons,
+    reasons: decision.reasons,
   };
-}
-
-function parkingComparisonAccepted(
-  comparison: ScenarioBacktestAcceptance['parkingComparison'],
-): boolean {
-  return comparison.imputedCoverage > comparison.directCoverage
-    && comparison.imputedMedianApe !== null
-    && comparison.imputedMedianApe <= SCENARIO_BACKTEST_GATE.medianApeMax
-    && comparison.imputedP75Ape !== null
-    && comparison.imputedP75Ape <= SCENARIO_BACKTEST_GATE.p75ApeMax
-    && comparison.biasRegression !== null
-    && comparison.biasRegression <= SCENARIO_BACKTEST_GATE.maximumAbsoluteBiasRegression + Number.EPSILON
-    && comparison.intervalCoverageRegression !== null
-    && comparison.intervalCoverageRegression <= SCENARIO_BACKTEST_GATE.maximumIntervalCoverageRegression + Number.EPSILON;
 }
 
 /**
@@ -558,7 +577,7 @@ export function backtestTransactions(index: TransactionIndex, options: BacktestO
   const policy = options.policy ?? ACTIVE_ESTIMATOR_POLICY;
 
   const completeEntries = allTransactions(index);
-  const completeLatestEligibleDate = latestDate(completeEntries, scenarioHeldOutTransactionEligible);
+  const completeLatestEligibleDate = latestDate(completeEntries, scenarioRuntimeInfluencingTransaction);
   const entries = completeEntries.filter(({ transaction }) => {
     const date = transactionDate(transaction);
     return date !== null && date <= asOf;
@@ -621,6 +640,10 @@ export function backtestTransactions(index: TransactionIndex, options: BacktestO
   }
 
   const knownUses = NORMALIZED_PRIMARY_USES.filter(knownPrimaryUse);
+  const byPrimaryUseDirectOnly = Object.fromEntries(knownUses.map((primaryUse) => [
+    primaryUse,
+    metrics(directOnlyCases.filter((backtestCase) => backtestCase.primaryUse === primaryUse)),
+  ])) as Record<Exclude<NormalizedPrimaryUse, 'unknown'>, BacktestMetrics>;
   const byPrimaryUse = Object.fromEntries(knownUses.map((primaryUse) => [
     primaryUse,
     metrics(directPlusImputedCases.filter((backtestCase) => backtestCase.primaryUse === primaryUse)),
@@ -650,6 +673,7 @@ export function backtestTransactions(index: TransactionIndex, options: BacktestO
       review: metrics(cases.filter((backtestCase) => backtestCase.status === 'review')),
       unavailable: metrics(cases.filter((backtestCase) => backtestCase.status === 'unavailable')),
     },
+    byPrimaryUseDirectOnly,
     byPrimaryUse,
     byParkingGrade,
     directOnly: metrics(directOnlyCases),
