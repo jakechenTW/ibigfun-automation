@@ -16,7 +16,11 @@
 - 主要排除原因：{{main_exclusion_reasons}}
 - 房貸假設：8 成貸、年利率 2.6%、30 年本息平均攤還
 - 推薦門檻：已驗證用途取 accepted 同用途情境；用途未知須至少兩個 accepted 情境（必含住宅）
-  全部符合 `−10% < P25 開價溢價 ≤ 該市 p*/2`，且無 diagnostic 或 bundle 衝突
+  全部符合 `−10% < P25 開價溢價 ≤ 該市 p*/2`；另不得有 reasons 含
+  `use-cohort-not-accepted`／`parking-cohort-not-accepted`／`parking-estimate-unavailable` 或
+  `parking-family-unknown`／`parking-count-unknown`／`parking-count-family-conflict`／
+  `invalid-parking-count` 的情境以可用 P25 得出相反結果，也不得有 `bundle-evidence-conflicts`。
+  unknown-use 的 `review` status 本身不是衝突
 - 接近門檻：`p*/2 < 開價溢價 ≤ p*`
 - 排除：`開價溢價 > p*`；可疑/待查：`開價溢價 ≤ −10%`（異常低）或法拍/資訊過少等軟標記
 - 區域閘門：最近捷運站不在目標白名單（目標捷運站外）或白名單站但可靠步行 >10 分（站內走路過遠）即排除，只計數不逐列（見 `data/region-allowlist.md`）

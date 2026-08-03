@@ -15,7 +15,11 @@
 - Filter 對照狀態：{{filter_verification_status}}
 - 自住條件：總價 <= 8000 萬、類型 電梯大樓（house_type=17）、7 樓以上、主建物 >= 30 坪、屋齡 <= 25 年、平面車位
 - 用途門檻：已驗證用途取 accepted 同用途情境；用途未知須至少兩個 accepted 情境（必含住宅）
-  全部有可用 P25／含車位總價且無 diagnostic 或 bundle 衝突，才可標「條件式符合（用途未確認）」
+  全部有可用 P25／含車位總價；另不得有 reasons 含 `use-cohort-not-accepted`／
+  `parking-cohort-not-accepted`／`parking-estimate-unavailable` 或 `parking-family-unknown`／
+  `parking-count-unknown`／`parking-count-family-conflict`／`invalid-parking-count` 的情境以可用 P25
+  得出相反結果，也不得有 `bundle-evidence-conflicts`，才可標「條件式符合（用途未確認）」。
+  unknown-use 的 `review` status 本身不是衝突
 - 實價連結：逐筆 `[內政部查詢]` 只開啟查詢服務入口，須以列示條件定位，並非精確交易列直連
 
 ### 符合條件

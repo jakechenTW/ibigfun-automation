@@ -230,7 +230,10 @@ confidence, stale sources, unreliable coordinates, missing type provenance,
 unknown parking/count, and bundle conflicts do not qualify for automatic
 recommendation. Unknown-use scenarios remain at most `review` and may support
 only the explicitly labeled conditional rule in `reporting-rules.md`; listing
-title prose never verifies use. Limited external review must not overwrite
+title prose never verifies use. Do not infer cohort acceptance or diagnostic
+conflict from that `review` status: use the scenario's actual quantiles,
+profile-required P25, and cohort/parking/bundle reason strings as defined in
+`reporting-rules.md`. Limited external review must not overwrite
 `marketScenarios` or the compatibility `marketEstimate` and must write the
 required `valuation-review.json` when it changes a report bucket.
 

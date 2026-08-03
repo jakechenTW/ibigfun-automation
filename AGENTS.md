@@ -63,7 +63,11 @@ Do these once before the first run; stop and ask the user if any fails:
    controls and any residential scenario is comparison-only. For unknown use,
    a recommendation is explicitly conditional and requires at least two
    accepted scenarios including residential, every supported scenario passing
-   the profile's conservative P25 gate, and no conflicting diagnostic scenario;
+   the profile's conservative P25 gate, and no rejected/disabled scenario with
+   a usable P25 producing the opposite gate result. Unknown-use scenario
+   `status` is always at most `review`, so determine accepted/rejected evidence
+   from quantiles plus the exact cohort, parking-component, and bundle reason
+   strings in `docs/reporting-rules.md`, never from the status label alone;
    otherwise route it according to the use-confirmation/manual-review rules.
    Listing title prose never verifies registered use. Show compact scenario
    evidence plus official-query locator fields and link to the Ministry query

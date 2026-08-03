@@ -12,18 +12,25 @@ Use this profile for rental-yield-oriented investment screening.
   `−10% < 溢價 ≤ p*/2`。不得用 P50、住宅比較情境或情境平均值替未通過的情境補票。
 - 已驗證用途：只有同用途 `role: primary` 情境可控制推薦；它須 `reliable`、信心非 low、來源新鮮、
   無 bundle conflict，且通過上述價格 gate。已驗證為非住宅時，`residential-comparison` 僅供比較。
-- 用途未知／未驗證：只有至少兩個 acceptance-enabled、資料新鮮且信心非 low 的 supported 情境
-  （必含 residential）**全部**通過上述價格 gate，且沒有 diagnostic-only 相反判斷或 bundle conflict，
-  才能進推薦，並明確標為「條件式推薦（用途未確認）」。此例外允許情境因
-  `registered-use-unverified` 保持 `review`；任何其他 review reason 仍不可推薦。
+- 用途未知／未驗證：不可用 `status` 判斷 acceptance，因 `role: unknown-use-scenario` 即使 accepted
+  也最多是 `review`。acceptance-enabled 須有非空建物 quantiles 與
+  `askingPremiumConservative`，且 `reasons` 不含 `use-cohort-not-accepted`、
+  `parking-cohort-not-accepted`、`parking-estimate-unavailable`、`parking-family-unknown`、
+  `parking-count-unknown`、`parking-count-family-conflict`、`invalid-parking-count` 或
+  `bundle-evidence-conflicts`；來源仍須新鮮且信心非 low。`registered-use-unverified` 與非衝突的
+  `bundle-evidence-corroborates`／`bundle-evidence-insufficient` 可保留。
+- 只有至少兩個上述 supported 情境（必含 residential）**全部**通過價格 gate，且沒有被 cohort／
+  parking reason 拒絕或停用、但仍有可用 `askingPremiumConservative` 並算出相反 gate 結果的情境，
+  才能進推薦，並明確標為「條件式推薦（用途未確認）」。這種相反 P25 結果才是 diagnostic
+  conflict；不得把 unknown-use 的任何 status 字面值當成判定捷徑，有 quantiles 時預期仍是 `review`。
 - 除行情條件外，推薦仍須走路可靠在內（`withinWalk === true` 或 triage likely-within）、乾淨
   （非 suspicious/likely-auction），且兩個官方來源均未過期。中位數單獨達標不可推薦。
 - 接近門檻：controlling 情境的 `p*/2 < 溢價 ≤ p*`，或溢價達推薦級但只差在行情／走路待確認。
   用途未知時，只要 pass／fail／insufficient 混合、全部 pass 但不足兩個或缺 residential，或
-  diagnostic-only 情境提供相反結果，均列為「用途待確認候選」。沒有 supported 情境或 bundle
-  conflict 則同桶標「人工複核」，不可偽裝成接近價格門檻。
+  rejected/disabled 情境以可用 P25 算出相反結果，均列為「用途待確認候選」。沒有 supported 情境
+  或含 `bundle-evidence-conflicts` 則同桶標「人工複核」，不可偽裝成接近價格門檻。
 - 排除：已驗證用途 controlling 情境 `溢價 > p*`；用途未知時，每個 supported 情境都未通過
-  profile P25 gate 則不推薦，列入排除。
+  profile P25 gate，且沒有 rejected/disabled 情境以可用 P25 算出 pass，則不推薦，列入排除。
 - 異常低（`溢價 ≤ −10%`）先進可疑/待查驗證，**不直接推薦**；驗證乾淨且行情可靠後依溢價歸桶。
 - 區域閘門（硬排除）：`regionGate` 為 `out-of-region`（最近站不在目標白名單）或
   `in-region-too-far`（白名單站但可靠步行 >10 分）的物件一律排除，且**不逐筆列出**，
@@ -44,8 +51,9 @@ Use this profile for rental-yield-oriented investment screening.
 - 僅能對低信心、review/unavailable 或中位數才達標的邊界物件做有界外部覆核；外部值不覆寫官方
   情境值，也不能使未 accepted 情境通過。
   若外部覆核影響分桶，必須寫同 run 的 `valuation-review.json`，否則不可改桶。
-- 行情資料若過期、弱、情境 unavailable/diagnostic-only/insufficient-sample，或 controlling 情境有
-  review reason（用途未知的明確條件式例外除外），物件不可標推薦。
+- 行情資料若過期、弱，或已驗證用途的 controlling 情境為
+  unavailable/diagnostic-only/insufficient-sample 或有 review reason，物件不可標推薦。用途未知不看
+  字面 status；只有通過上列 quantiles/P25/reasons 判定的明確條件式例外可推薦。
 - 租金：agent 粗估同區同類型可比租金，僅供參考、不影響分桶；一律標低信心與人工確認。
 - 地上權／使用權等非自由持分物件：開價不可直接比自由持分行情，依 `docs/reporting-rules.md`
   的「非自由持分（地上權／使用權）校正」處理（標可疑/待查或排除，不得標推薦）。

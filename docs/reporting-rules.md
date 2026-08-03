@@ -92,12 +92,32 @@ exclusion.
     只有共享車位 gate 通過時才可使用，且建物可比權重有上限。報告須標示推估階段與組件。
   - C：建物／車位組件仍無法分離，只能作同用途整體成交的 bundle 交叉檢查；不得進建物單價
     P25/P50/P75，也不得訓練或被當成 B 級。bundle 顯著衝突時送人工複核。
-- 報告語意中的「acceptance-enabled 情境」是：官方用途 cohort 已由相符的 schema-3 acceptance
-  標為 accepted，所需車位組件也通過共享車位 gate，且情境有非空的建物 P25/P50/P75。實際
-  `UseScenarioEstimate` 沒有獨立的 acceptance 布林欄；應由其 quantiles 與 `reasons` 判讀：含
-  `use-cohort-not-accepted` 或所需車位模型含 `parking-cohort-not-accepted` 的情境不得計入。
-  用途未知的情境即使 acceptance-enabled，`status` 依設計仍最多為 `review`；若唯一待確認原因是
-  `registered-use-unverified`，可依下方「條件式推薦」規則判斷，不能誤要求它變成 `reliable`。
+- 報告語意中的「acceptance-enabled 情境」必須從現有欄位判讀，不能虛構布林欄，也不能從
+  `status` 反推。`role: unknown-use-scenario` 即使 cohort 與組件皆通過，`status` 依設計仍最多為
+  `review`。可操作判定如下：
+  - 建物 `marketUnitPriceP25`／`marketUnitPriceMedian`／`marketUnitPriceP75` 均非空，且 profile
+    所需的 P25 欄位可用；投資為 `askingPremiumConservative`，自住平面車位另須
+    `bundleValue.p25Ntd`。
+  - `reasons` 不含用途拒絕 `use-cohort-not-accepted`；需要車位模型時，也不含
+    `parking-cohort-not-accepted` 或 `parking-estimate-unavailable`。
+  - 物件車位組件不可為未知或互相矛盾；實際對應 reason 是 `parking-family-unknown`、
+    `parking-count-unknown`、`parking-count-family-conflict`、`invalid-parking-count`。任何
+    `bundle-evidence-conflicts` 亦不是 enabled。`bundle-evidence-corroborates` 與
+    `bundle-evidence-insufficient` 是交叉檢查結果標籤，本身不是 cohort acceptance 布林值；後者須
+    顯示 bundle 覆核證據不足，但不等於 scenario `insufficient-sample`。只要所需 P25 仍完整，不得
+    把它誤讀成 `use-cohort-not-accepted`。
+  - `registered-use-unverified` 只表示用途待確認；它不會讓 accepted unknown-use 情境變成
+    `reliable`，也不能單靠 `review` status 把該情境誤判為未 accepted。來源偏舊、low confidence、
+    無所需 P25，或含 `source-stale`、`low-confidence`、`location-unreliable`、`missing-district`、
+    `ownership-unknown`、`invalid-total-area`、`invalid-asking-total-price`、
+    `missing-subject-building-age` 等實際 subject/quality reason，仍會使它不成為 supported。
+- 「rejected/disabled 診斷情境」也由 `reasons` 判定：至少含
+  `use-cohort-not-accepted`、`parking-cohort-not-accepted`、`parking-estimate-unavailable`，或上列
+  `parking-family-unknown`／`parking-count-unknown`／`parking-count-family-conflict`／
+  `invalid-parking-count` 之一，而不是看任何 status 字面值；有 quantiles 的 unknown-use 情境預期仍是
+  `review`。若這種情境仍有 profile 可用的 P25，就照同一 profile gate 計算；其 pass/fail 與
+  acceptance-enabled supported 情境的共同結論相反時，才叫 diagnostic conflict。沒有可用 P25 的
+  rejected 情境是證據不足，不是 supported，也不能憑 status 宣稱衝突。
 - 投資分桶以每個 acceptance-enabled 情境的 **含車位總價 P25** 所得
   `askingPremiumConservative` 計算/覆核；建物中位數或住宅比較情境只能說明，不能單獨使物件進入推薦。
 - 只有當本機 backtest acceptance 的 `transactions-index.json` checksum、`ESTIMATOR_POLICY_VERSION`、
@@ -139,14 +159,17 @@ exclusion.
 1. **已驗證用途**：同用途且 acceptance-enabled 的 `role: primary` 情境控制。若已驗證為非住宅，
    `role: residential-comparison` 只能比較說明，不能覆寫同用途結論或單獨促成推薦。
 2. **用途未知／未驗證**：先檢查 bundle conflict；任何 `bundle-evidence-conflicts` 都送「人工複核」。
-   接著只把 acceptance-enabled、P25 非空、資料新鮮、信心非 low，且除
-   `registered-use-unverified`、`bundle-evidence-corroborates`／`bundle-evidence-insufficient` 外無其他
-   unresolved reason 的情境視為 supported：
+   不得用情境的 `review` status 判定 acceptance；依上一節的 quantiles／P25 與 rejection reasons
+   分出 acceptance-enabled、rejected/disabled 和 insufficient，再只把 acceptance-enabled、P25
+   非空、資料新鮮、信心非 low，且除 `registered-use-unverified`、
+   `bundle-evidence-corroborates`／`bundle-evidence-insufficient` 外無其他 unresolved reason 的情境
+   視為 supported：
    - 至少兩個 supported 情境（必含 residential）全部通過 profile 的 P25 gate，且沒有
-     diagnostic-only 情境提供相反判斷，才可標「條件式推薦（用途未確認）」。
+     rejected/disabled 但仍有可用 P25 的情境得出相反 gate 結果，才可標「條件式推薦（用途未確認）」。
    - pass／fail／insufficient 混合、所有 supported 皆 pass 但未達兩情境或缺 residential，或
-     diagnostic-only 情境與通過結果衝突，均為「用途待確認候選」。
-   - 每個 supported 情境都未通過 P25 gate，為「不推薦」。
+     rejected/disabled 情境以可用 P25 得出相反結果，均為「用途待確認候選」。
+   - 每個 supported 情境都未通過 P25 gate，且沒有 rejected/disabled 情境以可用 P25 得出 pass，
+     為「不推薦」。
    - 沒有 supported 情境，為「人工複核」。
 
 條件式推薦不是法律用途認定；報告仍須列出待確認的登記用途、貸款、稅務與轉售風險。
@@ -227,10 +250,11 @@ P25/中位/P75、兩邊單價皆有時的差異、是否採納、理由與結果
 - Prefer fresh iBigFun listing and official market data for the target report date.
 - If market data is stale, cached, timed out, or externally reviewed, say so in the quick summary and the affected listing's compact evidence line.
 - Do not label a verified-use listing as recommended when its controlling scenario is stale, low-confidence,
-  `review`, `unavailable`, `diagnostic-only`, `insufficient-sample`, or weak. For unknown use, only the explicitly
-  labelled conditional-recommendation exception in「用途驗證與情境決策順序」may proceed while each
-  scenario remains `review` solely because use is unverified; any other review reason routes to a candidate or
-  human confirmation.
+  `review`, `unavailable`, `diagnostic-only`, `insufficient-sample`, or weak. For unknown use, scenario `status`
+  remains at most `review` and is not an acceptance discriminator. Apply the reason/P25 procedure in「用途驗證與
+  情境決策順序」: `registered-use-unverified` plus non-blocking bundle labels may remain on a conditional match,
+  while cohort/component rejection, stale/low-quality evidence, missing required P25, or a conflict routes it to
+  the specified candidate or human-review outcome.
 - Keep the official source date/freshness and compact evidence summary visible in the listing notes; preserve the full local evidence in `enriched.json` and (when used) `valuation-review.json`.
 - Track seen listing IDs using `docs/automation-state.md` so reposts, edited listings, and cross-day duplicates can be handled consistently.
 
@@ -357,6 +381,10 @@ listing lacking solid data cannot be labeled recommended.
   grade counts, status summary, and profile judgment. Below it render at most two influential comparables per
   scenario with the official-query locator fields defined above. A `review`, `unavailable`, `diagnostic-only`, or
   `insufficient-sample` scenario must say why it cannot control; do not imply it is a verified reliable valuation.
+- For an unknown-use row, `scenario_status_summary` and `scenario_judgment` must not turn the expected `review`
+  status into a diagnostic conflict. Show acceptance-enabled/rejected/insufficient from the actual quantiles,
+  required P25, and reason strings above; call it a diagnostic conflict only when a rejected/disabled scenario has
+  a usable P25 whose profile-gate result opposes the supported conclusion.
 - In the profile templates, set `scenario_requires_review` when the controlling or conditional-decision evidence
   needs review and render `需人工確認：{{scenario_manual_review_reason}}`; derive the reason compactly from
   `marketScenarios.reasons`, scenario `reasons`, freshness, and use verification, never from raw comparables.
