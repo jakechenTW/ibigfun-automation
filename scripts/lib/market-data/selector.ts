@@ -1,11 +1,12 @@
 import { haversineMeters } from '../geo.ts';
-import { ACTIVE_ESTIMATOR_POLICY, WEIGHTS } from './config.ts';
+import { ACTIVE_ESTIMATOR_POLICY, PARKING_POLICY, WEIGHTS } from './config.ts';
 import type { EstimatorPolicy, SearchStage } from './config.ts';
 import type {
   ComparableEvidence,
   FloorGroup,
   MarketSubject,
   MarketTransaction,
+  NormalizedPrimaryUse,
   SelectionResult,
   WeightBreakdown,
 } from './types.ts';
@@ -62,7 +63,7 @@ function locationDistances(subject: MarketSubject, transaction: MarketTransactio
   return { min: Math.max(0, distance - uncertainty), max: distance + uncertainty };
 }
 
-function hardReasons(
+function commonHardReasons(
   subject: MarketSubject,
   transaction: MarketTransaction,
   transactionDate: Date,
@@ -70,12 +71,9 @@ function hardReasons(
   maximumMonths: number,
 ): string[] {
   const reasons: string[] = [];
-  if (transaction.eligibility !== 'reliable-eligible') reasons.push('review-only-evidence');
   if (transaction.district !== subject.district) reasons.push('district-mismatch');
   if (transaction.buildingType !== subject.buildingType) reasons.push('building-type-mismatch');
   if (transaction.ownership !== subject.ownership || transaction.ownership === 'unknown') reasons.push('ownership-mismatch');
-  if (!finitePositive(transaction.buildingUnitPriceWan)) reasons.push('invalid-building-unit-price');
-  if (!finitePositive(transaction.buildingAreaPing)) reasons.push('invalid-building-area');
   if (!transaction.location.coordinate || transaction.location.method === 'unresolved') reasons.push('location-unresolved');
   if (transactionDate > asOf) reasons.push('transaction-in-future');
   if (transactionDate < subtractCalendarMonths(asOf, maximumMonths)) reasons.push('transaction-too-old');
@@ -85,6 +83,21 @@ function hardReasons(
   return reasons;
 }
 
+function legacyHardReasons(
+  subject: MarketSubject,
+  transaction: MarketTransaction,
+  transactionDate: Date,
+  asOf: Date,
+  maximumMonths: number,
+): string[] {
+  return [
+    ...(transaction.eligibility !== 'reliable-eligible' ? ['review-only-evidence'] : []),
+    ...commonHardReasons(subject, transaction, transactionDate, asOf, maximumMonths),
+    ...(!finitePositive(transaction.buildingUnitPriceWan) ? ['invalid-building-unit-price'] : []),
+    ...(!finitePositive(transaction.buildingAreaPing) ? ['invalid-building-area'] : []),
+  ];
+}
+
 function stageReasons(
   subject: MarketSubject,
   transaction: MarketTransaction,
@@ -92,13 +105,13 @@ function stageReasons(
   distances: { min: number; max: number } | null,
   transactionDate: Date,
   asOf: Date,
+  comparableAreaPing: number | null,
 ): string[] {
   const reasons: string[] = [];
-  const buildingAreaPing = transaction.buildingAreaPing;
-  if (!finitePositive(buildingAreaPing)) return ['invalid-building-area'];
+  if (!finitePositive(comparableAreaPing)) return ['invalid-building-area'];
   if (!distances || distances.min > stage.radiusM) reasons.push('distance-too-far');
   if (transactionDate < subtractCalendarMonths(asOf, stage.months)) reasons.push('transaction-too-old-for-stage');
-  const areaDifference = Math.abs(buildingAreaPing - subject.buildingAreaPing) / subject.buildingAreaPing;
+  const areaDifference = Math.abs(comparableAreaPing - subject.buildingAreaPing) / subject.buildingAreaPing;
   if (areaDifference > stage.areaTolerance) reasons.push('area-difference-too-large');
 
   const sameFloor = transaction.floorGroup === subject.floorGroup;
@@ -123,8 +136,8 @@ function weightBreakdown(
   transactionDate: Date | null,
   asOf: Date,
   policy: EstimatorPolicy,
+  comparableAreaPing: number | null,
 ): WeightBreakdown {
-  const buildingAreaPing = transaction.buildingAreaPing;
   const distance = !distances
     ? 0
     : policy.distanceWeightBands.find((band) => distances.max <= band.maxDistanceM)?.weight ?? 0;
@@ -136,8 +149,8 @@ function weightBreakdown(
   const locationPrecision = transaction.location.method === 'address-range'
     ? Math.max(0.5, 1 / (1 + (transaction.location.uncertaintyMeters ?? 0) / 400))
     : transaction.location.coordinate ? 1 : 0;
-  const areaDifference = finitePositive(subject.buildingAreaPing) && finitePositive(buildingAreaPing)
-    ? Math.abs(buildingAreaPing - subject.buildingAreaPing) / subject.buildingAreaPing
+  const areaDifference = finitePositive(subject.buildingAreaPing) && finitePositive(comparableAreaPing)
+    ? Math.abs(comparableAreaPing - subject.buildingAreaPing) / subject.buildingAreaPing
     : Number.POSITIVE_INFINITY;
   const area = areaDifference <= 0.2 ? 1 : areaDifference <= 0.3 ? WEIGHTS.relaxedArea : 0;
   const comparableAge = ageYearsAt(transaction.completionDate, asOf);
@@ -157,12 +170,24 @@ interface CandidateState {
   transactionDate: Date | null;
 }
 
-/** Selects exact-stage comparables using only official transaction metadata and GPS evidence. */
-export function selectComparables(
+interface SelectionRules {
+  comparableAreaPing(transaction: MarketTransaction): number | null;
+  hardReasons(
+    subject: MarketSubject,
+    transaction: MarketTransaction,
+    transactionDate: Date,
+    asOf: Date,
+    maximumMonths: number,
+  ): string[];
+  adjustWeight(transaction: MarketTransaction, weight: WeightBreakdown): WeightBreakdown;
+}
+
+function selectWithRules(
   subject: MarketSubject,
   candidates: readonly MarketTransaction[],
   asOf: string,
-  policy: EstimatorPolicy = ACTIVE_ESTIMATOR_POLICY,
+  policy: EstimatorPolicy,
+  rules: SelectionRules,
 ): SelectionResult {
   const targetDate = parseIsoDate(asOf);
   if (!targetDate) throw new RangeError('Comparable selection requires a valid as-of date');
@@ -175,8 +200,9 @@ export function selectComparables(
     const transactionDate = parseIsoDate(transaction.transactionDate);
     const transactionMonths = transactionDate ? completeMonthsBetween(transactionDate, targetDate) : Number.POSITIVE_INFINITY;
     const distances = locationDistances(subject, transaction);
+    const comparableAreaPing = rules.comparableAreaPing(transaction);
     const hard = transactionDate
-      ? hardReasons(subject, transaction, transactionDate, targetDate, maximumMonths)
+      ? rules.hardReasons(subject, transaction, transactionDate, targetDate, maximumMonths)
       : ['invalid-transaction-date'];
     return {
       evidence: {
@@ -184,7 +210,10 @@ export function selectComparables(
         distanceMinM: distances?.min ?? Number.POSITIVE_INFINITY,
         distanceMaxM: distances?.max ?? Number.POSITIVE_INFINITY,
         transactionAgeMonths: transactionMonths,
-        weight: weightBreakdown(subject, transaction, distances, transactionDate, targetDate, policy),
+        weight: rules.adjustWeight(
+          transaction,
+          weightBreakdown(subject, transaction, distances, transactionDate, targetDate, policy, comparableAreaPing),
+        ),
         included: false,
         reasons: [],
       },
@@ -203,7 +232,7 @@ export function selectComparables(
         : [...state.hardReasons, ...stageReasons(subject, state.evidence.transaction, stage, {
           min: state.evidence.distanceMinM,
           max: state.evidence.distanceMaxM,
-        }, state.transactionDate, targetDate)];
+        }, state.transactionDate, targetDate, rules.comparableAreaPing(state.evidence.transaction))];
       finalStageReasons.set(state, reasons);
       return reasons.length === 0;
     });
@@ -228,4 +257,74 @@ export function selectComparables(
     excluded: all.filter((candidate) => !candidate.included),
     candidates: all,
   };
+}
+
+/** Selects exact-stage comparables using only official transaction metadata and GPS evidence. */
+export function selectComparables(
+  subject: MarketSubject,
+  candidates: readonly MarketTransaction[],
+  asOf: string,
+  policy: EstimatorPolicy = ACTIVE_ESTIMATOR_POLICY,
+): SelectionResult {
+  return selectWithRules(subject, candidates, asOf, policy, {
+    comparableAreaPing: (transaction) => transaction.buildingAreaPing,
+    hardReasons: legacyHardReasons,
+    adjustWeight: (_transaction, weight) => weight,
+  });
+}
+
+export interface ScenarioSelectionOptions {
+  primaryUse: Exclude<NormalizedPrimaryUse, 'unknown'>;
+  allowImputedParking: boolean;
+  bundleOnly?: boolean;
+}
+
+function scenarioHardReasons(
+  options: ScenarioSelectionOptions,
+  subject: MarketSubject,
+  transaction: MarketTransaction,
+  transactionDate: Date,
+  asOf: Date,
+  maximumMonths: number,
+): string[] {
+  const reasons = commonHardReasons(subject, transaction, transactionDate, asOf, maximumMonths);
+  if (transaction.primaryUse !== options.primaryUse) reasons.push('primary-use-mismatch');
+  if (transaction.transferredBuildingCount !== 1) reasons.push('building-count-not-one');
+
+  if (options.bundleOnly) {
+    if (transaction.parkingEvidence.grade !== 'C') reasons.push('parking-grade-not-bundle-evidence');
+    if (!finitePositive(transaction.totalPriceNtd)) reasons.push('invalid-total-price');
+    if (!finitePositive(transaction.totalAreaPing)) reasons.push('invalid-total-area');
+    return reasons;
+  }
+
+  if (transaction.parkingEvidence.grade === 'C') reasons.push('parking-grade-not-building-evidence');
+  if (transaction.parkingEvidence.grade === 'B') {
+    if (!options.allowImputedParking) reasons.push('parking-imputation-not-accepted');
+    else if (transaction.parkingEvidence.imputation === null) reasons.push('parking-imputation-unavailable');
+  }
+  if (!finitePositive(transaction.buildingPriceNtd)) reasons.push('invalid-building-price');
+  if (!finitePositive(transaction.buildingUnitPriceWan)) reasons.push('invalid-building-unit-price');
+  if (!finitePositive(transaction.buildingAreaPing)) reasons.push('invalid-building-area');
+  return reasons;
+}
+
+/** Selects one exact-use cohort without allowing parking quality to cross evidence paths. */
+export function selectScenarioComparables(
+  subject: MarketSubject,
+  candidates: readonly MarketTransaction[],
+  asOf: string,
+  options: ScenarioSelectionOptions,
+  policy: EstimatorPolicy = ACTIVE_ESTIMATOR_POLICY,
+): SelectionResult {
+  return selectWithRules(subject, candidates, asOf, policy, {
+    comparableAreaPing: (transaction) => options.bundleOnly
+      ? transaction.totalAreaPing
+      : transaction.buildingAreaPing,
+    hardReasons: (selectionSubject, transaction, transactionDate, targetDate, maximumMonths) =>
+      scenarioHardReasons(options, selectionSubject, transaction, transactionDate, targetDate, maximumMonths),
+    adjustWeight: (transaction, weight) => transaction.parkingEvidence.grade === 'B'
+      ? { ...weight, total: Math.min(weight.total, PARKING_POLICY.imputedComparableWeightCap) }
+      : weight,
+  });
 }

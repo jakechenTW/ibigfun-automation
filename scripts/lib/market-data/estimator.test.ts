@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { gridKey } from './grid.ts';
-import { estimateMarket } from './estimator.ts';
+import { estimateMarket, estimateWeightedBuildingPrices } from './estimator.ts';
+import { selectComparables } from './selector.ts';
 import {
   EXPERIMENTAL_1000_METER_POLICY,
   EXPERIMENTAL_48_MONTH_POLICY,
@@ -245,4 +246,20 @@ test('extended policy does not promote baseline fallback comparables to high con
   assert.equal(baseline.confidence, 'medium');
   assert.equal(extended.selectedStage, 5);
   assert.equal(extended.confidence, 'medium');
+});
+
+test('reusable weighted building prices preserve MAD exclusions for scenario estimation', () => {
+  const selection = selectComparables(
+    subject,
+    [99, 100, 101, 102, 1_000].map((price, index) => transaction(`weighted-${index}`, price)),
+    AS_OF,
+  );
+  const estimate = estimateWeightedBuildingPrices(selection.included);
+
+  assert.ok(estimate);
+  assert.deepEqual(estimate.comparables.map((candidate) => candidate.transaction.id), [
+    'weighted-0', 'weighted-1', 'weighted-2', 'weighted-3',
+  ]);
+  assert.equal(estimate.marketUnitPriceMedian, 100.5);
+  assert.ok(estimate.excludedCandidates[0]?.reasons.includes('weighted-mad-outlier'));
 });

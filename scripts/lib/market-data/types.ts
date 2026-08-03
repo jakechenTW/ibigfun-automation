@@ -151,6 +151,58 @@ export interface MarketSubject {
   parkingSeparable: boolean;
 }
 
+export interface SubjectUseEvidence {
+  value: NormalizedPrimaryUse;
+  source: 'official' | 'manual' | 'unknown';
+  detail: string | null;
+}
+
+export interface UseScenarioEstimate {
+  primaryUse: Exclude<NormalizedPrimaryUse, 'unknown'>;
+  role: 'primary' | 'residential-comparison' | 'unknown-use-scenario';
+  status: EstimateStatus | 'diagnostic-only' | 'insufficient-sample';
+  confidence: EstimateConfidence;
+  marketUnitPriceP25: number | null;
+  marketUnitPriceMedian: number | null;
+  marketUnitPriceP75: number | null;
+  askingPremiumConservative: number | null;
+  bundleValue: BundleValueQuantiles | null;
+  parkingEstimate: ParkingImputationEvidence | null;
+  gradeCounts: Record<ParkingGrade, number>;
+  selectedStage: number | null;
+  comparables: ComparableEvidence[];
+  bundleComparables: ComparableEvidence[];
+  reasons: string[];
+}
+
+export interface MarketScenarioEstimate {
+  registeredUse: SubjectUseEvidence;
+  parkingFamily: ParkingFamily;
+  parkingCountAssumption: 0 | 1 | 2 | null;
+  sourceFreshness: SourceFreshness;
+  scenarios: UseScenarioEstimate[];
+  reasons: string[];
+}
+
+export interface ScenarioMarketSubject {
+  listingId: number | null;
+  coordinate: Coordinate;
+  matchedAddress: string | null;
+  district: string;
+  ownership: 'freehold' | 'non-freehold' | 'unknown';
+  ownershipEvidence?: SubjectOwnershipEvidence;
+  buildingType: BuildingType;
+  totalAreaPing: number;
+  askingTotalPriceNtd: number;
+  floor: number;
+  totalFloors: number;
+  floorGroup: FloorGroup;
+  ageYears: number | null;
+  registeredUse: SubjectUseEvidence;
+  parkingFamily: ParkingFamily;
+  parkingCount: 0 | 1 | 2 | null;
+}
+
 export interface ComparableEvidence {
   transaction: MarketTransaction;
   distanceMinM: number;

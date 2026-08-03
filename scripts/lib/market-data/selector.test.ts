@@ -4,7 +4,7 @@ import {
   EXPERIMENTAL_1000_METER_POLICY,
   EXPERIMENTAL_48_MONTH_POLICY,
 } from './config.ts';
-import { selectComparables } from './selector.ts';
+import { selectComparables, selectScenarioComparables } from './selector.ts';
 import type { LocationEvidence, MarketSubject, MarketTransaction } from './types.ts';
 
 const AS_OF = '2026-07-25';
@@ -280,4 +280,118 @@ test('clamps leap-day calendar cutoffs to the last day of February', () => {
     assert.equal(result.candidates[0]?.weight.time, expected.time, expected.date);
     assert.equal(result.included.length === 1, expected.included, expected.date);
   }
+});
+
+test('scenario selection isolates residential evidence from every other exact use', () => {
+  const result = selectScenarioComparables(subject, [
+    transaction('residential'),
+    transaction('office', {
+      eligibility: 'review-only',
+      eligibilityReasons: ['scenario-only-primary-use'],
+      originalPrimaryUse: '辦公用',
+      primaryUse: 'office',
+    }),
+    transaction('industrial', {
+      eligibility: 'review-only',
+      eligibilityReasons: ['scenario-only-primary-use'],
+      originalPrimaryUse: '工業用',
+      primaryUse: 'industrial',
+    }),
+  ], AS_OF, { primaryUse: 'residential', allowImputedParking: true });
+
+  assert.deepEqual(result.included.map((candidate) => candidate.transaction.id), ['residential']);
+  assert.ok(result.excluded.find((candidate) => candidate.transaction.id === 'office')?.reasons.includes('primary-use-mismatch'));
+  assert.ok(result.excluded.find((candidate) => candidate.transaction.id === 'industrial')?.reasons.includes('primary-use-mismatch'));
+});
+
+test('scenario building selection caps accepted grade B and excludes unresolved B and every grade C row', () => {
+  const imputation = {
+    asOf: '2026-01-25',
+    stage: 'nearby-500m' as const,
+    comparableIds: ['parking-a', 'parking-b', 'parking-c'],
+    comparableCount: 3,
+    priceP25Ntd: 1_800_000,
+    priceP50Ntd: 2_000_000,
+    priceP75Ntd: 2_200_000,
+    areaP25Ping: 9,
+    areaP50Ping: 10,
+    areaP75Ping: 11,
+  };
+  const result = selectScenarioComparables(subject, [
+    transaction('grade-a'),
+    transaction('grade-b-accepted', {
+      eligibility: 'review-only',
+      eligibilityReasons: ['parking-not-separable'],
+      parkingEvidence: {
+        grade: 'B', family: 'flat', originalType: '坡道平面',
+        officialPriceNtd: null, officialAreaPing: null, imputation, reasons: ['parking-not-separable'],
+      },
+    }),
+    transaction('grade-b-unresolved', {
+      buildingPriceNtd: null,
+      buildingAreaPing: null,
+      buildingUnitPriceWan: null,
+      eligibility: 'review-only',
+      eligibilityReasons: ['parking-not-separable'],
+      parkingEvidence: {
+        grade: 'B', family: 'flat', originalType: '坡道平面',
+        officialPriceNtd: null, officialAreaPing: null, imputation: null, reasons: ['parking-not-separable'],
+      },
+    }),
+    transaction('grade-c', {
+      eligibility: 'review-only',
+      eligibilityReasons: ['parking-not-separable'],
+      parkingEvidence: {
+        grade: 'C', family: 'unknown', originalType: '',
+        officialPriceNtd: null, officialAreaPing: null, imputation: null, reasons: ['parking-family-unknown'],
+      },
+    }),
+  ], AS_OF, { primaryUse: 'residential', allowImputedParking: true });
+
+  assert.deepEqual(result.included.map((candidate) => candidate.transaction.id), ['grade-a', 'grade-b-accepted']);
+  assert.equal(result.included.find((candidate) => candidate.transaction.id === 'grade-a')?.weight.total, 1);
+  assert.equal(result.included.find((candidate) => candidate.transaction.id === 'grade-b-accepted')?.weight.total, 0.60);
+  assert.ok(result.excluded.find((candidate) => candidate.transaction.id === 'grade-b-unresolved')?.reasons.includes('parking-imputation-unavailable'));
+  assert.ok(result.excluded.find((candidate) => candidate.transaction.id === 'grade-c')?.reasons.includes('parking-grade-not-building-evidence'));
+
+  const imputationDisabled = selectScenarioComparables(subject, [
+    transaction('grade-b-accepted', {
+      parkingEvidence: {
+        grade: 'B', family: 'flat', originalType: '坡道平面',
+        officialPriceNtd: null, officialAreaPing: null, imputation, reasons: ['parking-not-separable'],
+      },
+    }),
+  ], AS_OF, { primaryUse: 'residential', allowImputedParking: false });
+  assert.equal(imputationDisabled.included.length, 0);
+  assert.ok(imputationDisabled.excluded[0]?.reasons.includes('parking-imputation-not-accepted'));
+});
+
+test('scenario bundle selection returns only exact-use grade C evidence', () => {
+  const result = selectScenarioComparables(subject, [
+    transaction('grade-a'),
+    transaction('grade-c-residential', {
+      buildingPriceNtd: null,
+      buildingAreaPing: null,
+      buildingUnitPriceWan: null,
+      parkingEvidence: {
+        grade: 'C', family: 'unknown', originalType: '',
+        officialPriceNtd: null, officialAreaPing: null, imputation: null, reasons: ['parking-family-unknown'],
+      },
+    }),
+    transaction('grade-c-office', {
+      buildingPriceNtd: null,
+      buildingAreaPing: null,
+      buildingUnitPriceWan: null,
+      originalPrimaryUse: '辦公用',
+      primaryUse: 'office',
+      parkingEvidence: {
+        grade: 'C', family: 'unknown', originalType: '',
+        officialPriceNtd: null, officialAreaPing: null, imputation: null, reasons: ['parking-family-unknown'],
+      },
+    }),
+  ], AS_OF, { primaryUse: 'residential', allowImputedParking: true, bundleOnly: true });
+
+  assert.deepEqual(result.included.map((candidate) => candidate.transaction.id), ['grade-c-residential']);
+  assert.ok(result.excluded.find((candidate) => candidate.transaction.id === 'grade-a')?.reasons.includes('parking-grade-not-bundle-evidence'));
+  assert.ok(result.excluded.find((candidate) => candidate.transaction.id === 'grade-c-office')?.reasons.includes('primary-use-mismatch'));
 });

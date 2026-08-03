@@ -35,6 +35,64 @@ export interface EstimateMarketOptions {
   policy?: EstimatorPolicy;
 }
 
+export interface WeightedBuildingPriceEstimate {
+  comparables: ComparableEvidence[];
+  excludedCandidates: ComparableEvidence[];
+  marketUnitPriceP25: number | null;
+  marketUnitPriceMedian: number | null;
+  marketUnitPriceP75: number | null;
+}
+
+/** Applies the shared positive-weight and weighted-MAD rules to selected building evidence. */
+export function estimateWeightedBuildingPrices(
+  candidates: readonly ComparableEvidence[],
+  filterOutliers = true,
+): WeightedBuildingPriceEstimate {
+  const invalidUnitPrice = candidates.filter((candidate) => !hasBuildingUnitPrice(candidate));
+  const priced = candidates.filter(hasBuildingUnitPrice);
+  const unsupportedWeight = priced.filter((candidate) =>
+    !Number.isFinite(candidate.weight.total) || candidate.weight.total <= 0,
+  );
+  const weightSupported = priced.filter((candidate) =>
+    Number.isFinite(candidate.weight.total) && candidate.weight.total > 0,
+  );
+  const outlierIds = filterOutliers
+    ? new Set(weightedMadOutliers(weightSupported.map((candidate) => ({
+      id: candidate.transaction.id,
+      value: candidate.transaction.buildingUnitPriceWan,
+      weight: candidate.weight.total,
+    }))).map((observation) => observation.id))
+    : new Set<string>();
+  const comparables = weightSupported.filter((candidate) => !outlierIds.has(candidate.transaction.id));
+  const excludedCandidates = [
+    ...invalidUnitPrice.map(excludedInvalidBuildingUnitPrice),
+    ...unsupportedWeight.map(excludedUnsupportedWeight),
+    ...weightSupported.filter((candidate) => outlierIds.has(candidate.transaction.id)).map(excludedOutlier),
+  ];
+  if (comparables.length === 0) {
+    return {
+      comparables,
+      excludedCandidates,
+      marketUnitPriceP25: null,
+      marketUnitPriceMedian: null,
+      marketUnitPriceP75: null,
+    };
+  }
+
+  const observations = comparables.map((candidate) => ({
+    id: candidate.transaction.id,
+    value: candidate.transaction.buildingUnitPriceWan!,
+    weight: candidate.weight.total,
+  }));
+  return {
+    comparables,
+    excludedCandidates,
+    marketUnitPriceP25: weightedQuantile(observations, 0.25),
+    marketUnitPriceMedian: weightedQuantile(observations, 0.5),
+    marketUnitPriceP75: weightedQuantile(observations, 0.75),
+  };
+}
+
 function subjectHardReasons(subject: MarketSubject, options: EstimateMarketOptions): string[] {
   const reasons: string[] = [];
   if (!Number.isFinite(subject.coordinate.lat) || !Number.isFinite(subject.coordinate.lng)) reasons.push('location-unreliable');
@@ -107,28 +165,11 @@ export function estimateMarket(
   }
   const maximumRadiusM = Math.max(...policy.stages.map((stage) => stage.radiusM));
   const selection = selectComparables(subject, nearbyTransactions(subject, index, maximumRadiusM), asOf, policy);
-  const initialIncluded = selection.included;
-  const invalidUnitPrice = initialIncluded.filter((candidate) => !hasBuildingUnitPrice(candidate));
-  const pricedIncluded = initialIncluded.filter(hasBuildingUnitPrice);
-  const unsupportedWeight = pricedIncluded.filter((candidate) =>
-    !Number.isFinite(candidate.weight.total) || candidate.weight.total <= 0,
-  );
-  const weightSupported = pricedIncluded.filter((candidate) =>
-    Number.isFinite(candidate.weight.total) && candidate.weight.total > 0,
-  );
-  const outlierIds = hardReasons.length === 0
-    ? new Set(weightedMadOutliers(weightSupported.map((candidate) => ({
-      id: candidate.transaction.id,
-      value: candidate.transaction.buildingUnitPriceWan,
-      weight: candidate.weight.total,
-    }))).map((observation) => observation.id))
-    : new Set<string>();
-  const comparables = weightSupported.filter((candidate) => !outlierIds.has(candidate.transaction.id));
+  const weighted = estimateWeightedBuildingPrices(selection.included, hardReasons.length === 0);
+  const comparables = weighted.comparables;
   const excludedCandidates = [
     ...selection.excluded,
-    ...invalidUnitPrice.map(excludedInvalidBuildingUnitPrice),
-    ...unsupportedWeight.map(excludedUnsupportedWeight),
-    ...weightSupported.filter((candidate) => outlierIds.has(candidate.transaction.id)).map(excludedOutlier),
+    ...weighted.excludedCandidates,
   ];
   const unavailableReasons = [...hardReasons];
   if (comparables.length === 0 && selection.reviewOnly.length > 0 && hardReasons.length === 0) {
@@ -170,14 +211,9 @@ export function estimateMarket(
     };
   }
 
-  const observations = comparables.map((candidate) => ({
-    id: candidate.transaction.id,
-    value: candidate.transaction.buildingUnitPriceWan,
-    weight: candidate.weight.total,
-  }));
-  const median = weightedQuantile(observations, 0.5);
-  const p25 = weightedQuantile(observations, 0.25);
-  const p75 = weightedQuantile(observations, 0.75);
+  const median = weighted.marketUnitPriceMedian!;
+  const p25 = weighted.marketUnitPriceP25!;
+  const p75 = weighted.marketUnitPriceP75!;
   const iqrRatio = (p75 - p25) / median;
   const stale = freshness.transactionStale || freshness.doorplateStale;
   const selectedStage = selection.selectedStage === null
