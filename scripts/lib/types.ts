@@ -1,6 +1,7 @@
 import type { Coordinate } from './coords.ts';
 import type { RegionGate } from './region.ts';
-import type { BuildingType, MarketEstimate, MarketScenarioEstimate } from './market-data/types.ts';
+import type { LocalMarketScenarioEstimate } from './market-data/evidence.ts';
+import type { BuildingType, MarketEstimate } from './market-data/types.ts';
 
 /** One row of iBigFun's 刊登紀錄: this property's appearance on one source/date. */
 export interface ListingHistoryEntry {
@@ -114,7 +115,7 @@ export interface EnrichedListing extends Listing {
   tenure: ListingTenure;
   marketEstimate: MarketEstimate;
   /** Parallel candidate scenarios; `marketEstimate` remains authoritative until activation. */
-  marketScenarios: MarketScenarioEstimate;
+  marketScenarios: LocalMarketScenarioEstimate;
 }
 
 /** Internal deterministic enrichment shape before market evidence is attached. */

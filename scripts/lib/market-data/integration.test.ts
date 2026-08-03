@@ -4,7 +4,6 @@ import { test } from 'node:test';
 import { attachMarketEstimates, listingParkingFamily } from '../steps.ts';
 import type { PreMarketEnrichedListing } from '../types.ts';
 import { ACTIVE_ESTIMATOR_POLICY, ESTIMATOR_POLICY_VERSION } from './config.ts';
-import type { OfficialComparableLocator } from './evidence.ts';
 import type { BacktestAcceptance, MarketDataBundle } from './types.ts';
 
 const AS_OF = '2026-07-25';
@@ -225,6 +224,15 @@ test('known listing parking gets a parallel one-space scenario while legacy auth
   assert.ok(result.marketScenarios.scenarios.length > 0);
 });
 
+test('known parking preserves the legacy parking review when scenario floor data is missing', () => {
+  const [result] = attachMarketEstimates([listing({ parking: '平面', floor: null })], bundle, AS_OF);
+
+  assert.equal(result.marketEstimate.status, 'review');
+  assert.deepEqual(result.marketEstimate.unavailableReasons, ['listing-parking-not-separable']);
+  assert.ok(result.marketScenarios.reasons.includes('listing-floor-group-unavailable'));
+  assert.ok(result.marketScenarios.scenarios.every((scenario) => scenario.status === 'unavailable'));
+});
+
 test('no-parking listing gets an explicit zero-space scenario assumption', () => {
   const [result] = attachMarketEstimates([listing({ parking: '無車位' })], bundle, AS_OF);
 
@@ -235,9 +243,7 @@ test('no-parking listing gets an explicit zero-space scenario assumption', () =>
 test('local scenario comparables carry official query locators', () => {
   const [result] = attachMarketEstimates([listing()], bundle, AS_OF);
   const comparable = result.marketScenarios.scenarios
-    .flatMap((scenario) => [...scenario.comparables, ...scenario.bundleComparables])[0] as
-      | { officialLocator?: OfficialComparableLocator }
-      | undefined;
+    .flatMap((scenario) => [...scenario.comparables, ...scenario.bundleComparables])[0];
 
   assert.deepEqual(comparable?.officialLocator, {
     queryUrl: 'https://lvr.land.moi.gov.tw/',
@@ -259,6 +265,30 @@ test('unknown listing parking keeps count and price unknown with low-confidence 
   assert.ok(result.marketScenarios.scenarios.every((scenario) => scenario.confidence === 'low'));
   assert.ok(result.marketScenarios.scenarios.every((scenario) => scenario.parkingEstimate === null));
   assert.ok(result.marketScenarios.scenarios.every((scenario) => scenario.bundleValue === null));
+});
+
+test('unknown parking retains subject evidence in unavailable scenarios without market data', () => {
+  const [result] = attachMarketEstimates([listing({ parking: null })], null, AS_OF);
+
+  assert.ok(result.marketScenarios.reasons.includes('market-data-unavailable'));
+  assert.ok(result.marketScenarios.reasons.includes('parking-family-unknown'));
+  assert.ok(result.marketScenarios.reasons.includes('parking-count-unknown'));
+  assert.equal(result.marketScenarios.scenarios.length, 6);
+  assert.ok(result.marketScenarios.scenarios.every((scenario) => scenario.status === 'unavailable'));
+  assert.ok(result.marketScenarios.scenarios.every((scenario) => scenario.confidence === 'low'));
+  assert.ok(result.marketScenarios.scenarios.every((scenario) =>
+    scenario.reasons.includes('parking-family-unknown') && scenario.reasons.includes('parking-count-unknown')));
+});
+
+test('unknown parking retains subject evidence when scenario floor data is missing', () => {
+  const [result] = attachMarketEstimates([listing({ parking: '另洽', floor: null })], bundle, AS_OF);
+
+  assert.ok(result.marketScenarios.reasons.includes('listing-floor-group-unavailable'));
+  assert.ok(result.marketScenarios.reasons.includes('parking-family-unknown'));
+  assert.ok(result.marketScenarios.reasons.includes('parking-count-unknown'));
+  assert.equal(result.marketScenarios.scenarios.length, 6);
+  assert.ok(result.marketScenarios.scenarios.every((scenario) => scenario.status === 'unavailable'));
+  assert.ok(result.marketScenarios.scenarios.every((scenario) => scenario.confidence === 'low'));
 });
 
 test('explicit non-freehold title is retained as listing evidence', () => {

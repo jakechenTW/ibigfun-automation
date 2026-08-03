@@ -13,7 +13,11 @@ import type { EnrichResult, EnrichedListing, PreMarketEnrichedListing, FetchResu
 import { runDir, listingsPath, enrichedPath, effectiveProfilePath } from './runpaths.ts';
 import { estimateMarket } from './market-data/estimator.ts';
 import { estimateMarketScenarios } from './market-data/scenario-estimator.ts';
-import { attachOfficialComparableLocators } from './market-data/evidence.ts';
+import {
+  attachOfficialComparableLocators,
+  type LocalMarketScenarioEstimate,
+  type LocalUseScenarioEstimate,
+} from './market-data/evidence.ts';
 import { locateAddress, nearestDoorplate } from './market-data/doorplates.ts';
 import { normalizeTaiwanAddress } from './market-data/address.ts';
 import { floorGroup } from './market-data/property.ts';
@@ -27,7 +31,6 @@ import { ensureTaipeiMarketData } from './market-data/update.ts';
 import type {
   MarketDataBundle,
   MarketEstimate,
-  MarketScenarioEstimate,
   ParkingFamily,
   SourceFreshness,
   SubjectLocationEvidence,
@@ -215,14 +218,43 @@ function unavailableMarketScenarios(
   freshness: SourceFreshness,
   parking: ReturnType<typeof listingParkingAssumption>,
   reasons: string[],
-): MarketScenarioEstimate {
+): LocalMarketScenarioEstimate {
+  const subjectReasons = ['registered-use-unverified'];
+  if (parking.family === 'unknown') subjectReasons.push('parking-family-unknown');
+  if (parking.family !== 'none' && parking.count === null) subjectReasons.push('parking-count-unknown');
+  const allReasons = [...new Set([...reasons, ...subjectReasons])];
+  const primaryUses = [
+    'residential',
+    'mixed-residential',
+    'office',
+    'commercial',
+    'industrial',
+    'mixed-industrial',
+  ] as const;
+  const scenarios: LocalUseScenarioEstimate[] = primaryUses.map((primaryUse) => ({
+    primaryUse,
+    role: 'unknown-use-scenario',
+    status: 'unavailable',
+    confidence: 'low',
+    marketUnitPriceP25: null,
+    marketUnitPriceMedian: null,
+    marketUnitPriceP75: null,
+    askingPremiumConservative: null,
+    bundleValue: null,
+    parkingEstimate: null,
+    gradeCounts: { A: 0, B: 0, C: 0 },
+    selectedStage: null,
+    comparables: [],
+    bundleComparables: [],
+    reasons: allReasons,
+  }));
   return {
     registeredUse: { value: 'unknown', source: 'unknown', detail: null },
     parkingFamily: parking.family,
     parkingCountAssumption: parking.count,
     sourceFreshness: freshness,
-    scenarios: [],
-    reasons,
+    scenarios,
+    reasons: allReasons,
   };
 }
 
@@ -292,13 +324,23 @@ export function attachMarketEstimates(
         marketScenarios: unavailableMarketScenarios(freshness, parking, reasons),
       };
     }
+    const legacyParkingEstimate = listing.parking !== '無車位'
+      ? unavailableMarketEstimate(
+        freshness,
+        ['listing-parking-not-separable'],
+        'review',
+        ownership.evidence,
+        locationEvidence,
+      )
+      : null;
     const floor = integerField(listing.floor);
     const totalFloors = integerField(listing.totalFloors);
     if (floor == null || totalFloors == null) {
       const reasons = ['listing-floor-group-unavailable'];
       return {
         ...listing,
-        marketEstimate: unavailableMarketEstimate(freshness, reasons, 'unavailable', ownership.evidence, locationEvidence),
+        marketEstimate: legacyParkingEstimate
+          ?? unavailableMarketEstimate(freshness, reasons, 'unavailable', ownership.evidence, locationEvidence),
         marketScenarios: unavailableMarketScenarios(freshness, parking, reasons),
       };
     }
@@ -307,13 +349,14 @@ export function attachMarketEstimates(
       const reasons = ['listing-floor-group-unavailable'];
       return {
         ...listing,
-        marketEstimate: unavailableMarketEstimate(freshness, reasons, 'unavailable', ownership.evidence, locationEvidence),
+        marketEstimate: legacyParkingEstimate
+          ?? unavailableMarketEstimate(freshness, reasons, 'unavailable', ownership.evidence, locationEvidence),
         marketScenarios: unavailableMarketScenarios(freshness, parking, reasons),
       };
     }
 
-    const marketEstimate = listing.parking === '無車位'
-      ? attachLocationEvidence(enforceBacktestAcceptance(estimateMarket({
+    const marketEstimate = legacyParkingEstimate
+      ?? attachLocationEvidence(enforceBacktestAcceptance(estimateMarket({
         listingId: listing.id,
         coordinate: listing.coordinate,
         district: listing.district ?? '',
@@ -327,14 +370,7 @@ export function attachMarketEstimates(
         floorGroup: subjectFloorGroup,
         ageYears: listing.ageNum,
         parkingSeparable: true,
-      }, bundle.transactions, freshness, asOf), acceptanceDecision!), locationEvidence)
-      : unavailableMarketEstimate(
-        freshness,
-        ['listing-parking-not-separable'],
-        'review',
-        ownership.evidence,
-        locationEvidence,
-      );
+      }, bundle.transactions, freshness, asOf), acceptanceDecision!), locationEvidence);
     const marketScenarios = attachOfficialComparableLocators(estimateMarketScenarios({
       listingId: listing.id,
       coordinate: listing.coordinate,

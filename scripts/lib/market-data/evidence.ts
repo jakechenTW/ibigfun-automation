@@ -1,4 +1,9 @@
-import type { ComparableEvidence, MarketScenarioEstimate, MarketTransaction } from './types.ts';
+import type {
+  ComparableEvidence,
+  MarketScenarioEstimate,
+  MarketTransaction,
+  UseScenarioEstimate,
+} from './types.ts';
 
 export interface OfficialComparableLocator {
   queryUrl: 'https://lvr.land.moi.gov.tw/';
@@ -8,6 +13,20 @@ export interface OfficialComparableLocator {
   floor: number;
   totalPriceNtd: number;
   totalAreaPing: number;
+}
+
+/** Comparable evidence as serialized only into local enriched/report artifacts. */
+export interface LocalComparableEvidence extends ComparableEvidence {
+  officialLocator: OfficialComparableLocator;
+}
+
+export interface LocalUseScenarioEstimate extends Omit<UseScenarioEstimate, 'comparables' | 'bundleComparables'> {
+  comparables: LocalComparableEvidence[];
+  bundleComparables: LocalComparableEvidence[];
+}
+
+export interface LocalMarketScenarioEstimate extends Omit<MarketScenarioEstimate, 'scenarios'> {
+  scenarios: LocalUseScenarioEstimate[];
 }
 
 /** Fields a reader can enter at the official query page to locate one comparable. */
@@ -24,7 +43,7 @@ export function officialComparableLocator(transaction: MarketTransaction): Offic
 }
 
 /** Decorates only the local enriched/report projection, leaving persisted indexes unchanged. */
-export function attachOfficialComparableLocators(estimate: MarketScenarioEstimate): MarketScenarioEstimate {
+export function attachOfficialComparableLocators(estimate: MarketScenarioEstimate): LocalMarketScenarioEstimate {
   return {
     ...estimate,
     scenarios: estimate.scenarios.map((scenario) => ({
@@ -35,9 +54,7 @@ export function attachOfficialComparableLocators(estimate: MarketScenarioEstimat
   };
 }
 
-function withOfficialLocator(comparable: ComparableEvidence): ComparableEvidence & {
-  officialLocator: OfficialComparableLocator;
-} {
+function withOfficialLocator(comparable: ComparableEvidence): LocalComparableEvidence {
   return {
     ...comparable,
     officialLocator: officialComparableLocator(comparable.transaction),
