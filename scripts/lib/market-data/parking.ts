@@ -58,6 +58,16 @@ function locationPrecision(transaction: MarketTransaction): number {
     : 1;
 }
 
+function locationDistances(subject: ParkingSubject, transaction: MarketTransaction): { min: number; max: number } | null {
+  const coordinate = transaction.location.coordinate;
+  if (!coordinate || !Number.isFinite(coordinate.lat) || !Number.isFinite(coordinate.lng)) return null;
+  const distance = haversineMeters(subject.coordinate, coordinate);
+  const uncertainty = transaction.location.method === 'address-range' && finitePositive(transaction.location.uncertaintyMeters ?? 0)
+    ? transaction.location.uncertaintyMeters!
+    : 0;
+  return { min: Math.max(0, distance - uncertainty), max: distance + uncertainty };
+}
+
 function directPair(
   transaction: MarketTransaction,
   subject: ParkingSubject,
@@ -81,10 +91,9 @@ function timeWeight(transactionDate: Date, asOf: Date): number {
 }
 
 function nearbyWeight(subject: ParkingSubject, pair: DirectParkingPair, asOf: Date): number {
-  const coordinate = pair.transaction.location.coordinate;
-  if (!coordinate) return 0;
-  const distance = haversineMeters(subject.coordinate, coordinate);
-  const distanceWeight = ACTIVE_ESTIMATOR_POLICY.distanceWeightBands.find((band) => distance <= band.maxDistanceM)?.weight ?? 0;
+  const distances = locationDistances(subject, pair.transaction);
+  if (!distances) return 0;
+  const distanceWeight = ACTIVE_ESTIMATOR_POLICY.distanceWeightBands.find((band) => distances.max <= band.maxDistanceM)?.weight ?? 0;
   return distanceWeight * timeWeight(pair.transactionDate, asOf) * locationPrecision(pair.transaction);
 }
 
@@ -142,10 +151,10 @@ export function estimateParking(
   if (exactEstimate) return exactEstimate;
 
   const nearby = directPairs.filter((pair) => {
-    const coordinate = pair.transaction.location.coordinate;
+    const distances = locationDistances(subject, pair.transaction);
     return pair.transaction.buildingType === subject.buildingType
-      && coordinate !== null
-      && haversineMeters(subject.coordinate, coordinate) <= PARKING_POLICY.nearbyRadiusM;
+      && distances !== null
+      && distances.max <= PARKING_POLICY.nearbyRadiusM;
   });
   return estimate('nearby-500m', nearby, asOf, (pair) => nearbyWeight(subject, pair, targetDate));
 }
