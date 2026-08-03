@@ -21,6 +21,15 @@ export const BACKTEST_ACCEPTANCE_THRESHOLDS = {
   minimumHighConfidenceImprovement: 0.01,
 } as const;
 
+export const PARKING_POLICY = {
+  minimumDirectComparables: 3,
+  nearbyRadiusM: 500,
+  maximumAgeMonths: 36,
+  imputedComparableWeightCap: 0.60,
+  maximumPriceIqrRatio: 0.50,
+  maximumAreaIqrRatio: 0.35,
+} as const;
+
 export interface SearchStage {
   radiusM: number;
   months: number;
