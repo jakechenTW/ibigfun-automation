@@ -4,17 +4,21 @@ import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import { isValidDateString } from '../date.ts';
 import {
+  decideParkingFamily,
   decideParkingImputation,
   decideScenarioCohort,
 } from './acceptance-policy.ts';
 import {
   BACKTEST_ACCEPTANCE_THRESHOLDS,
   ACTIVE_ESTIMATOR_POLICY,
+  CANDIDATE_ESTIMATOR_POLICY_VERSION,
+  CANDIDATE_MARKET_SCHEMA_VERSION,
   DOORPLATE_STALE_DAYS,
   ESTIMATOR_POLICY_VERSION,
   MARKET_SCHEMA_VERSION,
   MIN_PRODUCTION_DOORPLATES,
   MIN_PRODUCTION_TRANSACTIONS,
+  PARKING_BACKTEST_GATE,
   SCENARIO_BACKTEST_GATE,
   TRANSACTION_STALE_DAYS,
 } from './config.ts';
@@ -25,12 +29,13 @@ import {
 import { NORMALIZED_PRIMARY_USES, PARKING_GRADES } from './types.ts';
 import type {
   BacktestAcceptance,
+  CandidateBacktestAcceptance,
   DoorplateIndex,
   MarketDataBundle,
   MarketDataManifest,
   SourceFreshness,
-  ScenarioBacktestAcceptance,
   ScenarioCohortAcceptance,
+  ParkingFamilyAcceptance,
   TransactionBuildDiagnostics,
   TransactionIndex,
 } from './types.ts';
@@ -197,8 +202,23 @@ function validateExactCountRecord(
 function validateTransactionBuildDiagnostics(
   value: TransactionBuildDiagnostics,
   recordCount: number,
+  includeGradeBComponents = true,
 ): void {
-  if (!value || typeof value !== 'object') throw new Error('Manifest lacks transaction normalization diagnostics');
+  const expectedKeys = [
+    'byParkingGrade',
+    'byPrimaryUse',
+    'excluded',
+    'excludedByReason',
+    ...(includeGradeBComponents ? ['gradeBByComponent'] : []),
+    'gradeBImputed',
+    'gradeBUnresolved',
+    'rawRows',
+    'reliableEligible',
+    'reviewOnly',
+  ];
+  if (!exactObject(value, expectedKeys)) {
+    throw new Error('Manifest transaction normalization diagnostics do not match their schema');
+  }
   const counts = [
     value.rawRows,
     value.reliableEligible,
@@ -227,6 +247,16 @@ function validateTransactionBuildDiagnostics(
   if (primaryUseCount !== recordCount || parkingGradeCount !== recordCount
       || value.gradeBImputed + value.gradeBUnresolved !== value.byParkingGrade.B) {
     throw new Error('Transaction normalization use or parking diagnostics do not match retained records');
+  }
+  if (includeGradeBComponents) {
+    const componentCount = validateExactCountRecord(
+      value.gradeBByComponent,
+      ['missingBoth', 'officialAreaOnly', 'officialPriceOnly'],
+      'grade-B-component',
+    );
+    if (componentCount !== value.byParkingGrade.B) {
+      throw new Error('Transaction normalization grade-B component diagnostics do not match retained records');
+    }
   }
   validateExcludedReasonDiagnostics(value.excludedByReason, value.excluded);
 }
@@ -259,9 +289,19 @@ const GLOBAL_THRESHOLD_KEYS = [
 ] as const;
 const SCENARIO_THRESHOLD_KEYS = [
   ...GLOBAL_THRESHOLD_KEYS,
+  'maximumAbsoluteBias',
   'maximumAbsoluteBiasRegression',
   'maximumIntervalCoverageRegression',
+  'minimumIntervalCoverage',
+  'minimumParkingAreaIntervalCoverage',
+  'minimumParkingEstimateCoverage',
+  'minimumParkingFamilyCases',
+  'minimumParkingPriceIntervalCoverage',
   'minimumUseCohortCases',
+  'parkingAreaMedianApeMax',
+  'parkingAreaP75ApeMax',
+  'parkingPriceMedianApeMax',
+  'parkingPriceP75ApeMax',
 ] as const;
 const ACCEPTANCE_METRIC_KEYS = [
   'estimateCoverage',
@@ -293,21 +333,55 @@ const PARKING_COMPARISON_KEYS = [
   'imputedP75Ape',
   'intervalCoverageRegression',
 ] as const;
+const PARKING_FAMILY_KEYS = [
+  'areaIntervalCoverage',
+  'areaMedianApe',
+  'areaP75Ape',
+  'caseCount',
+  'estimateCoverage',
+  'estimatedCount',
+  'priceIntervalCoverage',
+  'priceMedianApe',
+  'priceP75Ape',
+  'reasons',
+  'status',
+] as const;
+const PARKING_FAMILIES = ['flat', 'mechanical'] as const;
 const KNOWN_PRIMARY_USES = NORMALIZED_PRIMARY_USES.filter((use) => use !== 'unknown');
 
-function approvedBacktestThresholds(thresholds: unknown, schemaVersion: 2 | 3): boolean {
-  const expectedKeys = schemaVersion === 3 ? SCENARIO_THRESHOLD_KEYS : GLOBAL_THRESHOLD_KEYS;
-  if (!exactObject(thresholds, expectedKeys)) return false;
+function approvedBacktestThresholds(thresholds: unknown): boolean {
+  if (!exactObject(thresholds, GLOBAL_THRESHOLD_KEYS)) return false;
   const value = thresholds as Record<string, unknown>;
-  const globalApproved = value.medianApeMax === BACKTEST_ACCEPTANCE_THRESHOLDS.medianApeMax
+  return value.medianApeMax === BACKTEST_ACCEPTANCE_THRESHOLDS.medianApeMax
     && value.p75ApeMax === BACKTEST_ACCEPTANCE_THRESHOLDS.p75ApeMax
     && value.minimumEstimateCoverage === BACKTEST_ACCEPTANCE_THRESHOLDS.minimumEstimateCoverage
     && value.minimumConfidenceSliceCases === BACKTEST_ACCEPTANCE_THRESHOLDS.minimumConfidenceSliceCases
     && value.minimumHighConfidenceImprovement === BACKTEST_ACCEPTANCE_THRESHOLDS.minimumHighConfidenceImprovement;
-  return globalApproved && (schemaVersion === 2
-    || (value.minimumUseCohortCases === SCENARIO_BACKTEST_GATE.minimumUseCohortCases
-      && value.maximumAbsoluteBiasRegression === SCENARIO_BACKTEST_GATE.maximumAbsoluteBiasRegression
-      && value.maximumIntervalCoverageRegression === SCENARIO_BACKTEST_GATE.maximumIntervalCoverageRegression));
+}
+
+function approvedCandidateBacktestThresholds(thresholds: unknown): boolean {
+  if (!exactObject(thresholds, SCENARIO_THRESHOLD_KEYS)) return false;
+  const value = thresholds as Record<string, unknown>;
+  return value.medianApeMax === BACKTEST_ACCEPTANCE_THRESHOLDS.medianApeMax
+    && value.p75ApeMax === BACKTEST_ACCEPTANCE_THRESHOLDS.p75ApeMax
+    && value.minimumEstimateCoverage === BACKTEST_ACCEPTANCE_THRESHOLDS.minimumEstimateCoverage
+    && value.minimumConfidenceSliceCases === BACKTEST_ACCEPTANCE_THRESHOLDS.minimumConfidenceSliceCases
+    && value.minimumHighConfidenceImprovement === BACKTEST_ACCEPTANCE_THRESHOLDS.minimumHighConfidenceImprovement
+    && value.minimumUseCohortCases === SCENARIO_BACKTEST_GATE.minimumUseCohortCases
+    && value.maximumAbsoluteBiasRegression === SCENARIO_BACKTEST_GATE.maximumAbsoluteBiasRegression
+    && value.maximumIntervalCoverageRegression === SCENARIO_BACKTEST_GATE.maximumIntervalCoverageRegression
+    && value.maximumAbsoluteBias === SCENARIO_BACKTEST_GATE.maximumAbsoluteBias
+    && value.minimumIntervalCoverage === SCENARIO_BACKTEST_GATE.minimumIntervalCoverage
+    && value.minimumParkingFamilyCases === PARKING_BACKTEST_GATE.minimumMaskedCases
+    && value.minimumParkingEstimateCoverage === PARKING_BACKTEST_GATE.minimumEstimateCoverage
+    && value.parkingPriceMedianApeMax === PARKING_BACKTEST_GATE.priceMedianApeMax
+    && value.parkingPriceP75ApeMax === PARKING_BACKTEST_GATE.priceP75ApeMax
+    && value.parkingAreaMedianApeMax === PARKING_BACKTEST_GATE.areaMedianApeMax
+    && value.parkingAreaP75ApeMax === PARKING_BACKTEST_GATE.areaP75ApeMax
+    && value.minimumParkingPriceIntervalCoverage
+      === PARKING_BACKTEST_GATE.minimumPriceIntervalCoverage
+    && value.minimumParkingAreaIntervalCoverage
+      === PARKING_BACKTEST_GATE.minimumAreaIntervalCoverage;
 }
 
 function validAcceptanceMetrics(metrics: unknown, thresholds: Record<string, unknown>): boolean {
@@ -383,13 +457,63 @@ function validScenarioCohort(value: unknown): value is ScenarioCohortAcceptance 
     && cohort.reasons.every((reason, index) => reason === expected.reasons[index]);
 }
 
+function validParkingFamily(value: unknown): value is ParkingFamilyAcceptance {
+  if (!exactObject(value, PARKING_FAMILY_KEYS)) return false;
+  const family = value as unknown as ParkingFamilyAcceptance;
+  if ((family.status !== 'accepted' && family.status !== 'diagnostic-only'
+      && family.status !== 'failed')
+    || !Number.isSafeInteger(family.caseCount) || family.caseCount < 0
+    || !Number.isSafeInteger(family.estimatedCount) || family.estimatedCount < 0
+    || family.estimatedCount > family.caseCount
+    || !finiteRatio(family.estimateCoverage) || family.estimateCoverage > 1
+    || (family.caseCount === 0
+      ? family.estimateCoverage !== 0
+      : Math.abs(family.estimatedCount / family.caseCount - family.estimateCoverage)
+        > Number.EPSILON * 8)
+    || !nullableNonnegativeFinite(family.priceMedianApe)
+    || !nullableNonnegativeFinite(family.priceP75Ape)
+    || !nullableNonnegativeFinite(family.areaMedianApe)
+    || !nullableNonnegativeFinite(family.areaP75Ape)
+    || !nullableNonnegativeFinite(family.priceIntervalCoverage)
+    || !nullableNonnegativeFinite(family.areaIntervalCoverage)
+    || (family.priceIntervalCoverage !== null && family.priceIntervalCoverage > 1)
+    || (family.areaIntervalCoverage !== null && family.areaIntervalCoverage > 1)
+    || (family.priceMedianApe !== null && family.priceP75Ape !== null
+      && family.priceP75Ape < family.priceMedianApe)
+    || (family.areaMedianApe !== null && family.areaP75Ape !== null
+      && family.areaP75Ape < family.areaMedianApe)
+    || !Array.isArray(family.reasons)
+    || family.reasons.some((reason) => typeof reason !== 'string' || reason.length === 0)) {
+    return false;
+  }
+  const metricValues = [
+    family.priceMedianApe,
+    family.priceP75Ape,
+    family.areaMedianApe,
+    family.areaP75Ape,
+    family.priceIntervalCoverage,
+    family.areaIntervalCoverage,
+  ];
+  const metricsComplete = metricValues.every((metric) => metric !== null);
+  const hasAnyMetric = metricValues.some((metric) => metric !== null);
+  if ((family.estimatedCount === 0 && hasAnyMetric)
+    || (family.estimatedCount > 0 && !metricsComplete)) return false;
+  const expected = decideParkingFamily(family);
+  return family.status === expected.status
+    && family.reasons.length === expected.reasons.length
+    && family.reasons.every((reason, index) => reason === expected.reasons[index]);
+}
+
 function validScenarioAcceptance(value: Record<string, unknown>): boolean {
   if (!exactObject(value.useCohorts, KNOWN_PRIMARY_USES)) return false;
   const cohorts = value.useCohorts as Record<string, unknown>;
   if (KNOWN_PRIMARY_USES.some((use) => !validScenarioCohort(cohorts[use]))) return false;
+  if (!exactObject(value.parkingFamilies, PARKING_FAMILIES)) return false;
+  const families = value.parkingFamilies as unknown as CandidateBacktestAcceptance['parkingFamilies'];
+  if (PARKING_FAMILIES.some((family) => !validParkingFamily(families[family]))) return false;
   if (typeof value.parkingImputationAccepted !== 'boolean'
     || !exactObject(value.parkingComparison, PARKING_COMPARISON_KEYS)) return false;
-  const comparison = value.parkingComparison as unknown as ScenarioBacktestAcceptance['parkingComparison'];
+  const comparison = value.parkingComparison as unknown as CandidateBacktestAcceptance['parkingComparison'];
   if (!finiteRatio(comparison.directCoverage) || comparison.directCoverage > 1
     || !finiteRatio(comparison.imputedCoverage) || comparison.imputedCoverage > 1
     || !nullableNonnegativeFinite(comparison.directMedianApe)
@@ -421,21 +545,16 @@ function validScenarioAcceptance(value: Record<string, unknown>): boolean {
   if ((comparison.directCoverage > 0 && comparison.imputedCoverage > 0) !== regressionsComplete) {
     return false;
   }
-  return value.parkingImputationAccepted === decideParkingImputation(comparison);
+  return value.parkingImputationAccepted === decideParkingImputation(comparison, families)
+    && value.parkingImputationAccepted
+    && (cohorts.residential as ScenarioCohortAcceptance).status === 'accepted';
 }
 
 export function validBacktestAcceptance(value: unknown): value is BacktestAcceptance {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
-  const schemaVersion = record.schemaVersion;
-  if (schemaVersion !== 3) return false;
-  const topLevelKeys = [
-    ...ACCEPTANCE_IDENTITY_KEYS,
-    'parkingComparison',
-    'parkingImputationAccepted',
-    'useCohorts',
-  ];
-  if (!exactObject(record, topLevelKeys)
+  if (!exactObject(record, ACCEPTANCE_IDENTITY_KEYS)
+    || record.schemaVersion !== 2
     || record.estimatorPolicyVersion !== ESTIMATOR_POLICY_VERSION
     || record.policyId !== ACTIVE_ESTIMATOR_POLICY.id
     || typeof record.transactionArtifactSha256 !== 'string'
@@ -446,7 +565,35 @@ export function validBacktestAcceptance(value: unknown): value is BacktestAccept
     || typeof record.latestEligibleTransactionDate !== 'string' || !isValidDateString(record.latestEligibleTransactionDate)
     || record.asOf !== record.evaluatedThrough
     || record.evaluatedThrough < record.latestEligibleTransactionDate
-    || !approvedBacktestThresholds(record.thresholds, schemaVersion)) return false;
+    || !approvedBacktestThresholds(record.thresholds)) return false;
+  return validAcceptanceMetrics(record.metrics, record.thresholds as Record<string, unknown>);
+}
+
+export function validCandidateBacktestAcceptance(
+  value: unknown,
+): value is CandidateBacktestAcceptance {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  const topLevelKeys = [
+    ...ACCEPTANCE_IDENTITY_KEYS,
+    'parkingComparison',
+    'parkingFamilies',
+    'parkingImputationAccepted',
+    'useCohorts',
+  ];
+  if (!exactObject(record, topLevelKeys)
+    || record.schemaVersion !== 3
+    || record.estimatorPolicyVersion !== CANDIDATE_ESTIMATOR_POLICY_VERSION
+    || record.policyId !== ACTIVE_ESTIMATOR_POLICY.id
+    || typeof record.transactionArtifactSha256 !== 'string'
+    || !/^[a-f0-9]{64}$/.test(record.transactionArtifactSha256)
+    || typeof record.approvedAt !== 'string' || !Number.isFinite(Date.parse(record.approvedAt))
+    || typeof record.asOf !== 'string' || !isValidDateString(record.asOf)
+    || typeof record.evaluatedThrough !== 'string' || !isValidDateString(record.evaluatedThrough)
+    || typeof record.latestEligibleTransactionDate !== 'string' || !isValidDateString(record.latestEligibleTransactionDate)
+    || record.asOf !== record.evaluatedThrough
+    || record.evaluatedThrough < record.latestEligibleTransactionDate
+    || !approvedCandidateBacktestThresholds(record.thresholds)) return false;
   return validAcceptanceMetrics(record.metrics, record.thresholds as Record<string, unknown>)
     && validScenarioAcceptance(record);
 }
@@ -458,11 +605,9 @@ export function readBacktestAcceptance(root: string): BacktestAcceptance | null 
 
 function acceptanceLatestEligibleTransactionDate(
   index: TransactionIndex,
-  acceptance: BacktestAcceptance,
+  _acceptance: BacktestAcceptance,
 ): string | null {
-  return acceptance.schemaVersion === 3
-    ? latestScenarioInfluencingTransactionDate(index)
-    : latestEligibleTransactionDate(index);
+  return latestEligibleTransactionDate(index);
 }
 
 /** Atomically replaces the aggregate-only local acceptance artifact. */
@@ -471,7 +616,7 @@ export async function writeBacktestAcceptance(root: string, acceptance: Backtest
     minDoorplates: 0,
     minTransactions: 0,
   });
-  if (acceptance.schemaVersion !== 3) {
+  if (acceptance.schemaVersion !== 2) {
     throw new Error(
       'Backtest acceptance policy provenance does not match the runtime policy; run update first',
     );
@@ -482,7 +627,7 @@ export async function writeBacktestAcceptance(root: string, acceptance: Backtest
   if (acceptance.policyId !== ACTIVE_ESTIMATOR_POLICY.id) {
     throw new Error('Backtest acceptance policy does not match the active estimator policy');
   }
-  if (!approvedBacktestThresholds(acceptance.thresholds, acceptance.schemaVersion)) {
+  if (!approvedBacktestThresholds(acceptance.thresholds)) {
     throw new Error('Backtest acceptance must use the approved quality thresholds');
   }
   const latest = acceptanceLatestEligibleTransactionDate(active.transactions, acceptance);
@@ -635,7 +780,7 @@ async function validateArtifacts(root: string, manifest: MarketDataManifest): Pr
   }
 }
 
-type BuildValidationMode = 'current' | 'restorable';
+type BuildValidationMode = 'current' | 'candidate' | 'restorable';
 
 function validateManifestPolicy(
   manifest: MarketDataManifest,
@@ -645,9 +790,15 @@ function validateManifestPolicy(
     assertCurrentMarketDataIndexPolicy(manifest);
     return;
   }
+  if (mode === 'candidate') {
+    if (manifest.schemaVersion !== CANDIDATE_MARKET_SCHEMA_VERSION
+      || manifest.estimatorPolicyVersion !== CANDIDATE_ESTIMATOR_POLICY_VERSION) {
+      throw new Error('Candidate market manifest schema or policy provenance is invalid');
+    }
+    return;
+  }
   if (manifest.schemaVersion !== 1
       && manifest.schemaVersion !== 2
-      && manifest.schemaVersion !== 3
       && manifest.schemaVersion !== MARKET_SCHEMA_VERSION) {
     throw new Error('Market manifest schema version is not restorable');
   }
@@ -658,13 +809,9 @@ function validateManifestPolicy(
   if ((manifest.schemaVersion === 1 || manifest.schemaVersion === 2) && hasPolicyVersion) {
     throw new Error('Legacy market manifest policy provenance does not match its schema');
   }
-  if (manifest.schemaVersion === 3 && manifest.estimatorPolicyVersion !== 4) {
-    throw new Error('Legacy market manifest policy provenance does not match its schema');
-  }
   if (manifest.schemaVersion === MARKET_SCHEMA_VERSION
-      && (!Number.isSafeInteger(manifest.estimatorPolicyVersion)
-        || manifest.estimatorPolicyVersion <= 0)) {
-    throw new Error('Restorable market manifest policy provenance is invalid');
+      && manifest.estimatorPolicyVersion !== ESTIMATOR_POLICY_VERSION) {
+    throw new Error('Legacy market manifest policy provenance does not match its schema');
   }
 }
 
@@ -674,6 +821,13 @@ function validateManifestTransactionDiagnostics(
 ): void {
   const transactions = manifest.transactions as unknown as Record<string, unknown>;
   const hasNormalization = Object.prototype.hasOwnProperty.call(transactions, 'normalization');
+  if (mode === 'candidate') {
+    validateTransactionBuildDiagnostics(
+      transactions.normalization as TransactionBuildDiagnostics,
+      manifest.transactions.recordCount,
+    );
+    return;
+  }
   if (mode === 'restorable' && manifest.schemaVersion === 1) {
     if (hasNormalization) {
       throw new Error('Legacy transaction normalization diagnostics do not match their schema');
@@ -685,18 +839,16 @@ function validateManifestTransactionDiagnostics(
   if (mode === 'restorable' && manifest.schemaVersion === 2 && !hasNormalization) {
     return;
   }
-  if (mode === 'restorable'
-      && (manifest.schemaVersion === 2 || manifest.schemaVersion === 3)) {
+  if (mode === 'current'
+      || (mode === 'restorable'
+        && (manifest.schemaVersion === 2 || manifest.schemaVersion === MARKET_SCHEMA_VERSION))) {
     validateLegacyTransactionBuildDiagnostics(
       transactions.normalization,
       manifest.transactions.recordCount,
     );
     return;
   }
-  validateTransactionBuildDiagnostics(
-    transactions.normalization as TransactionBuildDiagnostics,
-    manifest.transactions.recordCount,
-  );
+  throw new Error('Market manifest transaction diagnostics do not match their schema');
 }
 
 async function validateBuild(
@@ -737,6 +889,14 @@ export async function validateStagedBuild(
   options: PublishOptions = {},
 ): Promise<MarketDataBundle> {
   return validateBuild(stageRoot, options);
+}
+
+/** Validates an isolated schema-5 / policy-6 challenger build only. */
+export async function validateCandidateStagedBuild(
+  stageRoot: string,
+  options: PublishOptions = {},
+): Promise<MarketDataBundle> {
+  return validateBuild(stageRoot, options, 'candidate');
 }
 
 /** Loads only a fully validated active build; malformed partial data is never exposed. */

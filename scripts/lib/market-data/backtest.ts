@@ -1,15 +1,18 @@
 import { estimateMarket, estimateWeightedBuildingPrices } from './estimator.ts';
 import {
   decideParkingImputation,
+  decideParkingFamily,
   decideScenarioCohort,
 } from './acceptance-policy.ts';
 import {
   ACTIVE_ESTIMATOR_POLICY,
   BACKTEST_ACCEPTANCE_THRESHOLDS,
+  CANDIDATE_ESTIMATOR_POLICY_VERSION,
   ESTIMATOR_POLICY_VERSION,
   HIGH_CONFIDENCE_MIN_COMPARABLES,
   HIGH_IQR_RATIO,
   MEDIUM_IQR_RATIO,
+  PARKING_BACKTEST_GATE,
   SCENARIO_BACKTEST_GATE,
 } from './config.ts';
 import type { EstimatorPolicy } from './config.ts';
@@ -20,13 +23,15 @@ import { weightedQuantile } from './statistics.ts';
 import { NORMALIZED_PRIMARY_USES, PARKING_GRADES } from './types.ts';
 import type {
   BuildingType,
+  BacktestAcceptance,
+  CandidateBacktestAcceptance,
   EstimateConfidence,
   EstimateStatus,
   MarketSubject,
   MarketTransaction,
   NormalizedPrimaryUse,
   ParkingGrade,
-  ScenarioBacktestAcceptance,
+  ParkingFamilyAcceptance,
   ScenarioCohortAcceptance,
   SourceFreshness,
   TransactionIndex,
@@ -479,11 +484,77 @@ export function evaluateBacktestGate(report: BacktestReport): BacktestGateResult
   return { passed: complete && reasons.length === 0, complete, reasons };
 }
 
+function parkingComparisonFor(
+  report: BacktestReport,
+): CandidateBacktestAcceptance['parkingComparison'] {
+  const direct = report.directOnly;
+  const imputed = report.directPlusImputed;
+  return {
+    directCoverage: direct.estimateCoverage,
+    imputedCoverage: imputed.estimateCoverage,
+    directMedianApe: direct.medianApe,
+    imputedMedianApe: imputed.medianApe,
+    directP75Ape: direct.p75Ape,
+    imputedP75Ape: imputed.p75Ape,
+    biasRegression: direct.bias === null || imputed.bias === null
+      ? null
+      : Math.abs(imputed.bias) - Math.abs(direct.bias),
+    intervalCoverageRegression: direct.intervalCoverage === null || imputed.intervalCoverage === null
+      ? null
+      : direct.intervalCoverage - imputed.intervalCoverage,
+  };
+}
+
+function parkingFamilyAcceptance(
+  metrics: ParkingMaskedHoldoutMetrics,
+): ParkingFamilyAcceptance {
+  const decision = decideParkingFamily(metrics);
+  return { ...metrics, status: decision.status, reasons: decision.reasons };
+}
+
+function parkingFamilyAcceptances(
+  report: BacktestReport,
+): CandidateBacktestAcceptance['parkingFamilies'] {
+  return {
+    flat: parkingFamilyAcceptance(report.parkingMaskedHoldout.byParkingFamily.flat),
+    mechanical: parkingFamilyAcceptance(report.parkingMaskedHoldout.byParkingFamily.mechanical),
+  };
+}
+
+/** Strict challenger gate; it cannot authorize the legacy production runtime. */
+export function evaluateCandidateBacktestGate(report: BacktestReport): BacktestGateResult {
+  const legacy = evaluateBacktestGate(report);
+  const reasons = [...legacy.reasons];
+  const residential = scenarioCohortAcceptance(report.byPrimaryUse.residential);
+  if (residential.status !== 'accepted') reasons.push('residential-use-cohort-failed');
+  const families = parkingFamilyAcceptances(report);
+  for (const family of ['flat', 'mechanical'] as const) {
+    if (families[family].status !== 'accepted') {
+      reasons.push(`parking-family-${family}-not-accepted`);
+    }
+  }
+  if (!decideParkingImputation(parkingComparisonFor(report), families)) {
+    reasons.push('parking-imputation-comparison-failed');
+  }
+  return {
+    passed: reasons.length === 0,
+    complete: legacy.complete
+      && residential.status !== 'diagnostic-only'
+      && families.flat.status !== 'diagnostic-only'
+      && families.mechanical.status !== 'diagnostic-only',
+    reasons: [...new Set(reasons)],
+  };
+}
+
+/** @deprecated Challenger-only compatibility name. */
+export const evaluateProductionBacktestGate = evaluateCandidateBacktestGate;
+
+/** Builds the active schema-2 / policy-4 aggregate production proof. */
 export function backtestAcceptance(
   report: BacktestReport,
   transactionArtifactSha256: string,
   approvedAt: string,
-): ScenarioBacktestAcceptance {
+): BacktestAcceptance {
   const gate = evaluateBacktestGate(report);
   const reliable = report.byStatus.reliable;
   const high = report.byConfidence.high;
@@ -493,36 +564,8 @@ export function backtestAcceptance(
     || report.latestEligibleTransactionDate === null) {
     throw new Error(`Backtest does not pass acceptance: ${gate.reasons.join(', ')}`);
   }
-  const direct = report.directOnly;
-  const imputed = report.directPlusImputed;
-  const biasRegression = direct.bias === null || imputed.bias === null
-    ? null
-    : Math.abs(imputed.bias) - Math.abs(direct.bias);
-  const intervalCoverageRegression = direct.intervalCoverage === null || imputed.intervalCoverage === null
-    ? null
-    : direct.intervalCoverage - imputed.intervalCoverage;
-  const parkingComparison: ScenarioBacktestAcceptance['parkingComparison'] = {
-    directCoverage: direct.estimateCoverage,
-    imputedCoverage: imputed.estimateCoverage,
-    directMedianApe: direct.medianApe,
-    imputedMedianApe: imputed.medianApe,
-    directP75Ape: direct.p75Ape,
-    imputedP75Ape: imputed.p75Ape,
-    biasRegression,
-    intervalCoverageRegression,
-  };
-  const parkingImputationAccepted = decideParkingImputation(parkingComparison);
-  const activeUseMetrics = parkingImputationAccepted
-    ? report.byPrimaryUse
-    : report.byPrimaryUseDirectOnly;
-  const useCohorts = Object.fromEntries(
-    NORMALIZED_PRIMARY_USES.filter(knownPrimaryUse).map((primaryUse) => [
-      primaryUse,
-      scenarioCohortAcceptance(activeUseMetrics[primaryUse]),
-    ]),
-  ) as ScenarioBacktestAcceptance['useCohorts'];
   return {
-    schemaVersion: 3,
+    schemaVersion: 2,
     estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
     policyId: report.policyId,
     transactionArtifactSha256,
@@ -530,7 +573,66 @@ export function backtestAcceptance(
     asOf: report.asOf,
     evaluatedThrough: report.asOf,
     latestEligibleTransactionDate: report.latestEligibleTransactionDate,
-    thresholds: { ...BACKTEST_GATE, ...SCENARIO_BACKTEST_GATE },
+    thresholds: { ...BACKTEST_GATE },
+    metrics: {
+      estimateCoverage: report.overall.estimateCoverage,
+      reliableEstimatedCount: reliable.estimatedCount,
+      reliableMedianApe: reliable.medianApe,
+      reliableP75Ape: reliable.p75Ape,
+      highConfidenceEstimatedCount: high.estimatedCount,
+      highConfidenceMedianApe: high.medianApe,
+      mediumConfidenceEstimatedCount: medium.estimatedCount,
+      mediumConfidenceMedianApe: medium.medianApe,
+    },
+  };
+}
+
+/** Builds a strict aggregate challenger proof after every policy-6 gate passes. */
+export function candidateBacktestAcceptance(
+  report: BacktestReport,
+  transactionArtifactSha256: string,
+  approvedAt: string,
+): CandidateBacktestAcceptance {
+  const gate = evaluateCandidateBacktestGate(report);
+  const reliable = report.byStatus.reliable;
+  const high = report.byConfidence.high;
+  const medium = report.byConfidence.medium;
+  if (!gate.passed || reliable.medianApe === null || reliable.p75Ape === null
+    || high.medianApe === null || medium.medianApe === null
+    || report.latestEligibleTransactionDate === null) {
+    throw new Error(`Backtest does not pass acceptance: ${gate.reasons.join(', ')}`);
+  }
+  const parkingComparison = parkingComparisonFor(report);
+  const parkingFamilies = parkingFamilyAcceptances(report);
+  const parkingImputationAccepted = decideParkingImputation(parkingComparison, parkingFamilies);
+  const activeUseMetrics = report.byPrimaryUse;
+  const useCohorts = Object.fromEntries(
+    NORMALIZED_PRIMARY_USES.filter(knownPrimaryUse).map((primaryUse) => [
+      primaryUse,
+      scenarioCohortAcceptance(activeUseMetrics[primaryUse]),
+    ]),
+  ) as CandidateBacktestAcceptance['useCohorts'];
+  return {
+    schemaVersion: 3,
+    estimatorPolicyVersion: CANDIDATE_ESTIMATOR_POLICY_VERSION,
+    policyId: report.policyId,
+    transactionArtifactSha256,
+    approvedAt,
+    asOf: report.asOf,
+    evaluatedThrough: report.asOf,
+    latestEligibleTransactionDate: report.latestEligibleTransactionDate,
+    thresholds: {
+      ...BACKTEST_GATE,
+      ...SCENARIO_BACKTEST_GATE,
+      minimumParkingFamilyCases: PARKING_BACKTEST_GATE.minimumMaskedCases,
+      minimumParkingEstimateCoverage: PARKING_BACKTEST_GATE.minimumEstimateCoverage,
+      parkingPriceMedianApeMax: PARKING_BACKTEST_GATE.priceMedianApeMax,
+      parkingPriceP75ApeMax: PARKING_BACKTEST_GATE.priceP75ApeMax,
+      parkingAreaMedianApeMax: PARKING_BACKTEST_GATE.areaMedianApeMax,
+      parkingAreaP75ApeMax: PARKING_BACKTEST_GATE.areaP75ApeMax,
+      minimumParkingPriceIntervalCoverage: PARKING_BACKTEST_GATE.minimumPriceIntervalCoverage,
+      minimumParkingAreaIntervalCoverage: PARKING_BACKTEST_GATE.minimumAreaIntervalCoverage,
+    },
     metrics: {
       estimateCoverage: report.overall.estimateCoverage,
       reliableEstimatedCount: reliable.estimatedCount,
@@ -543,6 +645,7 @@ export function backtestAcceptance(
     },
     useCohorts,
     parkingImputationAccepted,
+    parkingFamilies,
     parkingComparison,
   };
 }

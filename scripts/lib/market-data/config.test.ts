@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve, sep } from 'node:path';
 import {
+  CANDIDATE_ESTIMATOR_POLICY_VERSION,
+  CANDIDATE_MARKET_SCHEMA_VERSION,
   DOORPLATE_STALE_DAYS,
   ESTIMATOR_POLICY_VERSION,
   MARKET_SCHEMA_VERSION,
@@ -33,9 +35,11 @@ test('approved weights and stale windows are centralized', () => {
   assert.equal(DOORPLATE_STALE_DAYS, 60);
 });
 
-test('estimator acceptance uses an intentional policy compatibility version', () => {
-  assert.equal(ESTIMATOR_POLICY_VERSION, 5);
-  assert.equal(MARKET_SCHEMA_VERSION, 4);
+test('production and challenger keep separate compatibility versions', () => {
+  assert.equal(ESTIMATOR_POLICY_VERSION, 4);
+  assert.equal(MARKET_SCHEMA_VERSION, 3);
+  assert.equal(CANDIDATE_ESTIMATOR_POLICY_VERSION, 6);
+  assert.equal(CANDIDATE_MARKET_SCHEMA_VERSION, 5);
 });
 
 test('backtest diagnostics live outside the checksum-closed active build', () => {

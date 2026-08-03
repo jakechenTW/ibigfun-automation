@@ -7,8 +7,12 @@ import { test } from 'node:test';
 import { runMarketDataCommand } from '../../market-data.ts';
 import {
   ACTIVE_ESTIMATOR_POLICY,
+  CANDIDATE_ESTIMATOR_POLICY_VERSION,
+  CANDIDATE_MARKET_SCHEMA_VERSION,
   ESTIMATOR_POLICY_VERSION,
   MARKET_SCHEMA_VERSION,
+  PARKING_BACKTEST_GATE,
+  SCENARIO_BACKTEST_GATE,
 } from './config.ts';
 import {
   backtestAcceptancePath,
@@ -23,11 +27,15 @@ import {
   sha256File,
   stableJson,
   transactionArtifactChecksum,
+  validBacktestAcceptance,
+  validCandidateBacktestAcceptance,
+  validateCandidateStagedBuild,
   writeBacktestAcceptance,
 } from './store.ts';
 import { ensureTaipeiMarketData } from './update.ts';
 import type {
   BacktestAcceptance,
+  CandidateBacktestAcceptance,
   DoorplateIndex,
   LegacyBacktestAcceptance,
   MarketDataManifest,
@@ -54,19 +62,7 @@ function manifest(buildId: string, recordCount = 1): MarketDataManifest {
         reviewOnly: 0,
         excluded: 0,
         excludedByReason: {},
-        byPrimaryUse: {
-          commercial: 0,
-          industrial: 0,
-          'mixed-industrial': 0,
-          'mixed-residential': 0,
-          office: 0,
-          residential: recordCount,
-          unknown: 0,
-        },
-        byParkingGrade: { A: recordCount, B: 0, C: 0 },
-        gradeBImputed: 0,
-        gradeBUnresolved: 0,
-      },
+      } as unknown as MarketDataManifest['transactions']['normalization'],
     },
     lastFailure: null,
     artifacts: {},
@@ -114,6 +110,8 @@ const transaction = {
   originalPrimaryUse: '住家用',
   primaryUse: 'residential' as const,
   transferredBuildingCount: 1,
+  transferredParkingCount: 0,
+  buildingUnitPriceBoundsWan: null,
   parkingEvidence: {
     grade: 'A' as const, family: 'none' as const, originalType: '無車位',
     officialPriceNtd: 0, officialAreaPing: 0, imputation: null, reasons: [],
@@ -151,7 +149,7 @@ async function writeBuild(dir: string, buildId: string, count = 1): Promise<void
 
 async function downgradeBuildToLegacySchema(
   root: string,
-  schemaVersion: 1 | 2 | 3,
+  schemaVersion: 1 | 2 | 3 | 4,
   schema2Normalization: 'absent' | 'legacy-five' = 'legacy-five',
 ): Promise<void> {
   for (const indexFile of ['doorplates-index.json', 'transactions-index.json']) {
@@ -169,11 +167,11 @@ async function downgradeBuildToLegacySchema(
   };
   legacyManifest.schemaVersion = schemaVersion;
   if (schemaVersion <= 2) delete legacyManifest.estimatorPolicyVersion;
-  else legacyManifest.estimatorPolicyVersion = 4;
+  else legacyManifest.estimatorPolicyVersion = schemaVersion === 3 ? 4 : 5;
   if (schemaVersion === 1
       || (schemaVersion === 2 && schema2Normalization === 'absent')) {
     delete legacyManifest.transactions.normalization;
-  } else {
+  } else if (schemaVersion <= 3) {
     const current = legacyManifest.transactions.normalization as Record<string, unknown>;
     legacyManifest.transactions.normalization = {
       rawRows: current.rawRows,
@@ -182,6 +180,10 @@ async function downgradeBuildToLegacySchema(
       excluded: current.excluded,
       excludedByReason: current.excludedByReason,
     };
+  } else {
+    const current = legacyManifest.transactions.normalization as Record<string, unknown>;
+    const { gradeBByComponent: _gradeBByComponent, ...schema4 } = current;
+    legacyManifest.transactions.normalization = schema4;
   }
   for (const indexFile of ['doorplates-index.json', 'transactions-index.json']) {
     legacyManifest.artifacts[indexFile] = {
@@ -192,20 +194,89 @@ async function downgradeBuildToLegacySchema(
   await writeFile(join(root, 'manifest.json'), `${JSON.stringify(legacyManifest)}\n`);
 }
 
-test('scenario activation uses schema 4, policy 5, and schema-3 acceptance', async (t) => {
-  assert.equal(MARKET_SCHEMA_VERSION, 4);
-  assert.equal(ESTIMATOR_POLICY_VERSION, 5);
+async function convertBuildToCandidate(root: string): Promise<void> {
+  for (const indexFile of ['doorplates-index.json', 'transactions-index.json']) {
+    const index = JSON.parse(await readFile(join(root, indexFile), 'utf8')) as {
+      schemaVersion: number;
+    };
+    index.schemaVersion = CANDIDATE_MARKET_SCHEMA_VERSION;
+    await writeFile(join(root, indexFile), `${JSON.stringify(index)}\n`);
+  }
+  const candidateManifest = JSON.parse(
+    await readFile(join(root, 'manifest.json'), 'utf8'),
+  ) as MarketDataManifest;
+  candidateManifest.schemaVersion = CANDIDATE_MARKET_SCHEMA_VERSION;
+  candidateManifest.estimatorPolicyVersion = CANDIDATE_ESTIMATOR_POLICY_VERSION;
+  candidateManifest.transactions.normalization = {
+    rawRows: candidateManifest.transactions.recordCount,
+    reliableEligible: candidateManifest.transactions.recordCount,
+    reviewOnly: 0,
+    excluded: 0,
+    excludedByReason: {},
+    byPrimaryUse: {
+      commercial: 0,
+      industrial: 0,
+      'mixed-industrial': 0,
+      'mixed-residential': 0,
+      office: 0,
+      residential: candidateManifest.transactions.recordCount,
+      unknown: 0,
+    },
+    byParkingGrade: { A: candidateManifest.transactions.recordCount, B: 0, C: 0 },
+    gradeBByComponent: {
+      missingBoth: 0,
+      officialAreaOnly: 0,
+      officialPriceOnly: 0,
+    },
+    gradeBImputed: 0,
+    gradeBUnresolved: 0,
+  };
+  for (const indexFile of ['doorplates-index.json', 'transactions-index.json']) {
+    candidateManifest.artifacts[indexFile] = {
+      sha256: await sha256File(join(root, indexFile)),
+      bytes: (await readFile(join(root, indexFile))).byteLength,
+    };
+  }
+  await writeFile(join(root, 'manifest.json'), `${JSON.stringify(candidateManifest)}\n`);
+}
+
+test('safe stop loads only the legacy production pair and validates the challenger separately', async (t) => {
+  assert.equal(MARKET_SCHEMA_VERSION, 3);
+  assert.equal(ESTIMATOR_POLICY_VERSION, 4);
+  assert.equal(CANDIDATE_MARKET_SCHEMA_VERSION, 5);
+  assert.equal(CANDIDATE_ESTIMATOR_POLICY_VERSION, 6);
 
   const parent = await mkdtemp(join(tmpdir(), 'market-store-activation-contract-'));
   const root = join(parent, 'taipei');
+  const candidateRoot = join(parent, '.taipei-staging-candidate');
   t.after(() => rm(parent, { recursive: true, force: true }));
-  await writeBuild(root, 'activation-contract');
+  await writeBuild(root, 'production-contract');
+  await downgradeBuildToLegacySchema(root, 3);
+  const productionAcceptance = await passingAcceptance(root);
+  await writeFile(backtestAcceptancePath(root), JSON.stringify(productionAcceptance));
 
-  const acceptance = await passingAcceptance(root);
-  assert.equal(acceptance.schemaVersion, 3);
+  const active = await loadMarketData(root, { minDoorplates: 1, minTransactions: 0 });
+  assert.equal(active?.backtestAcceptance?.schemaVersion, 2);
+  assert.equal(marketDataBacktestAccepted(active!), true);
+  await assert.rejects(
+    () => validateCandidateStagedBuild(root, { minDoorplates: 1, minTransactions: 0 }),
+    /candidate.*(?:schema|policy)/i,
+  );
+
+  await writeBuild(candidateRoot, 'candidate-contract');
+  await convertBuildToCandidate(candidateRoot);
+  const challenger = await validateCandidateStagedBuild(candidateRoot, {
+    minDoorplates: 1,
+    minTransactions: 0,
+  });
+  const candidateAcceptance = await passingCandidateAcceptance(candidateRoot);
+  assert.equal(challenger.manifest.schemaVersion, 5);
+  assert.equal(await loadMarketData(candidateRoot, { minDoorplates: 1, minTransactions: 0 }), null);
+  assert.equal(validCandidateBacktestAcceptance(candidateAcceptance), true);
+  assert.equal(validBacktestAcceptance(candidateAcceptance), false);
 });
 
-async function passingAcceptance(root: string): Promise<ScenarioBacktestAcceptance> {
+async function passingCandidateAcceptance(root: string): Promise<CandidateBacktestAcceptance> {
   const checksum = transactionArtifactChecksum(readManifest(root)!);
   assert.ok(checksum);
   const diagnosticOnly = {
@@ -220,7 +291,7 @@ async function passingAcceptance(root: string): Promise<ScenarioBacktestAcceptan
   };
   return {
     schemaVersion: 3,
-    estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
+    estimatorPolicyVersion: CANDIDATE_ESTIMATOR_POLICY_VERSION,
     policyId: ACTIVE_ESTIMATOR_POLICY.id,
     transactionArtifactSha256: checksum,
     approvedAt: '2026-07-26T01:00:00.000Z',
@@ -236,6 +307,16 @@ async function passingAcceptance(root: string): Promise<ScenarioBacktestAcceptan
       minimumUseCohortCases: 20,
       maximumAbsoluteBiasRegression: 0.01,
       maximumIntervalCoverageRegression: 0.05,
+      maximumAbsoluteBias: 0.05,
+      minimumIntervalCoverage: 0.30,
+      minimumParkingFamilyCases: 20,
+      minimumParkingEstimateCoverage: 0.50,
+      parkingPriceMedianApeMax: 0.25,
+      parkingPriceP75ApeMax: 0.45,
+      parkingAreaMedianApeMax: 0.15,
+      parkingAreaP75ApeMax: 0.30,
+      minimumParkingPriceIntervalCoverage: 0.30,
+      minimumParkingAreaIntervalCoverage: 0.30,
     },
     metrics: {
       estimateCoverage: 0.8,
@@ -265,6 +346,34 @@ async function passingAcceptance(root: string): Promise<ScenarioBacktestAcceptan
       },
     },
     parkingImputationAccepted: true,
+    parkingFamilies: {
+      flat: {
+        status: 'accepted',
+        caseCount: 20,
+        estimatedCount: 16,
+        estimateCoverage: 0.8,
+        priceMedianApe: 0.10,
+        priceP75Ape: 0.20,
+        areaMedianApe: 0.08,
+        areaP75Ape: 0.12,
+        priceIntervalCoverage: 0.50,
+        areaIntervalCoverage: 0.50,
+        reasons: [],
+      },
+      mechanical: {
+        status: 'accepted',
+        caseCount: 20,
+        estimatedCount: 16,
+        estimateCoverage: 0.8,
+        priceMedianApe: 0.10,
+        priceP75Ape: 0.20,
+        areaMedianApe: 0.08,
+        areaP75Ape: 0.12,
+        priceIntervalCoverage: 0.50,
+        areaIntervalCoverage: 0.50,
+        reasons: [],
+      },
+    },
     parkingComparison: {
       directCoverage: 0.70,
       imputedCoverage: 0.71,
@@ -278,11 +387,11 @@ async function passingAcceptance(root: string): Promise<ScenarioBacktestAcceptan
   };
 }
 
-async function passingLegacyAcceptance(root: string): Promise<LegacyBacktestAcceptance> {
-  const current = await passingAcceptance(root);
+async function passingAcceptance(root: string): Promise<LegacyBacktestAcceptance> {
+  const current = await passingCandidateAcceptance(root);
   return {
     schemaVersion: 2,
-    estimatorPolicyVersion: current.estimatorPolicyVersion,
+    estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
     policyId: current.policyId,
     transactionArtifactSha256: current.transactionArtifactSha256,
     approvedAt: current.approvedAt,
@@ -298,6 +407,10 @@ async function passingLegacyAcceptance(root: string): Promise<LegacyBacktestAcce
     },
     metrics: { ...current.metrics },
   };
+}
+
+async function passingLegacyAcceptance(root: string): Promise<LegacyBacktestAcceptance> {
+  return passingAcceptance(root);
 }
 
 async function crashPublicationAfterRename(
@@ -602,7 +715,7 @@ test('restart recovery yields a validated old or new pair after every publicatio
   }
 });
 
-test('restart recovery restores schema 1-3 predecessors fail-closed after the first schema-4 rename', async (t) => {
+test('restart recovery restores schema 1-3 predecessors after the first production rename', async (t) => {
   const predecessors = [
     { schemaVersion: 1 as const, schema2Normalization: 'legacy-five' as const, label: 'schema 1' },
     { schemaVersion: 2 as const, schema2Normalization: 'absent' as const, label: 'schema 2 without normalization' },
@@ -621,7 +734,7 @@ test('restart recovery restores schema 1-3 predecessors fail-closed after the fi
       const oldBuildId = `schema${schemaVersion}-${schema2Normalization}-build`;
       await writeBuild(active, oldBuildId);
       await downgradeBuildToLegacySchema(active, schemaVersion, schema2Normalization);
-      await writeBuild(stage, 'schema4-build');
+      await writeBuild(stage, 'schema5-build');
 
       await crashPublicationAfterRename(
         active,
@@ -634,19 +747,17 @@ test('restart recovery restores schema 1-3 predecessors fail-closed after the fi
         minTransactions: 0,
       });
 
-      assert.equal(recovered, null);
+      assert.equal(recovered?.manifest.schemaVersion ?? null, schemaVersion === 3 ? 3 : null);
       assert.equal(readManifest(active)?.buildId, oldBuildId);
       assert.equal(readManifest(active)?.schemaVersion, schemaVersion);
-      assert.equal(
-        await loadMarketData(active, { minDoorplates: 1, minTransactions: 0 }),
-        null,
-      );
+      const loaded = await loadMarketData(active, { minDoorplates: 1, minTransactions: 0 });
+      assert.equal(loaded?.manifest.schemaVersion ?? null, schemaVersion === 3 ? 3 : null);
       assert.deepEqual(await readdir(parent), ['taipei']);
     });
   }
 });
 
-test('first schema-4 publication validates both historical schema-2 manifest shapes', async (t) => {
+test('production publication validates both historical schema-2 manifest shapes', async (t) => {
   for (const schema2Normalization of ['absent', 'legacy-five'] as const) {
     await t.test(schema2Normalization, async (t) => {
       const parent = await mkdtemp(
@@ -665,7 +776,7 @@ test('first schema-4 publication validates both historical schema-2 manifest sha
         Object.hasOwn(oldManifest.transactions, 'normalization'),
         schema2Normalization === 'legacy-five',
       );
-      await writeBuild(stage, 'schema4-build');
+      await writeBuild(stage, 'schema5-build');
 
       const published = await publishStagedBuildWithAcceptance(
         active,
@@ -674,8 +785,9 @@ test('first schema-4 publication validates both historical schema-2 manifest sha
         { minDoorplates: 1, minTransactions: 0 },
       );
 
-      assert.equal(published.manifest.schemaVersion, 4);
-      assert.equal(published.manifest.estimatorPolicyVersion, 5);
+      assert.equal(published.manifest.schemaVersion, MARKET_SCHEMA_VERSION);
+      assert.equal(published.manifest.estimatorPolicyVersion, ESTIMATOR_POLICY_VERSION);
+      assert.equal(published.backtestAcceptance?.schemaVersion, 2);
       assert.equal(marketDataBacktestAccepted(published), true);
     });
   }
@@ -734,7 +846,7 @@ test('restorable schema 2 rejects partial, extra, or incorrectly typed normaliza
   }
 });
 
-test('first schema-4 publication validates a true schema-3 policy-4 predecessor', async (t) => {
+test('production publication validates a true schema-3 policy-4 predecessor', async (t) => {
   const parent = await mkdtemp(join(tmpdir(), 'market-store-schema3-predecessor-'));
   const active = join(parent, 'taipei');
   const stage = join(parent, '.taipei-staging-next');
@@ -751,7 +863,7 @@ test('first schema-4 publication validates a true schema-3 policy-4 predecessor'
     ...await passingLegacyAcceptance(active),
     estimatorPolicyVersion: 4,
   }));
-  await writeBuild(stage, 'schema4-policy5-build');
+  await writeBuild(stage, 'schema5-policy6-build');
 
   const published = await publishStagedBuildWithAcceptance(
     active,
@@ -760,10 +872,38 @@ test('first schema-4 publication validates a true schema-3 policy-4 predecessor'
     { minDoorplates: 1, minTransactions: 0 },
   );
 
-  assert.equal(published.manifest.schemaVersion, 4);
-  assert.equal(published.manifest.estimatorPolicyVersion, 5);
-  assert.equal(published.backtestAcceptance?.schemaVersion, 3);
+  assert.equal(published.manifest.schemaVersion, MARKET_SCHEMA_VERSION);
+  assert.equal(published.manifest.estimatorPolicyVersion, ESTIMATOR_POLICY_VERSION);
+  assert.equal(published.backtestAcceptance?.schemaVersion, 2);
   assert.equal(marketDataBacktestAccepted(published), true);
+});
+
+test('production publication rejects a schema-4 policy-5 predecessor', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-schema4-predecessor-'));
+  const active = join(parent, 'taipei');
+  const stage = join(parent, '.taipei-staging-next');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(active, 'schema4-policy5-build');
+  await downgradeBuildToLegacySchema(active, 4);
+  const oldManifest = readManifest(active)!;
+  assert.equal(oldManifest.estimatorPolicyVersion, 5);
+  assert.equal(
+    Object.hasOwn(oldManifest.transactions.normalization, 'gradeBByComponent'),
+    false,
+  );
+  await writeBuild(stage, 'schema5-policy6-build');
+
+  await assert.rejects(
+    async () => publishStagedBuildWithAcceptance(
+      active,
+      stage,
+      await passingAcceptance(stage),
+      { minDoorplates: 1, minTransactions: 0 },
+    ),
+    /schema version is not restorable/i,
+  );
+  assert.equal(readManifest(active)?.schemaVersion, 4);
+  assert.equal(readManifest(stage)?.schemaVersion, MARKET_SCHEMA_VERSION);
 });
 
 test('restorable schema 1-3 reject fields from a different manifest generation', async (t) => {
@@ -810,7 +950,7 @@ test('restorable schema 1-3 reject fields from a different manifest generation',
   }
 });
 
-test('current-load rejects a schema-3 build and schema-2 acceptance pair after activation', async (t) => {
+test('current load accepts the schema-3 build and schema-2 acceptance pair', async (t) => {
   const parent = await mkdtemp(join(tmpdir(), 'market-store-prior-pair-'));
   const root = join(parent, 'taipei');
   t.after(() => rm(parent, { recursive: true, force: true }));
@@ -821,20 +961,11 @@ test('current-load rejects a schema-3 build and schema-2 acceptance pair after a
     estimatorPolicyVersion: 4,
   }));
 
-  await assert.rejects(
-    () => runMarketDataCommand(
-      ['backtest', '--city', 'taipei', '--as-of', '2026-07-25'],
-      new Date('2026-07-26T01:00:00.000Z'),
-      {
-        backtest: {
-          root,
-          lock: async (_root, operation) => operation(),
-          recover: async () => null,
-        },
-      },
-    ),
-    /index policy provenance.*run update first/i,
-  );
+  const loaded = await loadMarketData(root, { minDoorplates: 1, minTransactions: 0 });
+  assert.equal(loaded?.manifest.schemaVersion, MARKET_SCHEMA_VERSION);
+  assert.equal(loaded?.manifest.estimatorPolicyVersion, ESTIMATOR_POLICY_VERSION);
+  assert.equal(loaded?.backtestAcceptance?.schemaVersion, 2);
+  assert.equal(marketDataBacktestAccepted(loaded!), true);
 });
 
 test('production backtest recovers an interrupted publication before its locked load', async (t) => {
@@ -1045,7 +1176,7 @@ test('load rejects inconsistent or unstably ordered normalization diagnostics', 
   );
 });
 
-test('load rejects incomplete, unstable, or inconsistent use and parking diagnostics', async (t) => {
+test('candidate validation rejects incomplete, unstable, or inconsistent use and parking diagnostics', async (t) => {
   const parent = await mkdtemp(join(tmpdir(), 'market-store-'));
   t.after(() => rm(parent, { recursive: true, force: true }));
 
@@ -1055,10 +1186,14 @@ test('load rejects incomplete, unstable, or inconsistent use and parking diagnos
   ): Promise<void> {
     const root = join(parent, name);
     await writeBuild(root, name);
+    await convertBuildToCandidate(root);
     const value = JSON.parse(await readFile(join(root, 'manifest.json'), 'utf8')) as MarketDataManifest;
     change(value.transactions.normalization);
     await writeFile(join(root, 'manifest.json'), JSON.stringify(value));
-    assert.equal(await loadMarketData(root, { minDoorplates: 0, minTransactions: 0 }), null);
+    await assert.rejects(
+      () => validateCandidateStagedBuild(root, { minDoorplates: 0, minTransactions: 0 }),
+      /normalization/i,
+    );
   }
 
   await changeDiagnostics('use-count-mismatch', (normalization) => {
@@ -1070,11 +1205,30 @@ test('load rejects incomplete, unstable, or inconsistent use and parking diagnos
   await changeDiagnostics('grade-b-resolution-mismatch', (normalization) => {
     normalization.byParkingGrade = { A: 0, B: 1, C: 0 };
   });
+  await changeDiagnostics('missing-grade-b-component-breakdown', (normalization) => {
+    delete (normalization as unknown as Record<string, unknown>).gradeBByComponent;
+  });
+  await changeDiagnostics('extra-grade-b-component-key', (normalization) => {
+    (normalization as unknown as Record<string, unknown>).gradeBByComponent = {
+      ...normalization.gradeBByComponent,
+      privateCaseIds: ['must-not-load'],
+    };
+  });
+  await changeDiagnostics('grade-b-component-count-mismatch', (normalization) => {
+    normalization.byParkingGrade = { A: 0, B: 1, C: 0 };
+    normalization.gradeBImputed = 1;
+    normalization.gradeBByComponent.officialPriceOnly = 0;
+  });
   await changeDiagnostics('missing-use-key', (normalization) => {
     delete (normalization.byPrimaryUse as Partial<typeof normalization.byPrimaryUse>).unknown;
   });
   await changeDiagnostics('unstable-parking-key-order', (normalization) => {
     normalization.byParkingGrade = { B: 0, A: 1, C: 0 };
+  });
+  await changeDiagnostics('aggregate-only-current-shape', (normalization) => {
+    (normalization as unknown as Record<string, unknown>).rawCases = [{
+      address: '台北市不可載入的地址',
+    }];
   });
 });
 
@@ -1171,7 +1325,7 @@ test('backtest acceptance loads only for the active transaction artifact checksu
 
   const acceptance = await passingAcceptance(root);
   await writeBacktestAcceptance(root, acceptance);
-  assert.equal(readBacktestAcceptance(root)?.schemaVersion, 3);
+  assert.equal(readBacktestAcceptance(root)?.schemaVersion, 2);
   assert.equal(
     (await loadMarketData(root, { minDoorplates: 1, minTransactions: 0 }))?.backtestAcceptance?.transactionArtifactSha256,
     checksum,
@@ -1239,28 +1393,31 @@ test('backtest acceptance loads only for the active transaction artifact checksu
   );
 });
 
-test('schema-3 acceptance is exact, aggregate-only, and internally consistent', async (t) => {
+test('candidate schema-3 acceptance is exact, aggregate-only, and internally consistent', async (t) => {
   const parent = await mkdtemp(join(tmpdir(), 'market-store-scenario-acceptance-'));
   const root = join(parent, 'taipei');
   t.after(() => rm(parent, { recursive: true, force: true }));
   await writeBuild(root, 'scenario-acceptance');
-  const acceptance = await passingAcceptance(root);
-  await writeBacktestAcceptance(root, acceptance);
-  assert.deepEqual(readBacktestAcceptance(root), acceptance);
+  await convertBuildToCandidate(root);
+  const acceptance = await passingCandidateAcceptance(root);
+  assert.equal(validCandidateBacktestAcceptance(acceptance), true);
+  assert.equal(validBacktestAcceptance(acceptance), false);
 
   await assert.rejects(
     () => writeBacktestAcceptance(root, {
       ...acceptance,
       cases: [{ originalAddress: 'must-not-persist' }],
     } as unknown as BacktestAcceptance),
-    /non-passing backtest acceptance/,
+    /index policy provenance|non-passing backtest acceptance/,
   );
 
   const { office: _office, ...missingOffice } = acceptance.useCohorts;
+  const { mechanical: _mechanical, ...missingMechanicalFamily } = acceptance.parkingFamilies;
   const { intervalCoverageRegression: _interval, ...missingParkingMetric } = acceptance.parkingComparison;
   const invalid: unknown[] = [
     { ...acceptance, transactionArtifactSha256: 'not-a-sha256' },
     { ...acceptance, unexpected: true },
+    { ...acceptance, rawCases: [{ address: '台北市不可載入的地址' }] },
     { ...acceptance, useCohorts: missingOffice },
     { ...acceptance, useCohorts: { ...acceptance.useCohorts, unknown: acceptance.useCohorts.office } },
     {
@@ -1353,6 +1510,52 @@ test('schema-3 acceptance is exact, aggregate-only, and internally consistent', 
       },
     },
     { ...acceptance, metrics: { ...acceptance.metrics, reliableEstimatedCount: 0 } },
+    { ...acceptance, parkingFamilies: missingMechanicalFamily },
+    {
+      ...acceptance,
+      parkingFamilies: {
+        ...acceptance.parkingFamilies,
+        flat: {
+          ...acceptance.parkingFamilies.flat,
+          caseIds: ['private-case-id'],
+        },
+      },
+    },
+    {
+      ...acceptance,
+      parkingFamilies: {
+        ...acceptance.parkingFamilies,
+        flat: {
+          ...acceptance.parkingFamilies.flat,
+          address: '台北市不可載入的地址',
+        },
+      },
+    },
+    {
+      ...acceptance,
+      parkingFamilies: {
+        ...acceptance.parkingFamilies,
+        flat: { ...acceptance.parkingFamilies.flat, estimateCoverage: 0.81 },
+      },
+    },
+    {
+      ...acceptance,
+      parkingFamilies: {
+        ...acceptance.parkingFamilies,
+        flat: { ...acceptance.parkingFamilies.flat, status: 'failed' },
+      },
+    },
+    {
+      ...acceptance,
+      useCohorts: {
+        ...acceptance.useCohorts,
+        residential: {
+          ...acceptance.useCohorts.residential,
+          bias: 0.99,
+          intervalCoverage: 0,
+        },
+      },
+    },
     { ...acceptance, parkingImputationAccepted: false },
     { ...acceptance, parkingComparison: missingParkingMetric },
     { ...acceptance, parkingComparison: { ...acceptance.parkingComparison, directCoverage: 1.1 } },
@@ -1371,29 +1574,89 @@ test('schema-3 acceptance is exact, aggregate-only, and internally consistent', 
       parkingComparison: { ...acceptance.parkingComparison, intervalCoverageRegression: 2 },
     },
     { ...acceptance, thresholds: { ...acceptance.thresholds, minimumUseCohortCases: 19 } },
+    { ...acceptance, thresholds: { ...acceptance.thresholds, maximumAbsoluteBias: 0.99 } },
+    {
+      ...acceptance,
+      thresholds: {
+        ...acceptance.thresholds,
+        minimumParkingFamilyCases: PARKING_BACKTEST_GATE.minimumMaskedCases - 1,
+      },
+    },
   ];
   for (const candidate of invalid) {
-    await writeFile(backtestAcceptancePath(root), JSON.stringify(candidate));
-    assert.equal(readBacktestAcceptance(root), null);
+    assert.equal(validCandidateBacktestAcceptance(candidate), false);
   }
 });
 
-test('schema-2 acceptance cannot authorize the activated scenario runtime', async (t) => {
+test('candidate schema-3 policy-5 acceptance fails closed while exact policy-6 acceptance validates', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-policy6-acceptance-'));
+  const root = join(parent, 'taipei');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(root, 'policy6-acceptance');
+  await convertBuildToCandidate(root);
+  const acceptance = await passingCandidateAcceptance(root);
+
+  assert.equal(validCandidateBacktestAcceptance(acceptance), true);
+  assert.equal(validBacktestAcceptance(acceptance), false);
+
+  assert.equal(validCandidateBacktestAcceptance({
+    ...acceptance,
+    estimatorPolicyVersion: 5,
+  }), false);
+});
+
+test('candidate acceptance rejects an artifact unless residential and both parking families passed', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-production-gate-'));
+  const root = join(parent, 'taipei');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(root, 'production-gate');
+  await convertBuildToCandidate(root);
+  const acceptance = await passingCandidateAcceptance(root);
+
+  for (const invalid of [
+    {
+      ...acceptance,
+      useCohorts: {
+        ...acceptance.useCohorts,
+        residential: {
+          ...acceptance.useCohorts.residential,
+          status: 'failed' as const,
+          bias: SCENARIO_BACKTEST_GATE.maximumAbsoluteBias + 0.01,
+          reasons: ['absolute-bias-target-missed'],
+        },
+      },
+    },
+    {
+      ...acceptance,
+      parkingImputationAccepted: false,
+      parkingFamilies: {
+        ...acceptance.parkingFamilies,
+        mechanical: {
+          ...acceptance.parkingFamilies.mechanical,
+          status: 'failed' as const,
+          priceMedianApe: PARKING_BACKTEST_GATE.priceMedianApeMax + 0.01,
+          reasons: ['parking-price-median-ape-target-missed'],
+        },
+      },
+    },
+  ]) {
+    assert.equal(validCandidateBacktestAcceptance(invalid), false);
+  }
+});
+
+test('schema-2 acceptance authorizes only the legacy production runtime', async (t) => {
   const parent = await mkdtemp(join(tmpdir(), 'market-store-legacy-acceptance-'));
   const root = join(parent, 'taipei');
   t.after(() => rm(parent, { recursive: true, force: true }));
   await writeBuild(root, 'legacy-acceptance');
   const acceptance = await passingLegacyAcceptance(root);
 
-  await assert.rejects(
-    () => writeBacktestAcceptance(root, acceptance),
-    /acceptance policy provenance.*run update first/i,
-  );
-  await writeFile(backtestAcceptancePath(root), JSON.stringify(acceptance));
-  assert.equal(readBacktestAcceptance(root), null);
+  await writeBacktestAcceptance(root, acceptance);
+  assert.deepEqual(readBacktestAcceptance(root), acceptance);
+  assert.equal(validCandidateBacktestAcceptance(acceptance), false);
   const loaded = await loadMarketData(root, { minDoorplates: 1, minTransactions: 0 });
-  assert.equal(loaded?.backtestAcceptance, undefined);
-  assert.equal(marketDataBacktestAccepted(loaded!), false);
+  assert.deepEqual(loaded?.backtestAcceptance, acceptance);
+  assert.equal(marketDataBacktestAccepted(loaded!), true);
 });
 
 test('acceptance writer rejects old active index provenance before creating an artifact', async (t) => {

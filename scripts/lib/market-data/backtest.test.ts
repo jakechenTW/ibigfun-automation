@@ -3,6 +3,8 @@ import { test } from 'node:test';
 import { gridKey } from './grid.ts';
 import {
   ACTIVE_ESTIMATOR_POLICY,
+  CANDIDATE_ESTIMATOR_POLICY_VERSION,
+  ESTIMATOR_POLICY_VERSION,
   EXPERIMENTAL_1000_METER_POLICY,
   MARKET_SCHEMA_VERSION,
   SCENARIO_BACKTEST_GATE,
@@ -11,7 +13,9 @@ import {
   backtestAcceptance,
   backtestSubjectFromTransaction,
   backtestTransactions,
+  candidateBacktestAcceptance,
   evaluateBacktestGate,
+  evaluateProductionBacktestGate,
   heldOutTransactionEligible,
   type BacktestReport,
 } from './backtest.ts';
@@ -54,6 +58,8 @@ function transaction(
     floor: 3, totalFloors: buildingType === 'apartment' ? 5 : 10, floorGroup: buildingType === 'apartment' ? 'middle' : 'low',
     completionDate: buildingType === 'apartment' ? null : '2011-01-01', notes: '', exclusionFlags: [],
     eligibility: 'reliable-eligible', eligibilityReasons: [], originalPrimaryUse: '住家用', primaryUse: 'residential', transferredBuildingCount: 1,
+    transferredParkingCount: 0,
+    buildingUnitPriceBoundsWan: null,
     parkingEvidence: { grade: 'A', family: 'none', originalType: '無車位', officialPriceNtd: 0, officialAreaPing: 0, imputation: null, reasons: [] },
   };
   return { ...base, ...overrides };
@@ -96,6 +102,11 @@ function gradeBComparable(id: string, transactionDate: string, price: number): M
     areaP25Ping: 9,
     areaP50Ping: 10,
     areaP75Ping: 11,
+    pairP25: { priceNtd: 1_800_000, areaPing: 9 },
+    pairP50: { priceNtd: 2_000_000, areaPing: 10 },
+    pairP75: { priceNtd: 2_200_000, areaPing: 11 },
+    priceIqrRatio: 0.20,
+    areaIqrRatio: 0.20,
   };
   return exactUseTransaction(id, transactionDate, price, 'residential', {
     eligibility: 'review-only',
@@ -106,6 +117,8 @@ function gradeBComparable(id: string, transactionDate: string, price: number): M
     buildingAreaPing: 30,
     parkingPriceNtd: imputation.priceP50Ntd,
     parkingAreaPing: imputation.areaP50Ping,
+    transferredParkingCount: 1,
+    buildingUnitPriceBoundsWan: { p25: price * 0.95, p50: price, p75: price * 1.05, relativeIqrRatio: 0.10 },
     parkingEvidence: {
       grade: 'B', family: 'flat', originalType: '坡道平面',
       officialPriceNtd: null, officialAreaPing: null, imputation,
@@ -128,6 +141,7 @@ function directParkingTransaction(
     buildingAreaPing: 30,
     parkingPriceNtd,
     parkingAreaPing,
+    transferredParkingCount: 1,
     parkingEvidence: {
       grade: 'A', family: 'flat', originalType: '坡道平面',
       officialPriceNtd: parkingPriceNtd, officialAreaPing: parkingAreaPing,
@@ -392,7 +406,8 @@ test('acceptance requires sufficient slices and high confidence to outperform me
   assert.ok(evaluateBacktestGate(insufficient).reasons.includes('insufficient-high-confidence-cases'));
   assert.ok(evaluateBacktestGate(notMeasurablyBetter).reasons.includes('high-confidence-not-measurably-better'));
   assert.deepEqual(evaluateBacktestGate(passing), { passed: true, complete: true, reasons: [] });
-  assert.equal(shouldPersistBacktestAcceptance(passing, false), true);
+  assert.equal(shouldPersistBacktestAcceptance(passing, false), false);
+  assert.equal(shouldPersistBacktestAcceptance(productionReadyReport(), false), true);
   assert.equal(shouldPersistBacktestAcceptance(passing, true), false);
   assert.equal(shouldPersistBacktestAcceptance(insufficient, false), false);
 });
@@ -419,12 +434,116 @@ test('review cohort accuracy is diagnostic and does not fail reliable acceptance
   assert.deepEqual(evaluateBacktestGate(report), { passed: true, complete: true, reasons: [] });
 });
 
-test('passing acceptance records policy identity, scenario thresholds, and complete transaction coverage', () => {
-  const passing = completeGateReport({}, '2025-12-01');
-  const acceptance = backtestAcceptance(passing, 'a'.repeat(64), '2026-07-26T01:00:00.000Z');
+test('production gate requires the legacy global, residential exact-use, and shared parking gates', () => {
+  const passing = productionReadyReport();
+  assert.deepEqual(evaluateProductionBacktestGate(passing), {
+    passed: true,
+    complete: true,
+    reasons: [],
+  });
+
+  const residentialFailure = productionReadyReport();
+  residentialFailure.byPrimaryUse.residential = gateMetric({
+    caseCount: 20,
+    estimatedCount: 20,
+    estimateCoverage: 1,
+    medianApe: 0.13,
+    p75Ape: 0.21,
+  });
+  assert.ok(evaluateProductionBacktestGate(residentialFailure).reasons.includes(
+    'residential-use-cohort-failed',
+  ));
+
+  const parkingFailure = productionReadyReport();
+  parkingFailure.parkingMaskedHoldout.byParkingFamily.mechanical = maskedMetric({
+    caseCount: 0,
+    estimatedCount: 0,
+    estimateCoverage: 0,
+    priceMedianApe: null,
+    priceP75Ape: null,
+    areaMedianApe: null,
+    areaP75Ape: null,
+    priceIntervalCoverage: null,
+    areaIntervalCoverage: null,
+  });
+  assert.ok(evaluateProductionBacktestGate(parkingFailure).reasons.includes(
+    'parking-family-mechanical-not-accepted',
+  ));
+
+  const isolatedOfficeFailure = productionReadyReport();
+  isolatedOfficeFailure.byPrimaryUse.office = gateMetric({
+    caseCount: 20,
+    estimatedCount: 20,
+    estimateCoverage: 1,
+    medianApe: 0.50,
+    p75Ape: 0.80,
+    bias: 0.50,
+    intervalCoverage: 0,
+  });
+  assert.equal(evaluateProductionBacktestGate(isolatedOfficeFailure).passed, true);
+});
+
+test('exact-use cohort gate rejects catastrophic absolute bias and interval calibration', () => {
+  const catastrophicBias = productionReadyReport();
+  catastrophicBias.byPrimaryUse.residential = gateMetric({
+    caseCount: 20,
+    estimatedCount: 20,
+    estimateCoverage: 1,
+    medianApe: 0.08,
+    p75Ape: 0.16,
+    bias: 0.99,
+    intervalCoverage: 0.5,
+  });
+  assert.ok(evaluateProductionBacktestGate(catastrophicBias).reasons.includes(
+    'residential-use-cohort-failed',
+  ));
+
+  const catastrophicCalibration = productionReadyReport();
+  catastrophicCalibration.byPrimaryUse.residential = gateMetric({
+    caseCount: 20,
+    estimatedCount: 20,
+    estimateCoverage: 1,
+    medianApe: 0.08,
+    p75Ape: 0.16,
+    bias: 0,
+    intervalCoverage: 0,
+  });
+  assert.ok(evaluateProductionBacktestGate(catastrophicCalibration).reasons.includes(
+    'residential-use-cohort-failed',
+  ));
+});
+
+test('parking family gate rejects sparse and poor masked diagnostics independently', () => {
+  const sparse = productionReadyReport();
+  sparse.parkingMaskedHoldout.byParkingFamily.flat = maskedMetric({
+    caseCount: 19,
+    estimatedCount: 19,
+    estimateCoverage: 1,
+  });
+  assert.ok(evaluateProductionBacktestGate(sparse).reasons.includes(
+    'parking-family-flat-not-accepted',
+  ));
+
+  const poor = productionReadyReport();
+  poor.parkingMaskedHoldout.byParkingFamily.flat = maskedMetric({
+    priceMedianApe: 0.90,
+    priceP75Ape: 1.20,
+    areaMedianApe: 0.80,
+    areaP75Ape: 1,
+    priceIntervalCoverage: 0,
+    areaIntervalCoverage: 0,
+  });
+  assert.ok(evaluateProductionBacktestGate(poor).reasons.includes(
+    'parking-family-flat-not-accepted',
+  ));
+});
+
+test('passing challenger acceptance records policy identity, scenario thresholds, and complete transaction coverage', () => {
+  const passing = productionReadyReport();
+  const acceptance = candidateBacktestAcceptance(passing, 'a'.repeat(64), '2026-07-26T01:00:00.000Z');
 
   assert.equal(acceptance.schemaVersion, 3);
-  assert.equal(acceptance.estimatorPolicyVersion, 5);
+  assert.equal(acceptance.estimatorPolicyVersion, CANDIDATE_ESTIMATOR_POLICY_VERSION);
   assert.equal(acceptance.policyId, 'baseline');
   assert.equal(acceptance.evaluatedThrough, '2025-12-01');
   assert.equal(acceptance.latestEligibleTransactionDate, '2025-12-01');
@@ -432,12 +551,34 @@ test('passing acceptance records policy identity, scenario thresholds, and compl
   assert.equal(acceptance.thresholds.minimumUseCohortCases, SCENARIO_BACKTEST_GATE.minimumUseCohortCases);
   assert.equal(acceptance.thresholds.maximumAbsoluteBiasRegression, 0.01);
   assert.equal(acceptance.thresholds.maximumIntervalCoverageRegression, 0.05);
+  assert.equal(acceptance.thresholds.maximumAbsoluteBias, 0.05);
+  assert.equal(acceptance.thresholds.minimumIntervalCoverage, 0.30);
+  assert.equal(acceptance.thresholds.minimumParkingFamilyCases, 20);
+  assert.equal(acceptance.parkingFamilies.flat.status, 'accepted');
+  assert.equal(acceptance.parkingFamilies.mechanical.status, 'accepted');
   assert.equal(acceptance.metrics.reliableMedianApe, 0.08);
   assert.equal(acceptance.metrics.reliableP75Ape, 0.16);
 });
 
+test('production and challenger acceptance artifacts cannot cross-authorize', () => {
+  const passing = productionReadyReport();
+  const checksum = '9'.repeat(64);
+  const approvedAt = '2026-07-26T01:00:00.000Z';
+
+  const production = backtestAcceptance(passing, checksum, approvedAt);
+  const challenger = candidateBacktestAcceptance(passing, checksum, approvedAt);
+
+  assert.equal(production.schemaVersion, 2);
+  assert.equal(production.estimatorPolicyVersion, ESTIMATOR_POLICY_VERSION);
+  assert.equal(challenger.schemaVersion, 3);
+  assert.equal(
+    challenger.estimatorPolicyVersion,
+    CANDIDATE_ESTIMATOR_POLICY_VERSION,
+  );
+});
+
 test('schema-3 acceptance keeps sparse cohorts diagnostic and accepts a 20-case exact-use cohort at the accuracy bounds', () => {
-  const report = completeGateReport({}, '2025-12-01');
+  const report = productionReadyReport();
   report.byPrimaryUse.office = gateMetric({
     caseCount: 25,
     estimatedCount: 19,
@@ -455,7 +596,7 @@ test('schema-3 acceptance keeps sparse cohorts diagnostic and accepts a 20-case 
   report.byPrimaryUseDirectOnly.office = { ...report.byPrimaryUse.office };
   report.byPrimaryUseDirectOnly.industrial = { ...report.byPrimaryUse.industrial };
 
-  const acceptance = backtestAcceptance(report, 'b'.repeat(64), '2026-07-26T01:00:00.000Z');
+  const acceptance = candidateBacktestAcceptance(report, 'b'.repeat(64), '2026-07-26T01:00:00.000Z');
 
   assert.equal(acceptance.schemaVersion, 3);
   assert.deepEqual(Object.keys(acceptance.useCohorts), NORMALIZED_PRIMARY_USES.filter((use) => use !== 'unknown'));
@@ -471,7 +612,7 @@ test('schema-3 acceptance keeps sparse cohorts diagnostic and accepts a 20-case 
 });
 
 test('a failed non-residential use remains isolated while residential global failure blocks acceptance', () => {
-  const nonResidentialFailure = completeGateReport({}, '2025-12-01');
+  const nonResidentialFailure = productionReadyReport();
   nonResidentialFailure.byPrimaryUse.office = gateMetric({
     caseCount: 20,
     estimatedCount: 20,
@@ -481,7 +622,7 @@ test('a failed non-residential use remains isolated while residential global fai
   nonResidentialFailure.byPrimaryUseDirectOnly.office = {
     ...nonResidentialFailure.byPrimaryUse.office,
   };
-  const acceptance = backtestAcceptance(
+  const acceptance = candidateBacktestAcceptance(
     nonResidentialFailure,
     'c'.repeat(64),
     '2026-07-26T01:00:00.000Z',
@@ -494,7 +635,7 @@ test('a failed non-residential use remains isolated while residential global fai
     reliable: { medianApe: 0.13 },
   }, '2025-12-01');
   assert.throws(
-    () => backtestAcceptance(
+    () => candidateBacktestAcceptance(
       residentialGlobalFailure,
       'd'.repeat(64),
       '2026-07-26T01:00:00.000Z',
@@ -508,7 +649,7 @@ test('grade-B activation requires strict coverage improvement within accuracy, b
     direct: Partial<BacktestReport['directOnly']>,
     imputed: Partial<BacktestReport['directPlusImputed']>,
   ) => {
-    const report = completeGateReport({}, '2025-12-01');
+    const report = productionReadyReport();
     report.directOnly = gateMetric({
       estimateCoverage: 0.70,
       medianApe: 0.10,
@@ -525,22 +666,22 @@ test('grade-B activation requires strict coverage improvement within accuracy, b
       intervalCoverage: 0.75,
       ...imputed,
     });
-    return backtestAcceptance(report, 'e'.repeat(64), '2026-07-26T01:00:00.000Z');
+    return () => candidateBacktestAcceptance(report, 'e'.repeat(64), '2026-07-26T01:00:00.000Z');
   };
 
-  const passing = acceptanceFor({}, {});
+  const passing = acceptanceFor({}, {})();
   assert.equal(passing.parkingImputationAccepted, true);
   assert.equal(passing.parkingComparison.biasRegression, 0.009999999999999998);
   assert.ok(Math.abs((passing.parkingComparison.intervalCoverageRegression ?? 0) - 0.05) < 1e-12);
 
-  assert.equal(acceptanceFor({}, { estimateCoverage: 0.70 }).parkingImputationAccepted, false);
-  assert.equal(acceptanceFor({}, { bias: -0.031 }).parkingImputationAccepted, false);
-  assert.equal(acceptanceFor({}, { intervalCoverage: 0.749 }).parkingImputationAccepted, false);
-  assert.equal(acceptanceFor({}, { medianApe: 0.121 }).parkingImputationAccepted, false);
-  assert.equal(acceptanceFor({}, { p75Ape: 0.201 }).parkingImputationAccepted, false);
+  assert.throws(acceptanceFor({}, { estimateCoverage: 0.70 }), /parking-imputation-comparison-failed/);
+  assert.throws(acceptanceFor({}, { bias: -0.031 }), /parking-imputation-comparison-failed/);
+  assert.throws(acceptanceFor({}, { intervalCoverage: 0.749 }), /parking-imputation-comparison-failed/);
+  assert.throws(acceptanceFor({}, { medianApe: 0.121 }), /parking-imputation-comparison-failed/);
+  assert.throws(acceptanceFor({}, { p75Ape: 0.201 }), /parking-imputation-comparison-failed/);
 });
 
-test('rejected parking gates use acceptance with direct-only results and cannot activate runtime', () => {
+test('rejected parking gates cannot produce a production acceptance', () => {
   const report = completeGateReport({}, '2025-12-01') as BacktestReport & {
     byPrimaryUseDirectOnly: BacktestReport['byPrimaryUse'];
   };
@@ -576,45 +717,10 @@ test('rejected parking gates use acceptance with direct-only results and cannot 
     intervalCoverage: 0.8,
   });
 
-  const accepted = backtestAcceptance(report, 'f'.repeat(64), '2026-07-26T01:00:00.000Z');
-  assert.equal(accepted.parkingImputationAccepted, false);
-  assert.equal(accepted.useCohorts.residential.status, 'failed');
-
-  const runtimeSubject: ScenarioMarketSubject = {
-    listingId: 1,
-    coordinate,
-    matchedAddress: '台北市中正區測試路1號',
-    district: '中正區',
-    ownership: 'freehold',
-    buildingType: 'apartment',
-    totalAreaPing: 30,
-    askingTotalPriceNtd: 30_000_000,
-    floor: 3,
-    totalFloors: 5,
-    floorGroup: 'middle',
-    ageYears: null,
-    registeredUse: { value: 'residential', source: 'official', detail: '使用執照' },
-    parkingFamily: 'none',
-    parkingCount: 0,
-  };
-  const result = estimateMarketScenarios(
-    runtimeSubject,
-    indexOf([
-      exactUseTransaction('runtime-one', '2025-01-01', 99, 'residential'),
-      exactUseTransaction('runtime-two', '2025-02-01', 100, 'residential'),
-      exactUseTransaction('runtime-three', '2025-03-01', 101, 'residential'),
-    ]),
-    {
-      transactionCheckedAt: '2026-07-25T00:00:00.000Z',
-      doorplateCheckedAt: '2026-07-25T00:00:00.000Z',
-      transactionStale: false,
-      doorplateStale: false,
-    },
-    '2026-07-25',
-    accepted,
+  assert.throws(
+    () => candidateBacktestAcceptance(report, 'f'.repeat(64), '2026-07-26T01:00:00.000Z'),
+    /parking-imputation-comparison-failed/,
   );
-  assert.notEqual(result.scenarios[0]?.status, 'reliable');
-  assert.ok(result.scenarios[0]?.reasons.includes('use-cohort-not-accepted'));
 });
 
 test('selected backtest policy is passed to estimation without changing the active policy', () => {
@@ -684,6 +790,60 @@ function gateMetric(
     intervalCoverage: 0.5,
     ...values,
   };
+}
+
+function maskedMetric(
+  values: Partial<BacktestReport['parkingMaskedHoldout']['overall']> = {},
+): BacktestReport['parkingMaskedHoldout']['overall'] {
+  return {
+    caseCount: 25,
+    estimatedCount: 20,
+    estimateCoverage: 0.8,
+    priceMedianApe: 0.10,
+    priceP75Ape: 0.20,
+    areaMedianApe: 0.08,
+    areaP75Ape: 0.16,
+    priceIntervalCoverage: 0.50,
+    areaIntervalCoverage: 0.50,
+    ...values,
+  };
+}
+
+function productionReadyReport(): BacktestReport {
+  const report = completeGateReport({}, '2025-12-01');
+  const residential = gateMetric({
+    caseCount: 25,
+    estimatedCount: 20,
+    estimateCoverage: 0.8,
+    medianApe: 0.08,
+    p75Ape: 0.16,
+    bias: 0,
+    intervalCoverage: 0.5,
+  });
+  report.byPrimaryUse.residential = residential;
+  report.byPrimaryUseDirectOnly.residential = { ...residential };
+  report.directOnly = gateMetric({
+    estimateCoverage: 0.70,
+    medianApe: 0.10,
+    p75Ape: 0.18,
+    bias: 0.02,
+    intervalCoverage: 0.50,
+  });
+  report.directPlusImputed = gateMetric({
+    estimateCoverage: 0.71,
+    medianApe: 0.10,
+    p75Ape: 0.18,
+    bias: 0.02,
+    intervalCoverage: 0.50,
+  });
+  report.parkingMaskedHoldout = {
+    overall: maskedMetric({ caseCount: 50, estimatedCount: 40 }),
+    byParkingFamily: {
+      flat: maskedMetric(),
+      mechanical: maskedMetric(),
+    },
+  };
+  return report;
 }
 
 function completeGateReport(overrides: {

@@ -1,9 +1,14 @@
-export const MARKET_SCHEMA_VERSION = 4;
+/** Active production build contract retained from merge base ab54d11. */
+export const MARKET_SCHEMA_VERSION = 3;
 /**
  * Intentional acceptance compatibility contract. Bump whenever selector,
  * weighting, outlier, confidence, status, or backtest semantics change.
  */
-export const ESTIMATOR_POLICY_VERSION = 5;
+export const ESTIMATOR_POLICY_VERSION = 4;
+/** Non-authoritative challenger build contract. It cannot authorize runtime use. */
+export const CANDIDATE_MARKET_SCHEMA_VERSION = 5;
+/** Non-authoritative challenger estimator contract. */
+export const CANDIDATE_ESTIMATOR_POLICY_VERSION = 6;
 export const MARKET_DATA_ROOT = 'state/market-data/taipei';
 export const MARKET_BACKTEST_DIAGNOSTIC_ROOT = 'state/market-data/backtests/taipei';
 export const MIN_COMPARABLES = 3;
@@ -27,6 +32,19 @@ export const SCENARIO_BACKTEST_GATE = {
   p75ApeMax: 0.20,
   maximumAbsoluteBiasRegression: 0.01,
   maximumIntervalCoverageRegression: 0.05,
+  maximumAbsoluteBias: 0.05,
+  minimumIntervalCoverage: 0.30,
+} as const;
+
+export const PARKING_BACKTEST_GATE = {
+  minimumMaskedCases: 20,
+  minimumEstimateCoverage: 0.50,
+  priceMedianApeMax: 0.25,
+  priceP75ApeMax: 0.45,
+  areaMedianApeMax: 0.15,
+  areaP75ApeMax: 0.30,
+  minimumPriceIntervalCoverage: 0.30,
+  minimumAreaIntervalCoverage: 0.30,
 } as const;
 
 export const PARKING_POLICY = {
@@ -36,6 +54,9 @@ export const PARKING_POLICY = {
   imputedComparableWeightCap: 0.60,
   maximumPriceIqrRatio: 0.50,
   maximumAreaIqrRatio: 0.35,
+  maximumBuildingUnitPriceIqrRatio: 0.35,
+  reviewBuildingUnitPriceIqrRatio: 0.20,
+  minimumImputedWeightFactor: 0.25,
 } as const;
 
 export interface SearchStage {

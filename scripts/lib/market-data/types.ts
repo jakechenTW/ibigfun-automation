@@ -67,6 +67,16 @@ export interface ParkingImputationEvidence {
   areaP25Ping: number;
   areaP50Ping: number;
   areaP75Ping: number;
+  pairP25: ParkingPriceAreaPair;
+  pairP50: ParkingPriceAreaPair;
+  pairP75: ParkingPriceAreaPair;
+  priceIqrRatio: number;
+  areaIqrRatio: number;
+}
+
+export interface ParkingPriceAreaPair {
+  priceNtd: number;
+  areaPing: number;
 }
 
 export interface ParkingEvidence {
@@ -87,6 +97,7 @@ export interface RawParkingEvidence {
   priceWasZeroOrEmpty: boolean;
   totalAreaSqM: number;
   totalPriceNtd: number;
+  transferredParkingCount: number | null;
 }
 
 export interface BundleValueQuantiles {
@@ -94,6 +105,13 @@ export interface BundleValueQuantiles {
   p50Ntd: number;
   p75Ntd: number;
   observationCount: number;
+}
+
+export interface BuildingUnitPriceBoundsWan {
+  p25: number;
+  p50: number;
+  p75: number;
+  relativeIqrRatio: number;
 }
 
 export interface MarketTransaction {
@@ -112,6 +130,8 @@ export interface MarketTransaction {
   parkingPriceNtd: number | null;
   parkingAreaPing: number | null;
   buildingUnitPriceWan: number | null;
+  /** Present only for grade-B building evidence derived from joint parking observations. */
+  buildingUnitPriceBoundsWan: BuildingUnitPriceBoundsWan | null;
   parkingEvidence: ParkingEvidence;
   floor: number;
   totalFloors: number;
@@ -124,6 +144,7 @@ export interface MarketTransaction {
   originalPrimaryUse: string;
   primaryUse: NormalizedPrimaryUse;
   transferredBuildingCount: number | null;
+  transferredParkingCount: number | null;
 }
 
 export interface TransactionEligibilityEvidence {
@@ -131,6 +152,7 @@ export interface TransactionEligibilityEvidence {
   reasons: string[];
   primaryUse: NormalizedPrimaryUse;
   transferredBuildingCount: number | null;
+  transferredParkingCount: number | null;
 }
 
 export interface MarketSubject {
@@ -188,6 +210,8 @@ export interface ScenarioMarketSubject {
   listingId: number | null;
   coordinate: Coordinate;
   matchedAddress: string | null;
+  /** Listing-side address/GPS validation; uncertain evidence can never yield reliable authority. */
+  subjectLocationEvidence?: SubjectLocationEvidence | null;
   district: string;
   ownership: 'freehold' | 'non-freehold' | 'unknown';
   ownershipEvidence?: SubjectOwnershipEvidence;
@@ -271,6 +295,11 @@ export interface TransactionBuildDiagnostics {
   excludedByReason: Record<string, number>;
   byPrimaryUse: Record<NormalizedPrimaryUse, number>;
   byParkingGrade: Record<ParkingGrade, number>;
+  gradeBByComponent: {
+    missingBoth: number;
+    officialAreaOnly: number;
+    officialPriceOnly: number;
+  };
   gradeBImputed: number;
   gradeBUnresolved: number;
 }
@@ -347,12 +376,15 @@ interface BacktestAcceptanceIdentity {
   latestEligibleTransactionDate: string;
 }
 
-/** Legacy residential-only proof retained until the scenario policy activates. */
-export interface LegacyBacktestAcceptance extends BacktestAcceptanceIdentity {
+/** Active aggregate-only production proof retained from merge base ab54d11. */
+export interface BacktestAcceptance extends BacktestAcceptanceIdentity {
   schemaVersion: 2;
   thresholds: BacktestAcceptanceThresholds;
   metrics: BacktestAcceptanceMetrics;
 }
+
+/** @deprecated Name retained for fixture compatibility. */
+export type LegacyBacktestAcceptance = BacktestAcceptance;
 
 export interface ScenarioCohortAcceptance {
   status: 'accepted' | 'diagnostic-only' | 'failed';
@@ -365,16 +397,42 @@ export interface ScenarioCohortAcceptance {
   reasons: string[];
 }
 
-export interface ScenarioBacktestAcceptance extends BacktestAcceptanceIdentity {
+export interface ParkingFamilyAcceptance {
+  status: 'accepted' | 'diagnostic-only' | 'failed';
+  caseCount: number;
+  estimatedCount: number;
+  estimateCoverage: number;
+  priceMedianApe: number | null;
+  priceP75Ape: number | null;
+  areaMedianApe: number | null;
+  areaP75Ape: number | null;
+  priceIntervalCoverage: number | null;
+  areaIntervalCoverage: number | null;
+  reasons: string[];
+}
+
+/** Aggregate-only schema-5 / policy-6 challenger proof; never runtime authority. */
+export interface CandidateBacktestAcceptance extends BacktestAcceptanceIdentity {
   schemaVersion: 3;
   thresholds: BacktestAcceptanceThresholds & {
     minimumUseCohortCases: number;
     maximumAbsoluteBiasRegression: number;
     maximumIntervalCoverageRegression: number;
+    maximumAbsoluteBias: number;
+    minimumIntervalCoverage: number;
+    minimumParkingFamilyCases: number;
+    minimumParkingEstimateCoverage: number;
+    parkingPriceMedianApeMax: number;
+    parkingPriceP75ApeMax: number;
+    parkingAreaMedianApeMax: number;
+    parkingAreaP75ApeMax: number;
+    minimumParkingPriceIntervalCoverage: number;
+    minimumParkingAreaIntervalCoverage: number;
   };
   metrics: BacktestAcceptanceMetrics;
   useCohorts: Record<Exclude<NormalizedPrimaryUse, 'unknown'>, ScenarioCohortAcceptance>;
   parkingImputationAccepted: boolean;
+  parkingFamilies: Record<'flat' | 'mechanical', ParkingFamilyAcceptance>;
   parkingComparison: {
     directCoverage: number;
     imputedCoverage: number;
@@ -387,8 +445,8 @@ export interface ScenarioBacktestAcceptance extends BacktestAcceptanceIdentity {
   };
 }
 
-/** Aggregate-only proof that one exact transaction index passed the residential global gate. */
-export type BacktestAcceptance = LegacyBacktestAcceptance | ScenarioBacktestAcceptance;
+/** @deprecated Use CandidateBacktestAcceptance for challenger-only code. */
+export type ScenarioBacktestAcceptance = CandidateBacktestAcceptance;
 
 export interface MarketDataBundle {
   manifest: MarketDataManifest;
