@@ -159,6 +159,7 @@ export function mapDoorplateRow(row: DoorplateCsvRow): DoorplatePoint | null {
 export async function buildDoorplateIndex(
   source: Readable,
   datasetVersion: string,
+  schemaVersion = MARKET_SCHEMA_VERSION,
 ): Promise<DoorplateIndex> {
   const byCanonicalAddress: Record<string, DoorplatePoint[]> = {};
   const byRoad: Record<string, DoorplatePoint[]> = {};
@@ -187,7 +188,7 @@ export async function buildDoorplateIndex(
   }
 
   return {
-    schemaVersion: MARKET_SCHEMA_VERSION,
+    schemaVersion,
     datasetVersion,
     byCanonicalAddress: sortedIndexView(byCanonicalAddress),
     byRoad: sortedIndexView(byRoad),

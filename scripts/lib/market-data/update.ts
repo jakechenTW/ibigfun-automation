@@ -4,39 +4,38 @@ import path from 'node:path';
 import { parse } from 'csv-parse';
 import type { Logger } from '../journal.ts';
 import {
-  backtestAcceptance,
   backtestTransactions,
-  evaluateBacktestGate,
+  candidateBacktestAcceptance,
+  evaluateCandidateBacktestGate,
   type BacktestGateResult,
   type BacktestReport,
 } from './backtest.ts';
 import { buildDoorplateIndex } from './doorplates.ts';
 import { gridKey } from './grid.ts';
 import {
-  ACTIVE_ESTIMATOR_POLICY,
-  ESTIMATOR_POLICY_VERSION,
+  CANDIDATE_ESTIMATOR_POLICY_VERSION,
+  CANDIDATE_MARKET_SCHEMA_VERSION,
   MARKET_DATA_ROOT,
-  MARKET_SCHEMA_VERSION,
   PARKING_POLICY,
   type EstimatorPolicy,
 } from './config.ts';
 import { estimateParking } from './parking.ts';
+import { weightedQuantile } from './statistics.ts';
 import { extractTaipeiSalesCsv, downloadConditional, moiSeasonUrl, quartersForLookback, resolveTaipeiDoorplateSource, TAIPEI_DOORPLATE_DETAIL_URL, type FetchLike, type ZipEntry, zipEntriesFromFile } from './sources.ts';
 import {
   compareStableText,
   countIndexEntries,
   loadMarketData,
-  marketDataBacktestAccepted,
   publishStagedBuildWithAcceptance,
   recoverInterruptedMarketDataPublication,
   sha256File,
-  validateStagedBuild,
+  validateCandidateStagedBuild,
   writeStableJson,
 } from './store.ts';
 import { normalizeSaleTransaction, validateSaleTransactionHeaders, type SaleTransactionRow } from './transactions.ts';
 import { NORMALIZED_PRIMARY_USES, PARKING_GRADES } from './types.ts';
 import type {
-  BacktestAcceptance,
+  CandidateBacktestAcceptance,
   DoorplateIndex,
   MarketDataBundle,
   MarketDataManifest,
@@ -44,6 +43,7 @@ import type {
   NormalizedPrimaryUse,
   ParkingGrade,
   ParkingImputationEvidence,
+  ParkingPriceAreaPair,
   TransactionBuildDiagnostics,
   TransactionIndex,
 } from './types.ts';
@@ -68,7 +68,7 @@ export interface EnsureTaipeiMarketDataOptions {
 export interface CandidateEvaluation {
   report: BacktestReport;
   gate: BacktestGateResult;
-  acceptance: BacktestAcceptance | null;
+  acceptance: CandidateBacktestAcceptance | null;
   diagnostics: TransactionBuildDiagnostics;
 }
 
@@ -77,12 +77,22 @@ export interface EvaluateTaipeiMarketDataCandidateOptions {
   policy: EstimatorPolicy;
   publish: boolean;
   gateEvaluator?: (report: BacktestReport) => BacktestGateResult;
+  rootPath?: string;
+  fetch?: FetchLike;
+  clock?: () => Date;
+  logger?: Pick<Logger, 'event'>;
+  minDoorplates?: number;
+  minTransactions?: number;
+  openZip?: (file: string) => Promise<ZipEntry[]>;
+  lockTimeoutMs?: number;
+  lockStaleMs?: number;
+  lockPollMs?: number;
+  /** Test seam retained to prove candidate evaluation never invokes publication. */
+  publisher?: typeof publishStagedBuildWithAcceptance;
 }
 
 interface CandidateExecution {
   policy: EstimatorPolicy;
-  publish: boolean;
-  forceCandidateBuild: boolean;
   rethrowErrors: boolean;
   capture?: { evaluation?: CandidateEvaluation };
 }
@@ -191,41 +201,105 @@ async function artifactManifest(root: string): Promise<Record<string, { sha256: 
   return Object.fromEntries(Object.entries(out).sort(([a], [b]) => compareStableText(a, b)));
 }
 
+interface AcceptedParkingImputation {
+  imputation: ParkingImputationEvidence;
+  parkingPriceNtd: number;
+  parkingAreaPing: number;
+  buildingPriceNtd: number;
+  buildingAreaPing: number;
+  buildingUnitPriceWan: number;
+  buildingUnitPriceBoundsWan: NonNullable<MarketTransaction['buildingUnitPriceBoundsWan']>;
+}
+
 function acceptedParkingImputation(
   transaction: MarketTransaction,
   directGradeA: readonly MarketTransaction[],
-): ParkingImputationEvidence | null {
+): AcceptedParkingImputation | null {
   const coordinate = transaction.location.coordinate;
   const family = transaction.parkingEvidence.family;
-  if (!coordinate || (family !== 'flat' && family !== 'mechanical')) return null;
+  const count = transaction.transferredParkingCount;
+  if (!coordinate || (family !== 'flat' && family !== 'mechanical')
+    || !Number.isSafeInteger(count) || count === null || count <= 0) return null;
+  const officialPrice = transaction.parkingEvidence.officialPriceNtd;
+  const officialArea = transaction.parkingEvidence.officialAreaPing;
   const estimate = estimateParking({
     coordinate,
     matchedAddress: transaction.location.matchedAddress,
     buildingType: transaction.buildingType,
     family,
+    knownPriceNtd: officialPrice === null ? null : officialPrice / count,
+    knownAreaPing: officialArea === null ? null : officialArea / count,
   }, directGradeA, transaction.transactionDate);
   if (!estimate) return null;
 
-  const buildingPriceNtd = transaction.totalPriceNtd - estimate.priceP50Ntd;
-  const buildingAreaPing = transaction.totalAreaPing - estimate.areaP50Ping;
-  const priceIqrRatio = (estimate.priceP75Ntd - estimate.priceP25Ntd) / estimate.priceP50Ntd;
-  const areaIqrRatio = (estimate.areaP75Ping - estimate.areaP25Ping) / estimate.areaP50Ping;
+  const finalPair = (pair: ParkingPriceAreaPair): ParkingPriceAreaPair => ({
+    priceNtd: officialPrice ?? pair.priceNtd * count,
+    areaPing: officialArea ?? pair.areaPing * count,
+  });
+  const pairP25 = finalPair(estimate.pairP25);
+  const pairP50 = finalPair(estimate.pairP50);
+  const pairP75 = finalPair(estimate.pairP75);
+  const finalPairs = estimate.directPairs.map((pair) => ({
+    id: pair.id,
+    ...finalPair(pair),
+    weight: pair.weight,
+  }));
+  const componentQuantile = (component: 'priceNtd' | 'areaPing', quantile: number): number => weightedQuantile(
+    finalPairs.map((pair) => ({ id: pair.id, value: pair[component], weight: pair.weight })),
+    quantile,
+  );
+  const priceP25Ntd = Math.min(componentQuantile('priceNtd', 0.25), pairP50.priceNtd);
+  const priceP75Ntd = Math.max(componentQuantile('priceNtd', 0.75), pairP50.priceNtd);
+  const areaP25Ping = Math.min(componentQuantile('areaPing', 0.25), pairP50.areaPing);
+  const areaP75Ping = Math.max(componentQuantile('areaPing', 0.75), pairP50.areaPing);
+  const priceIqrRatio = (priceP75Ntd - priceP25Ntd) / pairP50.priceNtd;
+  const areaIqrRatio = (areaP75Ping - areaP25Ping) / pairP50.areaPing;
+  const buildingObservations = finalPairs.flatMap((pair) => {
+    const buildingPriceNtd = transaction.totalPriceNtd - pair.priceNtd;
+    const buildingAreaPing = transaction.totalAreaPing - pair.areaPing;
+    const unitPriceWan = buildingPriceNtd / buildingAreaPing / 10_000;
+    return buildingPriceNtd > 0 && buildingAreaPing > 0 && Number.isFinite(unitPriceWan) && unitPriceWan > 0
+      ? [{ id: pair.id, value: unitPriceWan, weight: pair.weight }]
+      : [];
+  });
+  if (buildingObservations.length !== finalPairs.length) return null;
+  const buildingPriceNtd = transaction.totalPriceNtd - pairP50.priceNtd;
+  const buildingAreaPing = transaction.totalAreaPing - pairP50.areaPing;
+  const buildingUnitPriceWan = buildingPriceNtd / buildingAreaPing / 10_000;
+  const p25 = Math.min(weightedQuantile(buildingObservations, 0.25), buildingUnitPriceWan);
+  const p75 = Math.max(weightedQuantile(buildingObservations, 0.75), buildingUnitPriceWan);
+  const buildingIqrRatio = (p75 - p25) / buildingUnitPriceWan;
   if (buildingPriceNtd <= 0 || buildingAreaPing <= 0
       || !Number.isFinite(priceIqrRatio) || priceIqrRatio > PARKING_POLICY.maximumPriceIqrRatio
-      || !Number.isFinite(areaIqrRatio) || areaIqrRatio > PARKING_POLICY.maximumAreaIqrRatio) {
+      || !Number.isFinite(areaIqrRatio) || areaIqrRatio > PARKING_POLICY.maximumAreaIqrRatio
+      || !Number.isFinite(buildingIqrRatio)
+      || buildingIqrRatio > PARKING_POLICY.maximumBuildingUnitPriceIqrRatio) {
     return null;
   }
   return {
-    asOf: estimate.asOf,
-    stage: estimate.stage,
-    comparableIds: estimate.comparableIds,
-    comparableCount: estimate.comparableCount,
-    priceP25Ntd: estimate.priceP25Ntd,
-    priceP50Ntd: estimate.priceP50Ntd,
-    priceP75Ntd: estimate.priceP75Ntd,
-    areaP25Ping: estimate.areaP25Ping,
-    areaP50Ping: estimate.areaP50Ping,
-    areaP75Ping: estimate.areaP75Ping,
+    imputation: {
+      asOf: estimate.asOf,
+      stage: estimate.stage,
+      comparableIds: estimate.comparableIds,
+      comparableCount: estimate.comparableCount,
+      priceP25Ntd,
+      priceP50Ntd: pairP50.priceNtd,
+      priceP75Ntd,
+      areaP25Ping,
+      areaP50Ping: pairP50.areaPing,
+      areaP75Ping,
+      pairP25,
+      pairP50,
+      pairP75,
+      priceIqrRatio,
+      areaIqrRatio,
+    },
+    parkingPriceNtd: pairP50.priceNtd,
+    parkingAreaPing: pairP50.areaPing,
+    buildingPriceNtd,
+    buildingAreaPing,
+    buildingUnitPriceWan,
+    buildingUnitPriceBoundsWan: { p25, p50: buildingUnitPriceWan, p75, relativeIqrRatio: buildingIqrRatio },
   };
 }
 
@@ -249,21 +323,20 @@ export function augmentParkingEvidenceCausally(
         augmented.push(transaction);
         continue;
       }
-      const imputation = acceptedParkingImputation(transaction, directGradeA);
-      if (!imputation) {
+      const accepted = acceptedParkingImputation(transaction, directGradeA);
+      if (!accepted) {
         augmented.push(transaction);
         continue;
       }
-      const buildingPriceNtd = transaction.totalPriceNtd - imputation.priceP50Ntd;
-      const buildingAreaPing = transaction.totalAreaPing - imputation.areaP50Ping;
       augmented.push({
         ...transaction,
-        parkingEvidence: { ...transaction.parkingEvidence, imputation },
-        parkingPriceNtd: imputation.priceP50Ntd,
-        parkingAreaPing: imputation.areaP50Ping,
-        buildingPriceNtd,
-        buildingAreaPing,
-        buildingUnitPriceWan: buildingPriceNtd / buildingAreaPing / 10_000,
+        parkingEvidence: { ...transaction.parkingEvidence, imputation: accepted.imputation },
+        parkingPriceNtd: accepted.parkingPriceNtd,
+        parkingAreaPing: accepted.parkingAreaPing,
+        buildingPriceNtd: accepted.buildingPriceNtd,
+        buildingAreaPing: accepted.buildingAreaPing,
+        buildingUnitPriceWan: accepted.buildingUnitPriceWan,
+        buildingUnitPriceBoundsWan: accepted.buildingUnitPriceBoundsWan,
       });
     }
     directGradeA.push(...dateGroup.filter((transaction) => transaction.parkingEvidence.grade === 'A'));
@@ -289,6 +362,7 @@ async function addTransactionCsv(
     excludedByReason: {},
     byPrimaryUse: emptyPrimaryUseCounts(),
     byParkingGrade: emptyParkingGradeCounts(),
+    gradeBByComponent: emptyGradeBComponentCounts(),
     gradeBImputed: 0,
     gradeBUnresolved: 0,
   };
@@ -309,6 +383,17 @@ async function addTransactionCsv(
     transactions.push(normalized.transaction);
     diagnostics.byPrimaryUse[normalized.transaction.primaryUse] += 1;
     diagnostics.byParkingGrade[normalized.transaction.parkingEvidence.grade] += 1;
+    if (normalized.transaction.parkingEvidence.grade === 'B') {
+      const hasOfficialPrice = normalized.transaction.parkingEvidence.officialPriceNtd !== null;
+      const hasOfficialArea = normalized.transaction.parkingEvidence.officialAreaPing !== null;
+      if (hasOfficialPrice && !hasOfficialArea) {
+        diagnostics.gradeBByComponent.officialPriceOnly += 1;
+      } else if (!hasOfficialPrice && hasOfficialArea) {
+        diagnostics.gradeBByComponent.officialAreaOnly += 1;
+      } else if (!hasOfficialPrice && !hasOfficialArea) {
+        diagnostics.gradeBByComponent.missingBoth += 1;
+      }
+    }
     if (normalized.transaction.eligibility === 'reliable-eligible') diagnostics.reliableEligible += 1;
     else diagnostics.reviewOnly += 1;
   }
@@ -327,6 +412,10 @@ function emptyParkingGradeCounts(): Record<ParkingGrade, number> {
   return Object.fromEntries(PARKING_GRADES.map((key) => [key, 0])) as Record<ParkingGrade, number>;
 }
 
+function emptyGradeBComponentCounts(): TransactionBuildDiagnostics['gradeBByComponent'] {
+  return { missingBoth: 0, officialAreaOnly: 0, officialPriceOnly: 0 };
+}
+
 function emptyTransactionBuildDiagnostics(): TransactionBuildDiagnostics {
   return {
     rawRows: 0,
@@ -336,6 +425,7 @@ function emptyTransactionBuildDiagnostics(): TransactionBuildDiagnostics {
     excludedByReason: {},
     byPrimaryUse: emptyPrimaryUseCounts(),
     byParkingGrade: emptyParkingGradeCounts(),
+    gradeBByComponent: emptyGradeBComponentCounts(),
     gradeBImputed: 0,
     gradeBUnresolved: 0,
   };
@@ -351,6 +441,9 @@ function mergeTransactionBuildDiagnostics(
   aggregate.excluded += next.excluded;
   for (const use of NORMALIZED_PRIMARY_USES) aggregate.byPrimaryUse[use] += next.byPrimaryUse[use];
   for (const grade of PARKING_GRADES) aggregate.byParkingGrade[grade] += next.byParkingGrade[grade];
+  for (const component of ['missingBoth', 'officialAreaOnly', 'officialPriceOnly'] as const) {
+    aggregate.gradeBByComponent[component] += next.gradeBByComponent[component];
+  }
   for (const [reason, count] of Object.entries(next.excludedByReason)) {
     aggregate.excludedByReason[reason] = (aggregate.excludedByReason[reason] ?? 0) + count;
   }
@@ -363,24 +456,20 @@ function finishTransactionIndex(
   cells: TransactionIndex['cells'],
   builtAt: string,
   datasetVersion: string,
+  schemaVersion: number,
 ): TransactionIndex {
   const sortedCells = Object.fromEntries(Object.entries(cells).sort(([a], [b]) => compareStableText(a, b))
     .map(([key, values]) => [key, values.sort((a, b) => compareStableText(a.id, b.id))]));
-  return { schemaVersion: MARKET_SCHEMA_VERSION, datasetVersion, builtAt, cells: sortedCells };
+  return { schemaVersion, datasetVersion, builtAt, cells: sortedCells };
 }
 
 /**
  * Refreshes official sources into a sibling staging directory. Any source or
  * validation failure leaves the active build untouched and returns it instead.
  */
-async function ensureTaipeiMarketDataUnlocked(
+async function evaluateTaipeiMarketDataCandidateUnlocked(
   options: EnsureTaipeiMarketDataOptions,
-  execution: CandidateExecution = {
-    policy: ACTIVE_ESTIMATOR_POLICY,
-    publish: true,
-    forceCandidateBuild: false,
-    rethrowErrors: false,
-  },
+  execution: CandidateExecution,
 ): Promise<MarketDataBundle | null> {
   const root = options.rootPath ?? MARKET_DATA_ROOT;
   const fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
@@ -421,7 +510,6 @@ async function ensureTaipeiMarketDataUnlocked(
     const mutableSeasons = new Set([activeSeason, priorSeason(options.asOf)]);
     const sourceVersions: NonNullable<MarketDataManifest['transactionSources']> = {};
     const stagedCsvPaths: Array<{ season: string; path: string }> = [];
-    let sourcesChanged = !existing || doorplateSha !== existing.manifest.doorplates.sha256;
     for (const season of seasons) {
       const old = existing?.manifest.transactionSources?.[season];
       const stagedCsvPath = path.join(rawRoot, 'transactions', `${season}.csv`);
@@ -452,7 +540,6 @@ async function ensureTaipeiMarketDataUnlocked(
           etag: downloaded.etag ?? old?.etag ?? null,
           lastModified: downloaded.lastModified ?? old?.lastModified ?? null,
         };
-        if (!old || csvSha !== old.sha256) sourcesChanged = true;
         stagedCsvPaths.push({ season, path: stagedCsvPath });
       } catch (error) {
         if (season !== activeSeason || old || !(error instanceof Error) || error.message !== 'FILE_ENDED') {
@@ -467,43 +554,11 @@ async function ensureTaipeiMarketDataUnlocked(
     }
 
     const builtAt = nowIso(clock);
-    if (existing && !sourcesChanged && !execution.forceCandidateBuild
-        && marketDataBacktestAccepted(existing)) {
-      const current = await loadMarketData(root, {
-        minDoorplates: options.minDoorplates,
-        minTransactions: options.minTransactions,
-      });
-      if (!current ||
-          current.manifest.buildId !== existing.manifest.buildId ||
-          JSON.stringify(current.manifest.artifacts) !== JSON.stringify(existing.manifest.artifacts)) {
-        throw new Error('Active market-data build changed during the locked refresh');
-      }
-      const refreshedManifest: MarketDataManifest = {
-        ...current.manifest,
-        doorplates: {
-          ...current.manifest.doorplates,
-          sourceUrl: doorplateSource.url,
-          publishedAt: doorplateSource.publishedAt,
-          checkedAt: builtAt,
-          etag: doorplate.etag ?? oldDoorplate?.etag ?? null,
-          lastModified: doorplate.lastModified ?? oldDoorplate?.lastModified ?? null,
-        },
-        transactions: { ...current.manifest.transactions, checkedAt: builtAt },
-        transactionSources: sourceVersions,
-        lastFailure: null,
-      };
-      const stagedManifest = path.join(stage, 'manifest.json');
-      await writeStableJson(stagedManifest, refreshedManifest);
-      await fs.rename(stagedManifest, path.join(root, 'manifest.json'));
-      await fs.rm(stage, { recursive: true, force: true });
-      stage = null;
-      current.manifest = refreshedManifest;
-      current.refresh = { status: 'not-modified' };
-      log(options.logger, 'info', 'market-data.not-modified', 'official source checksums are unchanged', { buildId: current.manifest.buildId });
-      return current;
-    }
-
-    const doorplates = await buildDoorplateIndex(createReadStream(doorplatePath), doorplateSha);
+    const doorplates = await buildDoorplateIndex(
+      createReadStream(doorplatePath),
+      doorplateSha,
+      CANDIDATE_MARKET_SCHEMA_VERSION,
+    );
     const normalizedTransactions: MarketTransaction[] = [];
     const normalization = emptyTransactionBuildDiagnostics();
     for (const source of stagedCsvPaths) {
@@ -526,12 +581,13 @@ async function ensureTaipeiMarketDataUnlocked(
       transactionCells,
       builtAt,
       sha256(stagedCsvPaths.map(({ season }) => `${season}:${sourceVersions[season]!.sha256}`).join('\n')),
+      CANDIDATE_MARKET_SCHEMA_VERSION,
     );
     await writeStableJson(path.join(stage, 'doorplates-index.json'), doorplates);
     await writeStableJson(path.join(stage, 'transactions-index.json'), transactions);
     const manifest: MarketDataManifest = {
-      schemaVersion: MARKET_SCHEMA_VERSION,
-      estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
+      schemaVersion: CANDIDATE_MARKET_SCHEMA_VERSION,
+      estimatorPolicyVersion: CANDIDATE_ESTIMATOR_POLICY_VERSION,
       buildId: `taipei-${builtAt.replace(/[^0-9]/g, '')}-${randomUUID().slice(0, 8)}`,
       builtAt,
       doorplates: {
@@ -553,7 +609,7 @@ async function ensureTaipeiMarketDataUnlocked(
       transactionSources: sourceVersions,
     };
     await writeStableJson(path.join(stage, 'manifest.json'), manifest);
-    const staged = await validateStagedBuild(stage, {
+    const staged = await validateCandidateStagedBuild(stage, {
       minDoorplates: options.minDoorplates,
       minTransactions: options.minTransactions,
     });
@@ -562,11 +618,11 @@ async function ensureTaipeiMarketDataUnlocked(
       asOf: options.asOf,
       policy: execution.policy,
     });
-    const productionGate = evaluateBacktestGate(report);
+    const candidateGate = evaluateCandidateBacktestGate(report);
     const injectedGate = options.gateEvaluator?.(report);
-    const gate = injectedGate && !injectedGate.passed ? injectedGate : productionGate;
-    const acceptance = gate.passed && productionGate.passed
-      ? backtestAcceptance(report, transactionArtifactSha256, builtAt)
+    const gate = injectedGate && !injectedGate.passed ? injectedGate : candidateGate;
+    const acceptance = gate.passed && candidateGate.passed
+      ? candidateBacktestAcceptance(report, transactionArtifactSha256, builtAt)
       : null;
     const evaluation: CandidateEvaluation = {
       report,
@@ -576,30 +632,16 @@ async function ensureTaipeiMarketDataUnlocked(
     };
     if (execution.capture) execution.capture.evaluation = evaluation;
     if (!gate.passed) {
-      if (execution.publish) {
-        throw new Error(`candidate backtest failed: ${gate.reasons.join(', ') || 'gate rejected candidate'}`);
-      }
       await fs.rm(stage, { recursive: true, force: true });
       stage = null;
       return null;
     }
     if (!acceptance) {
-      throw new Error('candidate backtest passed without a production acceptance');
+      throw new Error('candidate backtest passed without a candidate acceptance');
     }
-    if (!execution.publish) {
-      await fs.rm(stage, { recursive: true, force: true });
-      stage = null;
-      return null;
-    }
-    const publisher = options.publisher ?? publishStagedBuildWithAcceptance;
-    const published = await publisher(root, stage, acceptance, {
-      minDoorplates: options.minDoorplates,
-      minTransactions: options.minTransactions,
-    });
+    await fs.rm(stage, { recursive: true, force: true });
     stage = null;
-    published.refresh = { status: 'updated' };
-    log(options.logger, 'info', 'market-data.updated', 'published a validated Taipei market-data build', { buildId: published.manifest.buildId });
-    return published;
+    return null;
   } catch (error) {
     if (stage) await fs.rm(stage, { recursive: true, force: true });
     if (execution.rethrowErrors) throw error;
@@ -613,21 +655,52 @@ async function ensureTaipeiMarketDataUnlocked(
 }
 
 export async function ensureTaipeiMarketData(options: EnsureTaipeiMarketDataOptions): Promise<MarketDataBundle | null> {
+  const root = options.rootPath ?? MARKET_DATA_ROOT;
   try {
     return await withMarketDataLock(
-      options.rootPath ?? MARKET_DATA_ROOT,
-      () => ensureTaipeiMarketDataUnlocked(options),
+      root,
+      async () => {
+        await recoverInterruptedMarketDataPublication(root, {
+          minDoorplates: options.minDoorplates,
+          minTransactions: options.minTransactions,
+        });
+        const existing = await loadMarketData(root, {
+          minDoorplates: options.minDoorplates,
+          minTransactions: options.minTransactions,
+        });
+        log(
+          options.logger,
+          existing ? 'warn' : 'error',
+          existing ? 'market-data.last-known-good' : 'market-data.unavailable',
+          existing
+            ? 'challenger activation is withheld; retaining last-known-good build'
+            : 'market-data is unavailable while challenger activation is withheld',
+          { reason: 'challenger-activation-withheld' },
+        );
+        if (existing) {
+          existing.refresh = {
+            status: 'last-known-good',
+            failure: 'challenger-activation-withheld',
+          };
+        }
+        return existing;
+      },
       { timeoutMs: options.lockTimeoutMs, staleMs: options.lockStaleMs, pollMs: options.lockPollMs },
     );
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    const existing = await loadMarketData(options.rootPath ?? MARKET_DATA_ROOT, {
+    const existing = await loadMarketData(root, {
       minDoorplates: options.minDoorplates,
       minTransactions: options.minTransactions,
     });
     log(options.logger, 'warn', existing ? 'market-data.last-known-good' : 'market-data.unavailable',
       existing ? 'market-data refresh lock failed; retaining last-known-good build' : 'market-data is unavailable', { reason });
-    if (existing) existing.refresh = { status: 'last-known-good', failure: reason };
+    if (existing) {
+      existing.refresh = {
+        status: 'last-known-good',
+        failure: 'challenger-activation-withheld',
+      };
+    }
     return existing;
   }
 }
@@ -635,22 +708,37 @@ export async function ensureTaipeiMarketData(options: EnsureTaipeiMarketDataOpti
 export async function evaluateTaipeiMarketDataCandidate(
   options: EvaluateTaipeiMarketDataCandidateOptions,
 ): Promise<CandidateEvaluation> {
-  if (options.publish && options.policy.id !== ACTIVE_ESTIMATOR_POLICY.id) {
-    throw new Error('Only the active estimator policy may publish a market-data candidate');
+  if (options.publish) {
+    throw new Error('Challenger activation is withheld; candidate evaluation cannot publish');
   }
   const capture: NonNullable<CandidateExecution['capture']> = {};
+  const root = options.rootPath ?? MARKET_DATA_ROOT;
   await withMarketDataLock(
-    MARKET_DATA_ROOT,
-    () => ensureTaipeiMarketDataUnlocked(
-      { asOf: options.asOf, gateEvaluator: options.gateEvaluator },
+    root,
+    () => evaluateTaipeiMarketDataCandidateUnlocked(
+      {
+        asOf: options.asOf,
+        rootPath: root,
+        fetch: options.fetch,
+        clock: options.clock,
+        logger: options.logger,
+        minDoorplates: options.minDoorplates,
+        minTransactions: options.minTransactions,
+        openZip: options.openZip,
+        gateEvaluator: options.gateEvaluator,
+        publisher: options.publisher,
+      },
       {
         policy: options.policy,
-        publish: options.publish,
-        forceCandidateBuild: true,
         rethrowErrors: true,
         capture,
       },
     ),
+    {
+      timeoutMs: options.lockTimeoutMs,
+      staleMs: options.lockStaleMs,
+      pollMs: options.lockPollMs,
+    },
   );
   if (!capture.evaluation) throw new Error('Candidate evaluation completed without a result');
   return capture.evaluation;

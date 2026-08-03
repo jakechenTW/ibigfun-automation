@@ -42,6 +42,7 @@ export type MarketDataCommand =
   | { command: 'backtest'; city: typeof SUPPORTED_CITY; asOf: string; noGate: boolean; policyId: PolicyId };
 
 export interface MarketDataCommandDependencies {
+  updater?: typeof ensureTaipeiMarketData;
   candidateEvaluator?: (
     options: EvaluateTaipeiMarketDataCandidateOptions,
   ) => Promise<CandidateEvaluation>;
@@ -142,8 +143,11 @@ export function marketUpdateExitCode(status: 'updated' | 'not-modified' | 'last-
   return status === 'last-known-good' ? 3 : 0;
 }
 
-async function update(asOf: string): Promise<number> {
-  const bundle = await ensureTaipeiMarketData({ asOf });
+async function update(
+  asOf: string,
+  updater: typeof ensureTaipeiMarketData = ensureTaipeiMarketData,
+): Promise<number> {
+  const bundle = await updater({ asOf });
   if (!bundle) throw new Error('No validated Taipei market-data build is available after update');
   if (bundle.refresh?.status === 'last-known-good') {
     process.stderr.write(`WARN: refresh failed; retained last-known-good build ${bundle.manifest.buildId}: ${bundle.refresh.failure ?? 'unknown failure'}\n`);
@@ -238,7 +242,7 @@ export async function runMarketDataCommand(
 ): Promise<number> {
   const command = parseMarketDataArgs(args, now);
   if (command.command === 'update') {
-    return update(command.asOf);
+    return update(command.asOf, dependencies.updater);
   }
   if (command.command === 'candidate') {
     return candidate(command, dependencies.candidateEvaluator ?? evaluateTaipeiMarketDataCandidate);

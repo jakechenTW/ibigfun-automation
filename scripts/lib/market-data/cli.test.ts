@@ -8,6 +8,7 @@ import {
 } from './config.ts';
 import {
   type MarketDataCommandDependencies,
+  backtestExitCode,
   parseMarketDataArgs,
   runMarketDataCommand,
   shouldPersistBacktestAcceptance,
@@ -26,6 +27,17 @@ function passingBacktestReport(index: TransactionIndex): BacktestReport {
     bias: 0,
     intervalCoverage: 0.5,
     ...values,
+  });
+  const parkingMetric = (): BacktestReport['parkingMaskedHoldout']['overall'] => ({
+    caseCount: 25,
+    estimatedCount: 20,
+    estimateCoverage: 0.8,
+    priceMedianApe: 0.10,
+    priceP75Ape: 0.20,
+    areaMedianApe: 0.08,
+    areaP75Ape: 0.12,
+    priceIntervalCoverage: 0.5,
+    areaIntervalCoverage: 0.5,
   });
   return {
     ...report,
@@ -46,6 +58,16 @@ function passingBacktestReport(index: TransactionIndex): BacktestReport {
       ...report.byConfidence,
       high: metric({ medianApe: 0.08 }),
       medium: metric({ medianApe: 0.10 }),
+    },
+    byPrimaryUse: {
+      ...report.byPrimaryUse,
+      residential: metric(),
+    },
+    directOnly: metric({ caseCount: 50, estimatedCount: 35, estimateCoverage: 0.7 }),
+    directPlusImputed: metric({ caseCount: 50, estimatedCount: 40, estimateCoverage: 0.8 }),
+    parkingMaskedHoldout: {
+      overall: parkingMetric(),
+      byParkingFamily: { flat: parkingMetric(), mechanical: parkingMetric() },
     },
   };
 }
@@ -109,6 +131,9 @@ test('candidate CLI evaluates 48-month policy diagnostically without requesting 
               office: 0, residential: 0, unknown: 0,
             },
             byParkingGrade: { A: 0, B: 0, C: 0 },
+            gradeBByComponent: {
+              missingBoth: 0, officialAreaOnly: 0, officialPriceOnly: 0,
+            },
             gradeBImputed: 0,
             gradeBUnresolved: 0,
           },
@@ -211,6 +236,50 @@ test('non-active diagnostic policy cannot persist canonical acceptance', () => {
   assert.equal(shouldPersistBacktestAcceptance(passingDiagnostic, false), false);
 });
 
+test('production CLI uses only the legacy global gate while challenger slices stay diagnostic', () => {
+  const index: TransactionIndex = {
+    schemaVersion: MARKET_SCHEMA_VERSION,
+    datasetVersion: 'fixture',
+    builtAt: '2026-07-25T00:00:00.000Z',
+    cells: {},
+  };
+  const passing = passingBacktestReport(index);
+  assert.equal(backtestExitCode(passing, false), 0);
+  assert.equal(shouldPersistBacktestAcceptance(passing, false), true);
+
+  const residentialFailure: BacktestReport = {
+    ...passing,
+    byPrimaryUse: {
+      ...passing.byPrimaryUse,
+      residential: {
+        ...passing.byPrimaryUse.residential,
+        bias: 0.99,
+        intervalCoverage: 0,
+      },
+    },
+  };
+  assert.equal(backtestExitCode(residentialFailure, false), 0);
+  assert.equal(shouldPersistBacktestAcceptance(residentialFailure, false), true);
+
+  const mechanicalFailure: BacktestReport = {
+    ...passing,
+    parkingMaskedHoldout: {
+      ...passing.parkingMaskedHoldout,
+      byParkingFamily: {
+        ...passing.parkingMaskedHoldout.byParkingFamily,
+        mechanical: {
+          ...passing.parkingMaskedHoldout.byParkingFamily.mechanical,
+          priceMedianApe: 0.30,
+          priceP75Ape: 0.50,
+        },
+      },
+    },
+  };
+  assert.equal(backtestExitCode(mechanicalFailure, false), 0);
+  assert.equal(shouldPersistBacktestAcceptance(mechanicalFailure, false), true);
+  assert.equal(backtestExitCode(mechanicalFailure, true), 0);
+});
+
 function injectedBundleWithProvenance(
   schemaVersion: number,
   estimatorPolicyVersion?: number,
@@ -263,6 +332,33 @@ function injectedBundleWithProvenance(
     transactions: index,
   } as unknown as MarketDataBundle;
 }
+
+test('update command reports the frozen retained build with non-success exit code 3', async () => {
+  const retained = injectedBundleWithProvenance(
+    MARKET_SCHEMA_VERSION,
+    ESTIMATOR_POLICY_VERSION,
+  );
+  retained.refresh = {
+    status: 'last-known-good',
+    failure: 'challenger-activation-withheld',
+  };
+  let updaterCalls = 0;
+
+  const exitCode = await runMarketDataCommand(
+    ['update', '--city', 'taipei'],
+    new Date('2026-07-26T01:00:00.000Z'),
+    {
+      updater: async () => {
+        updaterCalls += 1;
+        return retained;
+      },
+    },
+  );
+
+  assert.equal(exitCode, 3);
+  assert.equal(updaterCalls, 1);
+  assert.equal(retained.refresh?.failure, 'challenger-activation-withheld');
+});
 
 test('production backtest rejects schema-2 provenance before evaluation or acceptance persistence', async () => {
   const legacyBundle = injectedBundleWithProvenance(2);
@@ -366,6 +462,9 @@ test('backtest acceptance writer cannot race a locked update into a stale final 
             office: 0, residential: 0, unknown: 0,
           },
           byParkingGrade: { A: 0, B: 0, C: 0 },
+          gradeBByComponent: {
+            missingBoth: 0, officialAreaOnly: 0, officialPriceOnly: 0,
+          },
           gradeBImputed: 0,
           gradeBUnresolved: 0,
         },
@@ -449,7 +548,7 @@ test('backtest acceptance writer cannot race a locked update into a stale final 
   });
   assert.equal(recoveryRan, true);
   const persisted = capturedAcceptance as BacktestAcceptance | null;
-  assert.equal(persisted?.schemaVersion, 3);
+  assert.equal(persisted?.schemaVersion, 2);
   assert.equal('cases' in (persisted ?? {}), false);
   assert.equal('scenarioCases' in (persisted ?? {}), false);
 });
