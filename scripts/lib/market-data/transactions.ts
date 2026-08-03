@@ -180,9 +180,15 @@ export function specialTransactionFlags(notes: string): string[] {
   return flags;
 }
 
-function transferredBuildingCount(raw: string): number | null {
-  const match = /(?:^|土地\d+)建物(\d+)車位\d+$/.exec(raw.normalize('NFKC').replace(/\s+/g, ''));
-  return match ? Number(match[1]) : null;
+function transferredCounts(raw: string): { building: number | null; parking: number | null } {
+  const match = /^(?:土地\d+)?建物(\d+)車位(\d+)$/.exec(raw.normalize('NFKC').replace(/\s+/g, ''));
+  if (!match) return { building: null, parking: null };
+  const building = Number(match[1]);
+  const parking = Number(match[2]);
+  return {
+    building: Number.isSafeInteger(building) && building >= 0 ? building : null,
+    parking: Number.isSafeInteger(parking) && parking >= 0 ? parking : null,
+  };
 }
 
 export function classifyTransactionEligibility(
@@ -190,18 +196,19 @@ export function classifyTransactionEligibility(
   transactionCountsRaw: string,
   notes: string,
 ): TransactionEligibilityEvidence | { excludedReasons: string[] } {
-  const count = transferredBuildingCount(transactionCountsRaw);
+  const counts = transferredCounts(transactionCountsRaw);
   if (/政府機關.*(?:標讓售|讓售)/u.test(notes)) return { excludedReasons: ['government-sale'] };
   const primaryUse = normalizePrimaryUse(primaryUseRaw);
-  const legacyReliable = primaryUse === 'residential' && count === 1;
+  const legacyReliable = primaryUse === 'residential' && counts.building === 1;
   return {
     eligibility: legacyReliable ? 'reliable-eligible' : 'review-only',
     reasons: legacyReliable ? [] : [
       ...(primaryUse === 'residential' ? [] : [primaryUse === 'unknown' ? 'primary-use-unavailable' : 'scenario-only-primary-use']),
-      ...(count !== 1 ? ['multiple-buildings'] : []),
+      ...(counts.building === null ? ['building-count-unavailable'] : counts.building !== 1 ? ['multiple-buildings'] : []),
     ],
     primaryUse,
-    transferredBuildingCount: count,
+    transferredBuildingCount: counts.building,
+    transferredParkingCount: counts.parking,
   };
 }
 
@@ -212,6 +219,20 @@ export function classifyParkingEvidence(input: RawParkingEvidence): ParkingEvide
   const officialAreaPing = areaAvailable ? input.areaSqM! * PING_PER_SQUARE_METER : null;
 
   if (family === 'none') {
+    if (input.transferredParkingCount === null) {
+      return {
+        grade: 'C', family, originalType: input.originalType,
+        officialPriceNtd: null, officialAreaPing: null, imputation: null,
+        reasons: ['parking-count-unavailable'],
+      };
+    }
+    if (input.transferredParkingCount !== 0) {
+      return {
+        grade: 'C', family, originalType: input.originalType,
+        officialPriceNtd: null, officialAreaPing: null, imputation: null,
+        reasons: ['parking-count-conflict'],
+      };
+    }
     if (!areaAvailable && !priceAvailable && input.areaWasZeroOrEmpty && input.priceWasZeroOrEmpty) {
       return {
         grade: 'A', family, originalType: input.originalType,
@@ -230,6 +251,21 @@ export function classifyParkingEvidence(input: RawParkingEvidence): ParkingEvide
       grade: 'C', family, originalType: input.originalType,
       officialPriceNtd: null, officialAreaPing: null, imputation: null,
       reasons: ['parking-family-unavailable'],
+    };
+  }
+
+  if (input.transferredParkingCount === null) {
+    return {
+      grade: 'C', family, originalType: input.originalType,
+      officialPriceNtd: input.priceNtd, officialAreaPing, imputation: null,
+      reasons: ['parking-count-unavailable'],
+    };
+  }
+  if (input.transferredParkingCount <= 0) {
+    return {
+      grade: 'C', family, originalType: input.originalType,
+      officialPriceNtd: input.priceNtd, officialAreaPing, imputation: null,
+      reasons: ['parking-count-conflict'],
     };
   }
 
@@ -329,6 +365,7 @@ export function normalizeSaleTransaction(
     priceWasZeroOrEmpty: isZeroOrEmpty(parkingPriceRaw),
     totalAreaSqM: buildingAreaSqM,
     totalPriceNtd,
+    transferredParkingCount: eligibility.transferredParkingCount,
   });
   const transactionEligibility = parkingEvidence.grade === 'A'
     ? eligibility
@@ -341,9 +378,11 @@ export function normalizeSaleTransaction(
   const parkingAreaSqM = parkingEvidence.grade === 'A'
     ? parkingEvidence.officialAreaPing! * SQUARE_METERS_PER_PING
     : null;
-  const parkingPriceNtd = parkingEvidence.grade === 'A' ? parkingEvidence.officialPriceNtd! : null;
+  const directParkingPriceNtd = parkingEvidence.grade === 'A'
+    ? parkingEvidence.officialPriceNtd!
+    : null;
   const buildingAreaSqMNet = parkingAreaSqM === null ? null : buildingAreaSqM - parkingAreaSqM;
-  const buildingPriceNtd = parkingPriceNtd === null ? null : totalPriceNtd - parkingPriceNtd;
+  const buildingPriceNtd = directParkingPriceNtd === null ? null : totalPriceNtd - directParkingPriceNtd;
   if (buildingAreaSqMNet !== null && buildingPriceNtd !== null && (buildingAreaSqMNet <= 0 || buildingPriceNtd <= 0)) {
     return excluded(id, 'invalid-building-value');
   }
@@ -381,9 +420,14 @@ export function normalizeSaleTransaction(
       totalAreaPing: buildingAreaSqM * PING_PER_SQUARE_METER,
       buildingPriceNtd,
       buildingAreaPing: buildingAreaSqMNet === null ? null : buildingAreaSqMNet * PING_PER_SQUARE_METER,
-      parkingPriceNtd,
-      parkingAreaPing: parkingEvidence.grade === 'A' ? parkingEvidence.officialAreaPing : null,
+      parkingPriceNtd: parkingEvidence.grade === 'A' || parkingEvidence.grade === 'B'
+        ? parkingEvidence.officialPriceNtd
+        : null,
+      parkingAreaPing: parkingEvidence.grade === 'A' || parkingEvidence.grade === 'B'
+        ? parkingEvidence.officialAreaPing
+        : null,
       buildingUnitPriceWan: derivedUnitPriceNtd === null ? null : derivedUnitPriceNtd * SQUARE_METERS_PER_PING / 10_000,
+      buildingUnitPriceBoundsWan: null,
       parkingEvidence,
       floor,
       totalFloors,
@@ -396,6 +440,7 @@ export function normalizeSaleTransaction(
       originalPrimaryUse: aliasValue(values, 'primaryUse'),
       primaryUse: eligibility.primaryUse,
       transferredBuildingCount: eligibility.transferredBuildingCount,
+      transferredParkingCount: eligibility.transferredParkingCount,
     },
   };
 }

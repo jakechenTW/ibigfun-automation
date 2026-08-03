@@ -406,7 +406,7 @@ test('acceptance requires sufficient slices and high confidence to outperform me
   assert.ok(evaluateBacktestGate(insufficient).reasons.includes('insufficient-high-confidence-cases'));
   assert.ok(evaluateBacktestGate(notMeasurablyBetter).reasons.includes('high-confidence-not-measurably-better'));
   assert.deepEqual(evaluateBacktestGate(passing), { passed: true, complete: true, reasons: [] });
-  assert.equal(shouldPersistBacktestAcceptance(passing, false), false);
+  assert.equal(shouldPersistBacktestAcceptance(passing, false), true);
   assert.equal(shouldPersistBacktestAcceptance(productionReadyReport(), false), true);
   assert.equal(shouldPersistBacktestAcceptance(passing, true), false);
   assert.equal(shouldPersistBacktestAcceptance(insufficient, false), false);

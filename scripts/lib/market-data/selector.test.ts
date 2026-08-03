@@ -60,6 +60,7 @@ function transaction(id: string, overrides: Partial<MarketTransaction> = {}): Ma
     parkingPriceNtd: 0,
     parkingAreaPing: 0,
     buildingUnitPriceWan: 100,
+    buildingUnitPriceBoundsWan: null,
     floor: 5,
     totalFloors: 10,
     floorGroup: 'middle',
@@ -71,6 +72,7 @@ function transaction(id: string, overrides: Partial<MarketTransaction> = {}): Ma
     originalPrimaryUse: '住家用',
     primaryUse: 'residential',
     transferredBuildingCount: 1,
+    transferredParkingCount: 0,
     parkingEvidence: {
       grade: 'A', family: 'none', originalType: '無車位',
       officialPriceNtd: 0, officialAreaPing: 0, imputation: null, reasons: [],
@@ -316,6 +318,11 @@ test('scenario building selection caps accepted grade B and excludes unresolved 
     areaP25Ping: 9,
     areaP50Ping: 10,
     areaP75Ping: 11,
+    pairP25: { priceNtd: 1_800_000, areaPing: 9 },
+    pairP50: { priceNtd: 2_000_000, areaPing: 10 },
+    pairP75: { priceNtd: 2_200_000, areaPing: 11 },
+    priceIqrRatio: 0.20,
+    areaIqrRatio: 0.20,
   };
   const result = selectScenarioComparables(subject, [
     transaction('grade-a'),
@@ -326,6 +333,16 @@ test('scenario building selection caps accepted grade B and excludes unresolved 
         grade: 'B', family: 'flat', originalType: '坡道平面',
         officialPriceNtd: null, officialAreaPing: null, imputation, reasons: ['parking-not-separable'],
       },
+      buildingUnitPriceBoundsWan: { p25: 90, p50: 100, p75: 110, relativeIqrRatio: 0.20 },
+    }),
+    transaction('grade-b-lower-uncertainty', {
+      eligibility: 'review-only',
+      eligibilityReasons: ['parking-not-separable'],
+      parkingEvidence: {
+        grade: 'B', family: 'flat', originalType: '坡道平面',
+        officialPriceNtd: null, officialAreaPing: null, imputation, reasons: ['parking-not-separable'],
+      },
+      buildingUnitPriceBoundsWan: { p25: 97.5, p50: 100, p75: 102.5, relativeIqrRatio: 0.05 },
     }),
     transaction('grade-b-unresolved', {
       buildingPriceNtd: null,
@@ -348,9 +365,18 @@ test('scenario building selection caps accepted grade B and excludes unresolved 
     }),
   ], AS_OF, { primaryUse: 'residential', allowImputedParking: true });
 
-  assert.deepEqual(result.included.map((candidate) => candidate.transaction.id), ['grade-a', 'grade-b-accepted']);
+  assert.deepEqual(result.included.map((candidate) => candidate.transaction.id), [
+    'grade-a', 'grade-b-accepted', 'grade-b-lower-uncertainty',
+  ]);
   assert.equal(result.included.find((candidate) => candidate.transaction.id === 'grade-a')?.weight.total, 1);
-  assert.equal(result.included.find((candidate) => candidate.transaction.id === 'grade-b-accepted')?.weight.total, 0.60);
+  const higherUncertaintyWeight = result.included.find(
+    (candidate) => candidate.transaction.id === 'grade-b-accepted',
+  )?.weight.total ?? 0;
+  const lowerUncertaintyWeight = result.included.find(
+    (candidate) => candidate.transaction.id === 'grade-b-lower-uncertainty',
+  )?.weight.total ?? 0;
+  assert.ok(higherUncertaintyWeight > 0 && higherUncertaintyWeight < 0.60);
+  assert.ok(lowerUncertaintyWeight > higherUncertaintyWeight && lowerUncertaintyWeight <= 0.60);
   assert.ok(result.excluded.find((candidate) => candidate.transaction.id === 'grade-b-unresolved')?.reasons.includes('parking-imputation-unavailable'));
   assert.ok(result.excluded.find((candidate) => candidate.transaction.id === 'grade-c')?.reasons.includes('parking-grade-not-building-evidence'));
 
@@ -364,6 +390,43 @@ test('scenario building selection caps accepted grade B and excludes unresolved 
   ], AS_OF, { primaryUse: 'residential', allowImputedParking: false });
   assert.equal(imputationDisabled.included.length, 0);
   assert.ok(imputationDisabled.excluded[0]?.reasons.includes('parking-imputation-not-accepted'));
+});
+
+test('scenario building selection admits grade-B evidence only from accepted parking families', () => {
+  const imputation = {
+    asOf: '2026-01-25', stage: 'nearby-500m' as const,
+    comparableIds: ['parking-a', 'parking-b', 'parking-c'], comparableCount: 3,
+    priceP25Ntd: 1_800_000, priceP50Ntd: 2_000_000, priceP75Ntd: 2_200_000,
+    areaP25Ping: 9, areaP50Ping: 10, areaP75Ping: 11,
+    pairP25: { priceNtd: 1_800_000, areaPing: 9 },
+    pairP50: { priceNtd: 2_000_000, areaPing: 10 },
+    pairP75: { priceNtd: 2_200_000, areaPing: 11 },
+    priceIqrRatio: 0.20, areaIqrRatio: 0.20,
+  };
+  const gradeB = (id: string, family: 'flat' | 'mechanical'): MarketTransaction => transaction(id, {
+    eligibility: 'review-only',
+    eligibilityReasons: ['parking-not-separable'],
+    transferredParkingCount: 1,
+    parkingEvidence: {
+      grade: 'B', family, originalType: family,
+      officialPriceNtd: null, officialAreaPing: null, imputation,
+      reasons: ['parking-not-separable'],
+    },
+    buildingUnitPriceBoundsWan: { p25: 97.5, p50: 100, p75: 102.5, relativeIqrRatio: 0.05 },
+  });
+
+  const result = selectScenarioComparables(subject, [
+    gradeB('flat-b', 'flat'),
+    gradeB('mechanical-b', 'mechanical'),
+  ], AS_OF, {
+    primaryUse: 'residential',
+    allowImputedParking: true,
+    acceptedParkingFamilies: ['flat'],
+  });
+
+  assert.deepEqual(result.included.map((candidate) => candidate.transaction.id), ['flat-b']);
+  assert.ok(result.excluded.find((candidate) => candidate.transaction.id === 'mechanical-b')
+    ?.reasons.includes('parking-family-cohort-not-accepted'));
 });
 
 test('scenario bundle selection returns only exact-use grade C evidence', () => {

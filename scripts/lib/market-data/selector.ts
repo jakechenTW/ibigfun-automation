@@ -276,6 +276,8 @@ export function selectComparables(
 export interface ScenarioSelectionOptions {
   primaryUse: Exclude<NormalizedPrimaryUse, 'unknown'>;
   allowImputedParking: boolean;
+  /** Grade-B evidence is limited to parking families with accepted masked holdouts. */
+  acceptedParkingFamilies?: ReadonlyArray<'flat' | 'mechanical'>;
   bundleOnly?: boolean;
 }
 
@@ -301,7 +303,26 @@ function scenarioHardReasons(
   if (transaction.parkingEvidence.grade === 'C') reasons.push('parking-grade-not-building-evidence');
   if (transaction.parkingEvidence.grade === 'B') {
     if (!options.allowImputedParking) reasons.push('parking-imputation-not-accepted');
+    else if (options.acceptedParkingFamilies
+      && ((transaction.parkingEvidence.family !== 'flat'
+          && transaction.parkingEvidence.family !== 'mechanical')
+        || !options.acceptedParkingFamilies.includes(transaction.parkingEvidence.family))) {
+      reasons.push('parking-family-cohort-not-accepted');
+    }
     else if (transaction.parkingEvidence.imputation === null) reasons.push('parking-imputation-unavailable');
+    const bounds = transaction.buildingUnitPriceBoundsWan;
+    if (!bounds
+      || !finitePositive(bounds.p25)
+      || !finitePositive(bounds.p50)
+      || !finitePositive(bounds.p75)
+      || bounds.p25 > bounds.p50
+      || bounds.p50 > bounds.p75
+      || !Number.isFinite(bounds.relativeIqrRatio)
+      || bounds.relativeIqrRatio < 0) {
+      reasons.push('parking-imputation-uncertainty-unavailable');
+    } else if (bounds.relativeIqrRatio > PARKING_POLICY.maximumBuildingUnitPriceIqrRatio) {
+      reasons.push('parking-imputation-uncertainty-too-wide');
+    }
   }
   if (!finitePositive(transaction.buildingPriceNtd)) reasons.push('invalid-building-price');
   if (!finitePositive(transaction.buildingUnitPriceWan)) reasons.push('invalid-building-unit-price');
@@ -323,8 +344,21 @@ export function selectScenarioComparables(
       : transaction.buildingAreaPing,
     hardReasons: (selectionSubject, transaction, transactionDate, targetDate, maximumMonths) =>
       scenarioHardReasons(options, selectionSubject, transaction, transactionDate, targetDate, maximumMonths),
-    adjustWeight: (transaction, weight) => transaction.parkingEvidence.grade === 'B'
-      ? { ...weight, total: Math.min(weight.total, PARKING_POLICY.imputedComparableWeightCap) }
-      : weight,
+    adjustWeight: (transaction, weight) => {
+      if (transaction.parkingEvidence.grade !== 'B') return weight;
+      const uncertainty = transaction.buildingUnitPriceBoundsWan?.relativeIqrRatio
+        ?? PARKING_POLICY.maximumBuildingUnitPriceIqrRatio;
+      const factor = Math.max(
+        PARKING_POLICY.minimumImputedWeightFactor,
+        1 - uncertainty / PARKING_POLICY.maximumBuildingUnitPriceIqrRatio,
+      );
+      return {
+        ...weight,
+        total: Math.min(
+          weight.total,
+          PARKING_POLICY.imputedComparableWeightCap * factor,
+        ),
+      };
+    },
   });
 }

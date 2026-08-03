@@ -15,6 +15,10 @@ export interface ParkingSubject {
   matchedAddress: string | null;
   buildingType: BuildingType;
   family: Exclude<ParkingFamily, 'none' | 'unknown'>;
+  /** Optional known per-space official component used to condition the missing component. */
+  knownPriceNtd?: number | null;
+  /** Optional known per-space official component used to condition the missing component. */
+  knownAreaPing?: number | null;
 }
 
 export interface ParkingEstimate extends ParkingImputationEvidence {
@@ -80,6 +84,7 @@ function directPair(
     return null;
   }
   if (transaction.parkingEvidence.grade !== 'A' || transaction.parkingEvidence.family !== subject.family) return null;
+  if (transaction.transferredBuildingCount !== 1 || transaction.transferredParkingCount !== 1) return null;
   if (!finitePositive(priceNtd) || !finitePositive(areaPing)) return null;
   return { id: transaction.id, transaction, priceNtd, areaPing, transactionDate };
 }
@@ -106,12 +111,61 @@ function estimate(
   pairs: readonly DirectParkingPair[],
   asOf: string,
   weightFor: (pair: DirectParkingPair) => number,
+  subject: ParkingSubject,
 ): ParkingEstimate | null {
-  const directPairs = pairs
+  const basePairs = pairs
     .map((pair) => ({ id: pair.id, priceNtd: pair.priceNtd, areaPing: pair.areaPing, weight: weightFor(pair) }))
     .filter((pair) => Number.isFinite(pair.weight) && pair.weight > 0)
     .sort((left, right) => left.id.localeCompare(right.id));
+  const knownPrice = finitePositive(subject.knownPriceNtd ?? null) ? subject.knownPriceNtd! : null;
+  const knownArea = finitePositive(subject.knownAreaPing ?? null) ? subject.knownAreaPing! : null;
+  const directPairs = basePairs.map((pair) => {
+    const priceDistance = knownPrice === null ? 0 : Math.abs(pair.priceNtd - knownPrice) / knownPrice;
+    const areaDistance = knownArea === null ? 0 : Math.abs(pair.areaPing - knownArea) / knownArea;
+    return {
+      ...pair,
+      weight: pair.weight / (1 + 10 * (priceDistance + areaDistance)),
+    };
+  });
   if (directPairs.length < PARKING_POLICY.minimumDirectComparables) return null;
+
+  const priceMedian = weightedQuantile(
+    directPairs.map((pair) => ({ id: pair.id, value: pair.priceNtd, weight: pair.weight })),
+    0.5,
+  );
+  const areaMedian = weightedQuantile(
+    directPairs.map((pair) => ({ id: pair.id, value: pair.areaPing, weight: pair.weight })),
+    0.5,
+  );
+  const jointOrdered = [...directPairs].sort((left, right) => {
+    const score = (pair: typeof left): number => knownPrice !== null
+      ? pair.areaPing / areaMedian
+      : knownArea !== null
+        ? pair.priceNtd / priceMedian
+        : (pair.priceNtd / priceMedian + pair.areaPing / areaMedian) / 2;
+    return score(left) - score(right) || left.id.localeCompare(right.id);
+  });
+  const jointPairAt = (quantile: number): typeof directPairs[number] => {
+    const totalWeight = jointOrdered.reduce((total, pair) => total + pair.weight, 0);
+    const threshold = totalWeight * quantile;
+    let cumulative = 0;
+    for (const pair of jointOrdered) {
+      cumulative += pair.weight;
+      if (cumulative + Number.EPSILON >= threshold) return pair;
+    }
+    return jointOrdered.at(-1)!;
+  };
+  const pairP25 = jointPairAt(0.25);
+  const pairP50 = jointPairAt(0.5);
+  const pairP75 = jointPairAt(0.75);
+  const marginalPriceP25 = weightedQuantile(directPairs.map((pair) => ({ id: pair.id, value: pair.priceNtd, weight: pair.weight })), 0.25);
+  const marginalPriceP75 = weightedQuantile(directPairs.map((pair) => ({ id: pair.id, value: pair.priceNtd, weight: pair.weight })), 0.75);
+  const marginalAreaP25 = weightedQuantile(directPairs.map((pair) => ({ id: pair.id, value: pair.areaPing, weight: pair.weight })), 0.25);
+  const marginalAreaP75 = weightedQuantile(directPairs.map((pair) => ({ id: pair.id, value: pair.areaPing, weight: pair.weight })), 0.75);
+  const priceP25Ntd = Math.min(marginalPriceP25, pairP50.priceNtd);
+  const priceP75Ntd = Math.max(marginalPriceP75, pairP50.priceNtd);
+  const areaP25Ping = Math.min(marginalAreaP25, pairP50.areaPing);
+  const areaP75Ping = Math.max(marginalAreaP75, pairP50.areaPing);
 
   return {
     asOf,
@@ -119,12 +173,17 @@ function estimate(
     family: pairs[0]!.transaction.parkingEvidence.family as 'flat' | 'mechanical',
     comparableIds: directPairs.map((pair) => pair.id),
     comparableCount: directPairs.length,
-    priceP25Ntd: weightedQuantile(directPairs.map((pair) => ({ id: pair.id, value: pair.priceNtd, weight: pair.weight })), 0.25),
-    priceP50Ntd: weightedQuantile(directPairs.map((pair) => ({ id: pair.id, value: pair.priceNtd, weight: pair.weight })), 0.5),
-    priceP75Ntd: weightedQuantile(directPairs.map((pair) => ({ id: pair.id, value: pair.priceNtd, weight: pair.weight })), 0.75),
-    areaP25Ping: weightedQuantile(directPairs.map((pair) => ({ id: pair.id, value: pair.areaPing, weight: pair.weight })), 0.25),
-    areaP50Ping: weightedQuantile(directPairs.map((pair) => ({ id: pair.id, value: pair.areaPing, weight: pair.weight })), 0.5),
-    areaP75Ping: weightedQuantile(directPairs.map((pair) => ({ id: pair.id, value: pair.areaPing, weight: pair.weight })), 0.75),
+    priceP25Ntd,
+    priceP50Ntd: pairP50.priceNtd,
+    priceP75Ntd,
+    areaP25Ping,
+    areaP50Ping: pairP50.areaPing,
+    areaP75Ping,
+    pairP25: { priceNtd: pairP25.priceNtd, areaPing: pairP25.areaPing },
+    pairP50: { priceNtd: pairP50.priceNtd, areaPing: pairP50.areaPing },
+    pairP75: { priceNtd: pairP75.priceNtd, areaPing: pairP75.areaPing },
+    priceIqrRatio: (priceP75Ntd - priceP25Ntd) / pairP50.priceNtd,
+    areaIqrRatio: (areaP75Ping - areaP25Ping) / pairP50.areaPing,
     directPairs,
   };
 }
@@ -147,7 +206,7 @@ export function estimateParking(
   const sameBuilding = subject.matchedAddress === null ? [] : directPairs.filter((pair) =>
     pair.transaction.location.matchedAddress === subject.matchedAddress,
   );
-  const exactEstimate = estimate('same-building', sameBuilding, asOf, (pair) => sameBuildingWeight(pair, targetDate));
+  const exactEstimate = estimate('same-building', sameBuilding, asOf, (pair) => sameBuildingWeight(pair, targetDate), subject);
   if (exactEstimate) return exactEstimate;
 
   const nearby = directPairs.filter((pair) => {
@@ -156,7 +215,7 @@ export function estimateParking(
       && distances !== null
       && distances.max <= PARKING_POLICY.nearbyRadiusM;
   });
-  return estimate('nearby-500m', nearby, asOf, (pair) => nearbyWeight(subject, pair, targetDate));
+  return estimate('nearby-500m', nearby, asOf, (pair) => nearbyWeight(subject, pair, targetDate), subject);
 }
 
 export interface BuildingObservation {

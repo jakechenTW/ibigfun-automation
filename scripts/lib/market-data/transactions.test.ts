@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { locateAddress } from './doorplates.ts';
 import {
   isSaleTransactionDataRow,
+  normalizeParkingFamily,
   normalizePrimaryUse,
   normalizeSaleTransaction,
   rocDateToIso,
@@ -56,6 +57,17 @@ function row(overrides: Record<string, string> = {}): Record<string, string> {
 }
 
 for (const [raw, expected] of [
+  ['坡道平面', 'flat'],
+  [' 升降機械 ', 'mechanical'],
+  ['無車位', 'none'],
+  ['ｍｅｃｈａｎｉｃａｌ', 'unknown'],
+] as const) {
+  test(`normalizes official parking family ${raw.trim()}`, () => {
+    assert.equal(normalizeParkingFamily(raw), expected);
+  });
+}
+
+for (const [raw, expected] of [
   ['住家用', 'residential'],
   ['住商用', 'mixed-residential'],
   ['辦公用', 'office'],
@@ -88,7 +100,7 @@ test('converts ROC dates and computes building-only unit price', () => {
 test('classifies ordinary one-building residential sales as reliable-eligible', () => {
   const tx = normalizeSaleTransaction(row({
     '主要用途': '住家用',
-    '交易筆棟數': '土地1建物1車位0',
+    '交易筆棟數': '土地1建物1車位1',
   }), context);
 
   assert.equal(tx.kind, 'included');
@@ -97,12 +109,38 @@ test('classifies ordinary one-building residential sales as reliable-eligible', 
   assert.deepEqual(tx.transaction.eligibilityReasons, []);
   assert.equal(tx.transaction.primaryUse, 'residential');
   assert.equal(tx.transaction.transferredBuildingCount, 1);
+  assert.equal(tx.transaction.transferredParkingCount, 1);
+});
+
+test('parses and persists both building and parking counts from the official transaction count', () => {
+  const tx = normalizeSaleTransaction(row({
+    '交易筆棟數': '土地２建物３車位４',
+  }), context);
+
+  assert.equal(tx.kind, 'included');
+  if (tx.kind !== 'included') return;
+  assert.equal(tx.transaction.transferredBuildingCount, 3);
+  assert.equal(tx.transaction.transferredParkingCount, 4);
+  assert.ok(tx.transaction.eligibilityReasons.includes('multiple-buildings'));
+});
+
+test('keeps malformed official building and parking counts explicit', () => {
+  const tx = normalizeSaleTransaction(row({
+    '交易筆棟數': '土地1建物X車位Y',
+  }), context);
+
+  assert.equal(tx.kind, 'included');
+  if (tx.kind !== 'included') return;
+  assert.equal(tx.transaction.transferredBuildingCount, null);
+  assert.equal(tx.transaction.transferredParkingCount, null);
+  assert.ok(tx.transaction.eligibilityReasons.includes('building-count-unavailable'));
+  assert.ok(tx.transaction.parkingEvidence.reasons.includes('parking-count-unavailable'));
 });
 
 test('classifies mixed-residential sales as review-only', () => {
   const tx = normalizeSaleTransaction(row({
     '主要用途': '住商用',
-    '交易筆棟數': '土地1建物1車位0',
+    '交易筆棟數': '土地1建物1車位1',
   }), context);
 
   assert.equal(tx.kind, 'included');
@@ -116,7 +154,7 @@ test('classifies mixed-residential sales as review-only', () => {
 test('classifies multiple transferred buildings as review-only', () => {
   const tx = normalizeSaleTransaction(row({
     '主要用途': '住家用',
-    '交易筆棟數': '土地1建物2車位0',
+    '交易筆棟數': '土地1建物2車位1',
   }), context);
 
   assert.equal(tx.kind, 'included');
@@ -159,7 +197,7 @@ test('excludes official government sale transactions', () => {
 
 test('retains official parking evidence by A/B/C grade without inventing building-only values', () => {
   const parkingCases = [
-    { patch: { '車位類別': '無車位', '車位移轉總面積平方公尺': '0', '車位總價元': '0' }, grade: 'A' },
+    { patch: { '車位類別': '無車位', '車位移轉總面積平方公尺': '0', '車位總價元': '0', '交易筆棟數': '土地1建物1車位0' }, grade: 'A' },
     { patch: { '車位類別': '坡道平面', '車位移轉總面積平方公尺': '20', '車位總價元': '3000000' }, grade: 'A' },
     { patch: { '車位類別': '坡道平面', '車位移轉總面積平方公尺': '', '車位總價元': '3000000' }, grade: 'B' },
     { patch: { '車位類別': '坡道平面', '車位移轉總面積平方公尺': '20', '車位總價元': '' }, grade: 'B' },
@@ -185,6 +223,16 @@ test('retains official parking evidence by A/B/C grade without inventing buildin
       grade === 'A',
       JSON.stringify(patch),
     );
+    if (grade === 'B' && patch['車位總價元'] === '3000000') {
+      assert.equal(tx.transaction.parkingPriceNtd, 3_000_000);
+      assert.equal(tx.transaction.parkingAreaPing, null);
+      assert.ok(tx.transaction.parkingEvidence.reasons.includes('parking-area-unavailable'));
+    }
+    if (grade === 'B' && patch['車位移轉總面積平方公尺'] === '20') {
+      assert.equal(tx.transaction.parkingPriceNtd, null);
+      assert.ok(Math.abs((tx.transaction.parkingAreaPing ?? 0) - 6.05) < 0.01);
+      assert.ok(tx.transaction.parkingEvidence.reasons.includes('parking-price-unavailable'));
+    }
   }
 });
 
@@ -196,6 +244,7 @@ test('treats conventional zero parking fields as no parking', () => {
       '車位類別': parkingType,
       '車位移轉總面積平方公尺': '0',
       '車位總價元': '0',
+      '交易筆棟數': '土地1建物1車位0',
     }), context);
 
     assert.equal(tx.kind, 'included', parkingType || 'empty parking type');
@@ -212,6 +261,7 @@ test('records contradictory parking as grade C review evidence', () => {
     '車位類別': '無車位',
     '車位移轉總面積平方公尺': '20',
     '車位總價元': '3000000',
+    '交易筆棟數': '土地1建物1車位0',
   }), context);
 
   assert.equal(tx.kind, 'included');

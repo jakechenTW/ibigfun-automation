@@ -64,6 +64,7 @@ function transaction(id: string, price: number, overrides: Partial<MarketTransac
     parkingPriceNtd: 0,
     parkingAreaPing: 0,
     buildingUnitPriceWan: price,
+    buildingUnitPriceBoundsWan: null,
     floor: 5,
     totalFloors: 10,
     floorGroup: 'middle',
@@ -75,6 +76,7 @@ function transaction(id: string, price: number, overrides: Partial<MarketTransac
     originalPrimaryUse: '住家用',
     primaryUse: 'residential',
     transferredBuildingCount: 1,
+    transferredParkingCount: 0,
     parkingEvidence: {
       grade: 'A', family: 'none', originalType: '無車位',
       officialPriceNtd: 0, officialAreaPing: 0, imputation: null, reasons: [],

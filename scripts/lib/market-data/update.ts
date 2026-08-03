@@ -698,7 +698,7 @@ export async function ensureTaipeiMarketData(options: EnsureTaipeiMarketDataOpti
     if (existing) {
       existing.refresh = {
         status: 'last-known-good',
-        failure: 'challenger-activation-withheld',
+        failure: reason,
       };
     }
     return existing;

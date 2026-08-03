@@ -39,6 +39,7 @@ function directParkingTransaction(
     parkingPriceNtd: 2_000_000,
     parkingAreaPing: 10,
     buildingUnitPriceWan: 100,
+    buildingUnitPriceBoundsWan: null,
     parkingEvidence: {
       grade: 'A',
       family: 'flat',
@@ -59,6 +60,7 @@ function directParkingTransaction(
     originalPrimaryUse: '住家用',
     primaryUse: 'residential',
     transferredBuildingCount: 1,
+    transferredParkingCount: 1,
     ...overrides,
   };
 }
@@ -251,6 +253,85 @@ test('does not train on grade-A evidence with non-positive official parking pair
   ], '2026-01-15');
 
   assert.deepEqual(result?.comparableIds, ['valid-a', 'valid-b', 'valid-c']);
+});
+
+test('trains only on structurally sound single-building single-space grade-A pairs', () => {
+  const result = estimateParking(subject, [
+    directParkingTransaction('valid-a'),
+    directParkingTransaction('valid-b'),
+    directParkingTransaction('valid-c'),
+    directParkingTransaction('multiple-buildings', { transferredBuildingCount: 2 }),
+    directParkingTransaction('multiple-spaces', {
+      transferredParkingCount: 2,
+      parkingEvidence: {
+        grade: 'A', family: 'flat', originalType: '坡道平面',
+        officialPriceNtd: 4_000_000, officialAreaPing: 20, imputation: null, reasons: [],
+      },
+    }),
+    directParkingTransaction('unknown-space-count', { transferredParkingCount: null }),
+  ], '2026-01-15');
+
+  assert.deepEqual(result?.comparableIds, ['valid-a', 'valid-b', 'valid-c']);
+});
+
+test('selects a real joint price-area pair instead of combining independent marginal medians', () => {
+  const candidates = [
+    directParkingTransaction('joint-a', {
+      parkingEvidence: {
+        grade: 'A', family: 'flat', originalType: '坡道平面',
+        officialPriceNtd: 1_000_000, officialAreaPing: 30, imputation: null, reasons: [],
+      },
+    }),
+    directParkingTransaction('joint-b', {
+      parkingEvidence: {
+        grade: 'A', family: 'flat', originalType: '坡道平面',
+        officialPriceNtd: 2_000_000, officialAreaPing: 10, imputation: null, reasons: [],
+      },
+    }),
+    directParkingTransaction('joint-c', {
+      parkingEvidence: {
+        grade: 'A', family: 'flat', originalType: '坡道平面',
+        officialPriceNtd: 3_000_000, officialAreaPing: 20, imputation: null, reasons: [],
+      },
+    }),
+  ];
+
+  const result = estimateParking(subject, candidates, '2026-01-15');
+
+  assert.ok(result);
+  assert.ok(result.directPairs.some((pair) =>
+    pair.priceNtd === result.priceP50Ntd && pair.areaPing === result.areaP50Ping));
+  assert.deepEqual(result.pairP50, {
+    priceNtd: result.priceP50Ntd,
+    areaPing: result.areaP50Ping,
+  });
+});
+
+test('conditions the joint parking observation on an official known component', () => {
+  const candidates = [
+    directParkingTransaction('known-a', {
+      parkingEvidence: {
+        grade: 'A', family: 'flat', originalType: '坡道平面',
+        officialPriceNtd: 1_000_000, officialAreaPing: 30, imputation: null, reasons: [],
+      },
+    }),
+    directParkingTransaction('known-b', {
+      parkingEvidence: {
+        grade: 'A', family: 'flat', originalType: '坡道平面',
+        officialPriceNtd: 2_000_000, officialAreaPing: 10, imputation: null, reasons: [],
+      },
+    }),
+    directParkingTransaction('known-c', {
+      parkingEvidence: {
+        grade: 'A', family: 'flat', originalType: '坡道平面',
+        officialPriceNtd: 3_000_000, officialAreaPing: 20, imputation: null, reasons: [],
+      },
+    }),
+  ];
+
+  const result = estimateParking({ ...subject, knownPriceNtd: 3_000_000 }, candidates, '2026-01-15');
+
+  assert.deepEqual(result?.pairP50, { priceNtd: 3_000_000, areaPing: 20 });
 });
 
 test('combines each valid building observation with each valid parking pair', () => {

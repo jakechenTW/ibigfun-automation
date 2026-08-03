@@ -27,6 +27,7 @@ const transaction: MarketTransaction = {
   parkingPriceNtd: 0,
   parkingAreaPing: 0,
   buildingUnitPriceWan: 100,
+  buildingUnitPriceBoundsWan: null,
   parkingEvidence: {
     grade: 'A',
     family: 'none',
@@ -47,6 +48,7 @@ const transaction: MarketTransaction = {
   originalPrimaryUse: '住家用',
   primaryUse: 'residential',
   transferredBuildingCount: 1,
+  transferredParkingCount: 0,
 };
 
 test('builds an auditable official query locator without claiming a transaction deep link', () => {
