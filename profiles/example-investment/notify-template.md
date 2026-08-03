@@ -11,14 +11,18 @@
 - 接近門檻：{{near_threshold_count}} 筆
 - 目標日排除：{{excluded_count}} 筆
 - 可疑/待查：{{suspicious_count}} 筆
-- 官方行情｜可靠：{{market_reliable_count}} 筆・待覆核：{{market_review_count}} 筆・不可用：{{market_unavailable_count}} 筆・資料偏舊：{{market_stale_count}} 筆
+- 用途情境決策｜條件式推薦：{{conditional_recommended_count}} 筆・用途待確認：{{use_confirmation_count}} 筆・人工複核：{{scenario_manual_review_count}} 筆
+- 相容行情稽核（非分桶權威）｜可靠：{{market_reliable_count}} 筆・待覆核：{{market_review_count}} 筆・不可用：{{market_unavailable_count}} 筆・資料偏舊：{{market_stale_count}} 筆
 - 主要排除原因：{{main_exclusion_reasons}}
 - 房貸假設：8 成貸、年利率 2.6%、30 年本息平均攤還
-- 推薦門檻：`開價溢價 ≤ 該市 p*/2`（`p*` 由議價率換算，見 `data/negotiation-rate.md`）
+- 推薦門檻：已驗證用途取 accepted 同用途情境；用途未知須至少兩個 accepted 情境（必含住宅）
+  全部符合 `−10% < P25 開價溢價 ≤ 該市 p*/2`，且無 diagnostic 或 bundle 衝突
 - 接近門檻：`p*/2 < 開價溢價 ≤ p*`
 - 排除：`開價溢價 > p*`；可疑/待查：`開價溢價 ≤ −10%`（異常低）或法拍/資訊過少等軟標記
 - 區域閘門：最近捷運站不在目標白名單（目標捷運站外）或白名單站但可靠步行 >10 分（站內走路過遠）即排除，只計數不逐列（見 `data/region-allowlist.md`）
 - 可疑/待查：法拍／資訊過少／無室內圖等由 agent 軟標記,降權但不自動移除
+- 用途來源：只認 `marketScenarios.registeredUse` 的 official/manual 證據；房源標題與描述不驗證用途
+- 實價連結：逐筆 `[內政部查詢]` 只開啟查詢服務入口，須以列示條件定位，並非精確交易列直連
 
 ### 推薦物件
 
@@ -26,16 +30,29 @@
 
 {{#each recommended}}
 
-#### {{rank}}. [{{title}}]({{url}}) ｜ 開價溢價 {{premium_percent}}%
+#### {{rank}}. [{{title}}]({{url}}) ｜ 開價溢價 {{premium_percent}}%・{{use_decision_label}}
 
 - {{walk_line}}
 - {{tenure_line}}
 - {{price}} 萬／{{ping}} 坪／{{unit_price}} 萬/坪・{{floor}}/{{total_floor}} 樓・屋齡 {{age}}・{{address_or_area}}
-- 行情狀態 {{market_status}}｜官方中位 {{market_median_wan}} 萬/坪（P25–P75 {{market_p25_wan}}–{{market_p75_wan}}）・信心 {{market_confidence}}・可比 {{comparable_count}} 筆・階段 {{selected_stage}}・官方資料 {{official_source_date}}（{{market_freshness}}）
-- 房貸 {{monthly_mortgage}}・月租 ~{{estimated_rent}}（參考）・現金流 ~{{monthly_cash_flow}}/月（參考）
-{{#if market_requires_review}}
+- 登記用途 {{registered_use_value}}（來源 {{registered_use_source}}・{{registered_use_detail}}）
 
-- 需人工確認：{{market_manual_review_reason}}
+| 登記用途情境 | 建物單價 P25／P50／P75 | 含車位總價 P25／P50／P75 | A／B／C 筆數 | 狀態 | 判斷 |
+|---|---:|---:|---:|---|---|
+{{#each market_scenarios}}
+| {{use_label}} | {{building_p25_wan}}／{{building_p50_wan}}／{{building_p75_wan}} 萬/坪 | {{bundle_p25_wan}}／{{bundle_p50_wan}}／{{bundle_p75_wan}} 萬 | {{grade_a_count}}／{{grade_b_count}}／{{grade_c_count}} | {{scenario_status_summary}} | {{scenario_judgment}} |
+{{/each}}
+
+{{#each market_scenarios}}
+{{#each influential_comparables}}
+- {{../use_label}} 最具影響可比：{{transaction_month}}・{{district}} {{address_or_road}}・{{floor}} 樓・{{total_area_ping}} 坪・{{total_price_wan}} 萬・車位 {{parking_evidence}}・距離 {{distance_min_m}}–{{distance_max_m}} 公尺・{{imputation_label}}・[內政部查詢](https://lvr.land.moi.gov.tw/)
+{{/each}}
+{{/each}}
+
+- 房貸 {{monthly_mortgage}}・月租 ~{{estimated_rent}}（參考）・現金流 ~{{monthly_cash_flow}}/月（參考）
+{{#if scenario_requires_review}}
+
+- 需人工確認：{{scenario_manual_review_reason}}
 
 {{/if}}
 - 覆核：{{valuation_review_line}}
@@ -46,7 +63,8 @@
 
 {{else}}
 
-- 無符合 `開價溢價 ≤ p*/2` 的推薦物件。
+- 無已驗證用途或符合 unknown-use 條件式規則、且所有 controlling/supported 情境皆通過
+  `−10% < P25 開價溢價 ≤ p*/2` 的推薦物件。
 
 {{/if}}
 
@@ -56,16 +74,29 @@
 
 {{#each near_threshold}}
 
-#### {{rank}}. [{{title}}]({{url}}) ｜ 開價溢價 {{premium_percent}}%・差在 {{near_threshold_reason}}
+#### {{rank}}. [{{title}}]({{url}}) ｜ 開價溢價 {{premium_percent}}%・差在 {{near_threshold_reason}}・{{use_decision_label}}
 
 - {{walk_line}}
 - {{tenure_line}}
 - {{price}} 萬／{{ping}} 坪／{{unit_price}} 萬/坪・{{floor}}/{{total_floor}} 樓・屋齡 {{age}}・{{address_or_area}}
-- 行情狀態 {{market_status}}｜官方中位 {{market_median_wan}} 萬/坪（P25–P75 {{market_p25_wan}}–{{market_p75_wan}}）・信心 {{market_confidence}}・可比 {{comparable_count}} 筆・階段 {{selected_stage}}・官方資料 {{official_source_date}}（{{market_freshness}}）
-- 房貸 {{monthly_mortgage}}・月租 ~{{estimated_rent}}（參考）・現金流 ~{{monthly_cash_flow}}/月（參考）
-{{#if market_requires_review}}
+- 登記用途 {{registered_use_value}}（來源 {{registered_use_source}}・{{registered_use_detail}}）
 
-- 需人工確認：{{market_manual_review_reason}}
+| 登記用途情境 | 建物單價 P25／P50／P75 | 含車位總價 P25／P50／P75 | A／B／C 筆數 | 狀態 | 判斷 |
+|---|---:|---:|---:|---|---|
+{{#each market_scenarios}}
+| {{use_label}} | {{building_p25_wan}}／{{building_p50_wan}}／{{building_p75_wan}} 萬/坪 | {{bundle_p25_wan}}／{{bundle_p50_wan}}／{{bundle_p75_wan}} 萬 | {{grade_a_count}}／{{grade_b_count}}／{{grade_c_count}} | {{scenario_status_summary}} | {{scenario_judgment}} |
+{{/each}}
+
+{{#each market_scenarios}}
+{{#each influential_comparables}}
+- {{../use_label}} 最具影響可比：{{transaction_month}}・{{district}} {{address_or_road}}・{{floor}} 樓・{{total_area_ping}} 坪・{{total_price_wan}} 萬・車位 {{parking_evidence}}・距離 {{distance_min_m}}–{{distance_max_m}} 公尺・{{imputation_label}}・[內政部查詢](https://lvr.land.moi.gov.tw/)
+{{/each}}
+{{/each}}
+
+- 房貸 {{monthly_mortgage}}・月租 ~{{estimated_rent}}（參考）・現金流 ~{{monthly_cash_flow}}/月（參考）
+{{#if scenario_requires_review}}
+
+- 需人工確認：{{scenario_manual_review_reason}}
 
 {{/if}}
 - 覆核：{{valuation_review_line}}
@@ -75,7 +106,7 @@
 
 {{else}}
 
-- 無 `p*/2 < 開價溢價 ≤ p*` 的接近門檻候選。
+- 無價格接近、用途待確認或需人工複核的候選。
 
 {{/if}}
 
@@ -89,10 +120,23 @@
 
 - {{tenure_line}}
 - 命中訊號：{{suspicious_signals}}
-- 行情狀態 {{market_status}}｜官方中位 {{market_median_wan}} 萬/坪（P25–P75 {{market_p25_wan}}–{{market_p75_wan}}）・信心 {{market_confidence}}・可比 {{comparable_count}} 筆・階段 {{selected_stage}}・官方資料 {{official_source_date}}（{{market_freshness}}）
-{{#if market_requires_review}}
+- 登記用途 {{registered_use_value}}（來源 {{registered_use_source}}・{{registered_use_detail}}）
 
-- 需人工確認：{{market_manual_review_reason}}
+| 登記用途情境 | 建物單價 P25／P50／P75 | 含車位總價 P25／P50／P75 | A／B／C 筆數 | 狀態 | 判斷 |
+|---|---:|---:|---:|---|---|
+{{#each market_scenarios}}
+| {{use_label}} | {{building_p25_wan}}／{{building_p50_wan}}／{{building_p75_wan}} 萬/坪 | {{bundle_p25_wan}}／{{bundle_p50_wan}}／{{bundle_p75_wan}} 萬 | {{grade_a_count}}／{{grade_b_count}}／{{grade_c_count}} | {{scenario_status_summary}} | {{scenario_judgment}} |
+{{/each}}
+
+{{#each market_scenarios}}
+{{#each influential_comparables}}
+- {{../use_label}} 最具影響可比：{{transaction_month}}・{{district}} {{address_or_road}}・{{floor}} 樓・{{total_area_ping}} 坪・{{total_price_wan}} 萬・車位 {{parking_evidence}}・距離 {{distance_min_m}}–{{distance_max_m}} 公尺・{{imputation_label}}・[內政部查詢](https://lvr.land.moi.gov.tw/)
+{{/each}}
+{{/each}}
+
+{{#if scenario_requires_review}}
+
+- 需人工確認：{{scenario_manual_review_reason}}
 
 {{/if}}
 - 覆核：{{valuation_review_line}}
@@ -116,10 +160,23 @@
 
 - {{price}} 萬／{{ping}} 坪／{{unit_price}} 萬/坪・開價溢價 {{premium_percent}}%
 - {{tenure_line}}
-- 行情狀態 {{market_status}}｜官方中位 {{market_median_wan}} 萬/坪（P25–P75 {{market_p25_wan}}–{{market_p75_wan}}）・信心 {{market_confidence}}・可比 {{comparable_count}} 筆・階段 {{selected_stage}}・官方資料 {{official_source_date}}（{{market_freshness}}）
-{{#if market_requires_review}}
+- 登記用途 {{registered_use_value}}（來源 {{registered_use_source}}・{{registered_use_detail}}）
 
-- 需人工確認：{{market_manual_review_reason}}
+| 登記用途情境 | 建物單價 P25／P50／P75 | 含車位總價 P25／P50／P75 | A／B／C 筆數 | 狀態 | 判斷 |
+|---|---:|---:|---:|---|---|
+{{#each market_scenarios}}
+| {{use_label}} | {{building_p25_wan}}／{{building_p50_wan}}／{{building_p75_wan}} 萬/坪 | {{bundle_p25_wan}}／{{bundle_p50_wan}}／{{bundle_p75_wan}} 萬 | {{grade_a_count}}／{{grade_b_count}}／{{grade_c_count}} | {{scenario_status_summary}} | {{scenario_judgment}} |
+{{/each}}
+
+{{#each market_scenarios}}
+{{#each influential_comparables}}
+- {{../use_label}} 最具影響可比：{{transaction_month}}・{{district}} {{address_or_road}}・{{floor}} 樓・{{total_area_ping}} 坪・{{total_price_wan}} 萬・車位 {{parking_evidence}}・距離 {{distance_min_m}}–{{distance_max_m}} 公尺・{{imputation_label}}・[內政部查詢](https://lvr.land.moi.gov.tw/)
+{{/each}}
+{{/each}}
+
+{{#if scenario_requires_review}}
+
+- 需人工確認：{{scenario_manual_review_reason}}
 
 {{/if}}
 - 覆核：{{valuation_review_line}}
@@ -139,6 +196,7 @@
 - 屋況、漏水、頂樓防水、修繕成本
 - 貸款成數、銀行估價、利率條件
 - 是否有增建、頂加、權狀或用途問題
+- 登記用途／使用執照、貸款、稅務與轉售風險（用途未知或條件式推薦必列）
 - 實價登錄可比物件是否足夠接近
 
 ### 規則來源

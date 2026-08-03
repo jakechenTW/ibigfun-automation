@@ -45,8 +45,9 @@ Do these once before the first run; stop and ask the user if any fails:
    <target>` writes `state/runs/<profile>/<label>/enriched.json`): nearest MRT
    exit by **walking distance** (OpenRouteService foot routing over OSM),
    monthly mortgage, parsed numbers, reusable walk signals (`withinWalk`),
-   reliability flags, official `marketEstimate` evidence, and an advisory `signals.auctionKeyword` flag
-   the agent weighs (no longer an auto-exclusion — see Quality /
+   reliability flags, authoritative official `marketScenarios` evidence, the
+   one-release compatibility `marketEstimate`, and an advisory
+   `signals.auctionKeyword` flag the agent weighs (no longer an auto-exclusion — see Quality /
    Suspicious-Listing Judgment in docs/reporting-rules.md). Listings with an
    unreliable coordinate/route are marked `withinWalk: null` for manual review,
    never auto-excluded. See "Tooling" below.
@@ -55,13 +56,23 @@ Do these once before the first run; stop and ask the user if any fails:
    deterministic walk, and give a labelled verdict (likely-within / likely-far /
    unknown→human) → `docs/reporting-rules.md` (Walking-Distance Triage).
 6. Deduplicate by stable listing ID → `docs/automation-state.md`.
-7. Read each listing's deterministic `marketEstimate`: use the official median,
-   P25–P75, confidence, comparable count, selected stage, and source freshness.
-   P25 is the conservative investment gate; `review`, `unavailable`, low
-   confidence, stale sources, and inseparable parking are never auto-recommended.
-   A bounded external valuation may review a boundary case but never silently
-   overwrites official values; write `valuation-review.json` when it affects a
-   bucket → `docs/reporting-rules.md` and `profiles/<profile>/evaluation.md`.
+7. Read each listing's deterministic `marketScenarios`: evaluate exact official
+   primary-use cohorts separately, disclose direct/imputed/bundle-only parking
+   evidence as grades A/B/C, and use only cohorts authorized by the matching
+   per-cohort acceptance. For verified use, the accepted same-use scenario
+   controls and any residential scenario is comparison-only. For unknown use,
+   a recommendation is explicitly conditional and requires at least two
+   accepted scenarios including residential, every supported scenario passing
+   the profile's conservative P25 gate, and no conflicting diagnostic scenario;
+   otherwise route it according to the use-confirmation/manual-review rules.
+   Listing title prose never verifies registered use. Show compact scenario
+   evidence plus official-query locator fields and link to the Ministry query
+   service; the link is not an exact-row deep link. The legacy `marketEstimate`
+   remains only as labeled compatibility/notification-audit evidence for one
+   release. A bounded external valuation may review a boundary case but never
+   silently overwrites official scenario values; write `valuation-review.json`
+   when it affects a bucket → `docs/reporting-rules.md` and
+   `profiles/<profile>/evaluation.md`.
 8. Estimate the remaining profile-specific fields (for investment: rent; for
    self-use: fit, risks, and missing confirmations) →
    `docs/reporting-rules.md` and `profiles/<profile>/evaluation.md`.
@@ -96,11 +107,13 @@ evaluation, and writing the report.
 - `npm run market-data -- update --city taipei` — refreshes the local, validated
   Taipei official-data build without credentials. It obtains the Taipei City
   doorplate dataset and Ministry of the Interior real-price transaction ZIPs,
-  stages and validates them, classifies transactions as reliable-eligible,
-  review-only, or excluded, then runs the complete quality gate before
-  atomically publishing the candidate build and its matching schema-2
-  acceptance. A failed refresh retains the last-known-good build plus its
-  matching acceptance; this git-ignored local state is never committed.
+  stages and validates them, retains exact official primary-use cohorts,
+  classifies parking evidence as direct grade A, causally imputed grade B, or
+  bundle-only grade C, then runs the residential, shared-parking, and per-use
+  cohort gates before atomically publishing the schema-4 candidate build and
+  its matching aggregate schema-3 acceptance. A failed refresh retains the
+  last-known-good build plus its matching acceptance; this git-ignored local
+  state is never committed.
   Unchanged sources may return `not-modified` only when the active build already
   carries matching current-policy acceptance. Missing/old-policy acceptance
   forces a semantic rebuild and gate even when source bytes are unchanged.
@@ -133,7 +146,7 @@ evaluation, and writing the report.
   status, or backtest semantics change. When that bump changes transaction
   normalization or eligibility, use `update` to rebuild and publish the index;
   never use `backtest` to mint new acceptance for a pre-change index. The
-  schema-3 build manifest records the policy version that created its indexes;
+  schema-4 build manifest records the policy version that created its indexes;
   standalone backtest (including `--no-gate`) rejects missing or mismatched
   provenance before evaluating cases, and the acceptance writer revalidates
   that provenance plus the active transaction checksum before persistence.
@@ -147,7 +160,11 @@ evaluation, and writing the report.
   `<from>_<to>`. One run per profile and label is recorded under
   `state/runs/<profile>/<label>/`; artifacts are
   `state/runs/<profile>/<label>/{listings.json, enriched.json, report.md, valuation-review.json?}`.
-  `valuation-review.json` is optional and exists only if a bounded external review affects a report bucket; `mark report --status ok` binds every review to exactly one listing's authoritative `marketEstimate` even when notification status is `warn`/`fail`. A whole range is fetched in **one** query
+  `valuation-review.json` is optional and exists only if a bounded external
+  review affects a report bucket; `mark report --status ok` binds every review
+  to exactly one listing's compatibility `marketEstimate` audit fields even
+  when notification status is `warn`/`fail`, while `marketScenarios` remains
+  the report decision authority. A whole range is fetched in **one** query
   (`add_date`/`add_date_max`), deduped by listing id, and emitted as **one**
   merged report + **one** notification. Already-ok steps are skipped, so
   re-running resumes.
@@ -241,9 +258,10 @@ ai-notify --tool <codex|claude> --status <ok|warn|fail> \
   source files, indexes, manifest/checksums, and no credentials. It is
   checksum-closed, so undeclared files invalidate it. Its sibling
   `state/market-data/taipei-backtest-acceptance.json` contains only aggregate
-  schema-2 acceptance metrics keyed to the active transaction-index checksum,
-  active policy id, estimator policy version, and complete eligible
-  transaction-date coverage. Publication promotes this pair together. Optional
+  schema-3 acceptance metrics keyed to the active transaction-index checksum,
+  active policy id, estimator policy version, complete eligible
+  transaction-date coverage, exact-use cohorts, and the shared parking gate.
+  Publication promotes this pair together. Optional
   per-case diagnostic reports belong under
   `state/market-data/backtests/taipei/`, outside the active build.
 - `prompts/daily-run.md`: the committed headless worker prompt for the daily
