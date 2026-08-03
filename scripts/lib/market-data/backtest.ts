@@ -1,18 +1,29 @@
-import { estimateMarket } from './estimator.ts';
+import { estimateMarket, estimateWeightedBuildingPrices } from './estimator.ts';
 import {
   ACTIVE_ESTIMATOR_POLICY,
   BACKTEST_ACCEPTANCE_THRESHOLDS,
   ESTIMATOR_POLICY_VERSION,
+  HIGH_CONFIDENCE_MIN_COMPARABLES,
+  HIGH_IQR_RATIO,
+  MEDIUM_IQR_RATIO,
+  SCENARIO_BACKTEST_GATE,
 } from './config.ts';
 import type { EstimatorPolicy } from './config.ts';
+import { neighborGridKeys } from './grid.ts';
+import { estimateParking } from './parking.ts';
+import { selectScenarioComparables } from './selector.ts';
 import { weightedQuantile } from './statistics.ts';
+import { NORMALIZED_PRIMARY_USES, PARKING_GRADES } from './types.ts';
 import type {
-  BacktestAcceptance,
   BuildingType,
   EstimateConfidence,
   EstimateStatus,
   MarketSubject,
   MarketTransaction,
+  NormalizedPrimaryUse,
+  ParkingGrade,
+  ScenarioBacktestAcceptance,
+  ScenarioCohortAcceptance,
   SourceFreshness,
   TransactionIndex,
 } from './types.ts';
@@ -56,11 +67,33 @@ export interface BacktestReport {
   byBuildingType: Record<BuildingType, BacktestMetrics>;
   byConfidence: Record<EstimateConfidence, BacktestMetrics>;
   byStatus: Record<EstimateStatus, BacktestMetrics>;
+  byPrimaryUse: Record<Exclude<NormalizedPrimaryUse, 'unknown'>, BacktestMetrics>;
+  byParkingGrade: Record<ParkingGrade, BacktestMetrics>;
+  directOnly: BacktestMetrics;
+  directPlusImputed: BacktestMetrics;
+  parkingMaskedHoldout: ParkingMaskedHoldoutReport;
   work: {
     historicalIndexBuilds: number;
     historicalInsertions: number;
   };
   cases: BacktestCase[];
+}
+
+export interface ParkingMaskedHoldoutMetrics {
+  caseCount: number;
+  estimatedCount: number;
+  estimateCoverage: number;
+  priceMedianApe: number | null;
+  priceP75Ape: number | null;
+  areaMedianApe: number | null;
+  areaP75Ape: number | null;
+  priceIntervalCoverage: number | null;
+  areaIntervalCoverage: number | null;
+}
+
+export interface ParkingMaskedHoldoutReport {
+  overall: ParkingMaskedHoldoutMetrics;
+  byParkingFamily: Record<'flat' | 'mechanical', ParkingMaskedHoldoutMetrics>;
 }
 
 export interface BacktestGateResult {
@@ -90,6 +123,20 @@ function finitePositive(value: number | null): value is number {
   return value !== null && Number.isFinite(value) && value > 0;
 }
 
+function knownPrimaryUse(
+  value: NormalizedPrimaryUse,
+): value is Exclude<NormalizedPrimaryUse, 'unknown'> {
+  return value !== 'unknown';
+}
+
+function scenarioUseEligibilityAccepted(transaction: MarketTransaction): boolean {
+  return transaction.eligibility === 'reliable-eligible'
+    || (transaction.eligibility === 'review-only'
+      && transaction.primaryUse !== 'residential'
+      && transaction.eligibilityReasons.length === 1
+      && transaction.eligibilityReasons[0] === 'scenario-only-primary-use');
+}
+
 function transactionDate(transaction: MarketTransaction): Date | null {
   return parseIsoDate(transaction.transactionDate);
 }
@@ -107,6 +154,22 @@ export function heldOutTransactionEligible(transaction: MarketTransaction): bool
   const coordinate = transaction.location.coordinate;
   if (!subjectDate || !coordinate || !Number.isFinite(coordinate.lat) || !Number.isFinite(coordinate.lng)) return false;
   if (transaction.eligibility !== 'reliable-eligible') return false;
+  if (!transaction.district || transaction.ownership !== 'freehold') return false;
+  if (!finitePositive(transaction.buildingAreaPing) || !finitePositive(transaction.buildingUnitPriceWan)) return false;
+  if (!Number.isFinite(transaction.floor) || !Number.isFinite(transaction.totalFloors) || transaction.totalFloors <= 0) return false;
+  return transaction.buildingType === 'apartment'
+    || ageYearsAt(transaction.completionDate, subjectDate) !== null;
+}
+
+/** Scenario cohorts admit exact known-use grade-A sales without changing legacy eligibility. */
+function scenarioHeldOutTransactionEligible(transaction: MarketTransaction): boolean {
+  const subjectDate = transactionDate(transaction);
+  const coordinate = transaction.location.coordinate;
+  if (!subjectDate || !coordinate || !Number.isFinite(coordinate.lat) || !Number.isFinite(coordinate.lng)) return false;
+  if (!scenarioUseEligibilityAccepted(transaction)
+    || !knownPrimaryUse(transaction.primaryUse)
+    || transaction.transferredBuildingCount !== 1
+    || transaction.parkingEvidence.grade !== 'A') return false;
   if (!transaction.district || transaction.ownership !== 'freehold') return false;
   if (!finitePositive(transaction.buildingAreaPing) || !finitePositive(transaction.buildingUnitPriceWan)) return false;
   if (!Number.isFinite(transaction.floor) || !Number.isFinite(transaction.totalFloors) || transaction.totalFloors <= 0) return false;
@@ -150,17 +213,29 @@ function allTransactions(index: TransactionIndex): IndexedTransaction[] {
       || left.transaction.id.localeCompare(right.transaction.id));
 }
 
-function latestEligibleDate(entries: readonly IndexedTransaction[]): string | null {
+function latestDate(
+  entries: readonly IndexedTransaction[],
+  eligible: (transaction: MarketTransaction) => boolean,
+): string | null {
   let latest: string | null = null;
   for (const { transaction } of entries) {
-    if (heldOutTransactionEligible(transaction)) latest = transaction.transactionDate;
+    if (eligible(transaction)) latest = transaction.transactionDate;
   }
   return latest;
+}
+
+function latestEligibleDate(entries: readonly IndexedTransaction[]): string | null {
+  return latestDate(entries, heldOutTransactionEligible);
 }
 
 /** Latest held-out-eligible transaction represented by the complete deduplicated index. */
 export function latestEligibleTransactionDate(index: TransactionIndex): string | null {
   return latestEligibleDate(allTransactions(index));
+}
+
+/** Complete coverage boundary for schema-3 exact-use scenario acceptance. */
+export function latestScenarioEligibleTransactionDate(index: TransactionIndex): string | null {
+  return latestDate(allTransactions(index), scenarioHeldOutTransactionEligible);
 }
 
 const BACKTEST_FRESHNESS: SourceFreshness = {
@@ -181,6 +256,145 @@ function metrics(cases: readonly BacktestCase[]): BacktestMetrics {
     p75Ape: apes.length === 0 ? null : weightedQuantile(apes, 0.75),
     bias: estimated.length === 0 ? null : estimated.reduce((total, backtestCase) => total + backtestCase.bias!, 0) / estimated.length,
     intervalCoverage: estimated.length === 0 ? null : estimated.filter((backtestCase) => backtestCase.intervalHit).length / estimated.length,
+  };
+}
+
+interface ScenarioBacktestCase extends BacktestCase {
+  primaryUse: Exclude<NormalizedPrimaryUse, 'unknown'>;
+  parkingGrade: ParkingGrade;
+}
+
+interface MaskedParkingCase {
+  family: 'flat' | 'mechanical';
+  priceApe: number | null;
+  areaApe: number | null;
+  priceIntervalHit: boolean | null;
+  areaIntervalHit: boolean | null;
+}
+
+function nearbyHistoricalTransactions(
+  subject: MarketSubject,
+  historicalIndex: TransactionIndex,
+  policy: EstimatorPolicy,
+): MarketTransaction[] {
+  const maximumRadiusM = Math.max(...policy.stages.map((stage) => stage.radiusM));
+  const byId = new Map<string, MarketTransaction>();
+  for (const cellKey of neighborGridKeys(subject.coordinate, maximumRadiusM)) {
+    for (const transaction of historicalIndex.cells[cellKey] ?? []) byId.set(transaction.id, transaction);
+  }
+  return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function scenarioConfidence(
+  comparableCount: number,
+  p25: number,
+  median: number,
+  p75: number,
+  selectedStage: number | null,
+  policy: EstimatorPolicy,
+): EstimateConfidence {
+  const iqrRatio = (p75 - p25) / median;
+  const stage = selectedStage === null ? null : policy.stages[selectedStage - 1] ?? null;
+  if (comparableCount >= HIGH_CONFIDENCE_MIN_COMPARABLES
+    && stage?.confidenceClass === 'standard'
+    && iqrRatio <= HIGH_IQR_RATIO) return 'high';
+  return comparableCount >= 3 && iqrRatio <= MEDIUM_IQR_RATIO ? 'medium' : 'low';
+}
+
+function scenarioBacktestCase(
+  transaction: MarketTransaction,
+  historicalIndex: TransactionIndex,
+  policy: EstimatorPolicy,
+  allowImputedParking: boolean,
+): ScenarioBacktestCase {
+  const primaryUse = transaction.primaryUse as Exclude<NormalizedPrimaryUse, 'unknown'>;
+  const actual = transaction.buildingUnitPriceWan!;
+  const subject = backtestSubjectFromTransaction(transaction);
+  const selection = selectScenarioComparables(
+    subject,
+    nearbyHistoricalTransactions(subject, historicalIndex, policy),
+    transaction.transactionDate,
+    { primaryUse, allowImputedParking },
+    policy,
+  );
+  const weighted = estimateWeightedBuildingPrices(selection.included);
+  const median = weighted.marketUnitPriceMedian;
+  const p25 = weighted.marketUnitPriceP25;
+  const p75 = weighted.marketUnitPriceP75;
+  const canScore = weighted.comparables.length >= 3
+    && median !== null && p25 !== null && p75 !== null;
+  const confidence = canScore
+    ? scenarioConfidence(weighted.comparables.length, p25, median, p75, selection.selectedStage, policy)
+    : 'low';
+  const status: EstimateStatus = !canScore ? 'unavailable' : confidence === 'low' ? 'review' : 'reliable';
+  return {
+    subjectDate: transaction.transactionDate,
+    buildingType: transaction.buildingType,
+    primaryUse,
+    parkingGrade: transaction.parkingEvidence.grade,
+    confidence,
+    status,
+    actualUnitPriceWan: actual,
+    estimatedUnitPriceWan: canScore ? median : null,
+    estimatedP25Wan: canScore ? p25 : null,
+    estimatedP75Wan: canScore ? p75 : null,
+    ape: canScore ? Math.abs(median - actual) / actual : null,
+    bias: canScore ? (median - actual) / actual : null,
+    intervalHit: canScore ? actual >= p25 && actual <= p75 : null,
+    comparableDates: weighted.comparables
+      .map((candidate) => candidate.transaction.transactionDate)
+      .sort(),
+  };
+}
+
+function maskedParkingCase(
+  transaction: MarketTransaction,
+  historicalIndex: TransactionIndex,
+  policy: EstimatorPolicy,
+): MaskedParkingCase | null {
+  const family = transaction.parkingEvidence.family;
+  const actualPrice = transaction.parkingEvidence.officialPriceNtd;
+  const actualArea = transaction.parkingEvidence.officialAreaPing;
+  const coordinate = transaction.location.coordinate;
+  if (transaction.parkingEvidence.grade !== 'A'
+    || (family !== 'flat' && family !== 'mechanical')
+    || !finitePositive(actualPrice) || !finitePositive(actualArea)
+    || !coordinate || !Number.isFinite(coordinate.lat) || !Number.isFinite(coordinate.lng)) return null;
+  const subject = backtestSubjectFromTransaction(transaction);
+  const estimate = estimateParking({
+    coordinate,
+    matchedAddress: transaction.location.matchedAddress,
+    buildingType: transaction.buildingType,
+    family,
+  }, nearbyHistoricalTransactions(subject, historicalIndex, policy), transaction.transactionDate);
+  return {
+    family,
+    priceApe: estimate ? Math.abs(estimate.priceP50Ntd - actualPrice) / actualPrice : null,
+    areaApe: estimate ? Math.abs(estimate.areaP50Ping - actualArea) / actualArea : null,
+    priceIntervalHit: estimate ? actualPrice >= estimate.priceP25Ntd && actualPrice <= estimate.priceP75Ntd : null,
+    areaIntervalHit: estimate ? actualArea >= estimate.areaP25Ping && actualArea <= estimate.areaP75Ping : null,
+  };
+}
+
+function maskedParkingMetrics(cases: readonly MaskedParkingCase[]): ParkingMaskedHoldoutMetrics {
+  const estimated = cases.filter((item) => item.priceApe !== null && item.areaApe !== null
+    && item.priceIntervalHit !== null && item.areaIntervalHit !== null);
+  const priceApes = estimated.map((item, index) => ({ id: String(index), value: item.priceApe!, weight: 1 }));
+  const areaApes = estimated.map((item, index) => ({ id: String(index), value: item.areaApe!, weight: 1 }));
+  return {
+    caseCount: cases.length,
+    estimatedCount: estimated.length,
+    estimateCoverage: cases.length === 0 ? 0 : estimated.length / cases.length,
+    priceMedianApe: priceApes.length === 0 ? null : weightedQuantile(priceApes, 0.5),
+    priceP75Ape: priceApes.length === 0 ? null : weightedQuantile(priceApes, 0.75),
+    areaMedianApe: areaApes.length === 0 ? null : weightedQuantile(areaApes, 0.5),
+    areaP75Ape: areaApes.length === 0 ? null : weightedQuantile(areaApes, 0.75),
+    priceIntervalCoverage: estimated.length === 0
+      ? null
+      : estimated.filter((item) => item.priceIntervalHit).length / estimated.length,
+    areaIntervalCoverage: estimated.length === 0
+      ? null
+      : estimated.filter((item) => item.areaIntervalHit).length / estimated.length,
   };
 }
 
@@ -229,7 +443,7 @@ export function backtestAcceptance(
   report: BacktestReport,
   transactionArtifactSha256: string,
   approvedAt: string,
-): BacktestAcceptance {
+): ScenarioBacktestAcceptance {
   const gate = evaluateBacktestGate(report);
   const reliable = report.byStatus.reliable;
   const high = report.byConfidence.high;
@@ -239,8 +453,32 @@ export function backtestAcceptance(
     || report.latestEligibleTransactionDate === null) {
     throw new Error(`Backtest does not pass acceptance: ${gate.reasons.join(', ')}`);
   }
+  const useCohorts = Object.fromEntries(
+    NORMALIZED_PRIMARY_USES.filter(knownPrimaryUse).map((primaryUse) => [
+      primaryUse,
+      scenarioCohortAcceptance(report.byPrimaryUse[primaryUse]),
+    ]),
+  ) as ScenarioBacktestAcceptance['useCohorts'];
+  const direct = report.directOnly;
+  const imputed = report.directPlusImputed;
+  const biasRegression = direct.bias === null || imputed.bias === null
+    ? null
+    : Math.abs(imputed.bias) - Math.abs(direct.bias);
+  const intervalCoverageRegression = direct.intervalCoverage === null || imputed.intervalCoverage === null
+    ? null
+    : direct.intervalCoverage - imputed.intervalCoverage;
+  const parkingComparison: ScenarioBacktestAcceptance['parkingComparison'] = {
+    directCoverage: direct.estimateCoverage,
+    imputedCoverage: imputed.estimateCoverage,
+    directMedianApe: direct.medianApe,
+    imputedMedianApe: imputed.medianApe,
+    directP75Ape: direct.p75Ape,
+    imputedP75Ape: imputed.p75Ape,
+    biasRegression,
+    intervalCoverageRegression,
+  };
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
     policyId: report.policyId,
     transactionArtifactSha256,
@@ -248,7 +486,7 @@ export function backtestAcceptance(
     asOf: report.asOf,
     evaluatedThrough: report.asOf,
     latestEligibleTransactionDate: report.latestEligibleTransactionDate,
-    thresholds: { ...BACKTEST_GATE },
+    thresholds: { ...BACKTEST_GATE, ...SCENARIO_BACKTEST_GATE },
     metrics: {
       estimateCoverage: report.overall.estimateCoverage,
       reliableEstimatedCount: reliable.estimatedCount,
@@ -259,7 +497,55 @@ export function backtestAcceptance(
       mediumConfidenceEstimatedCount: medium.estimatedCount,
       mediumConfidenceMedianApe: medium.medianApe,
     },
+    useCohorts,
+    parkingImputationAccepted: parkingComparisonAccepted(parkingComparison),
+    parkingComparison,
   };
+}
+
+function scenarioCohortAcceptance(metric: BacktestMetrics): ScenarioCohortAcceptance {
+  const reasons: string[] = [];
+  if (metric.estimatedCount < SCENARIO_BACKTEST_GATE.minimumUseCohortCases) {
+    reasons.push('insufficient-use-cohort-cases');
+  }
+  if (metric.medianApe === null || metric.p75Ape === null
+    || metric.bias === null || metric.intervalCoverage === null) {
+    reasons.push('incomplete-use-cohort-metrics');
+  } else {
+    if (metric.medianApe > SCENARIO_BACKTEST_GATE.medianApeMax) {
+      reasons.push('median-ape-target-missed');
+    }
+    if (metric.p75Ape > SCENARIO_BACKTEST_GATE.p75ApeMax) {
+      reasons.push('p75-ape-target-missed');
+    }
+  }
+  const status: ScenarioCohortAcceptance['status'] = metric.estimatedCount < SCENARIO_BACKTEST_GATE.minimumUseCohortCases
+    ? 'diagnostic-only'
+    : reasons.length === 0 ? 'accepted' : 'failed';
+  return {
+    status,
+    scoredCases: metric.estimatedCount,
+    estimateCoverage: metric.estimateCoverage,
+    medianApe: metric.medianApe,
+    p75Ape: metric.p75Ape,
+    bias: metric.bias,
+    intervalCoverage: metric.intervalCoverage,
+    reasons,
+  };
+}
+
+function parkingComparisonAccepted(
+  comparison: ScenarioBacktestAcceptance['parkingComparison'],
+): boolean {
+  return comparison.imputedCoverage > comparison.directCoverage
+    && comparison.imputedMedianApe !== null
+    && comparison.imputedMedianApe <= SCENARIO_BACKTEST_GATE.medianApeMax
+    && comparison.imputedP75Ape !== null
+    && comparison.imputedP75Ape <= SCENARIO_BACKTEST_GATE.p75ApeMax
+    && comparison.biasRegression !== null
+    && comparison.biasRegression <= SCENARIO_BACKTEST_GATE.maximumAbsoluteBiasRegression + Number.EPSILON
+    && comparison.intervalCoverageRegression !== null
+    && comparison.intervalCoverageRegression <= SCENARIO_BACKTEST_GATE.maximumIntervalCoverageRegression + Number.EPSILON;
 }
 
 /**
@@ -272,7 +558,7 @@ export function backtestTransactions(index: TransactionIndex, options: BacktestO
   const policy = options.policy ?? ACTIVE_ESTIMATOR_POLICY;
 
   const completeEntries = allTransactions(index);
-  const completeLatestEligibleDate = latestEligibleDate(completeEntries);
+  const completeLatestEligibleDate = latestDate(completeEntries, scenarioHeldOutTransactionEligible);
   const entries = completeEntries.filter(({ transaction }) => {
     const date = transactionDate(transaction);
     return date !== null && date <= asOf;
@@ -280,6 +566,9 @@ export function backtestTransactions(index: TransactionIndex, options: BacktestO
   const historicalCells: TransactionIndex['cells'] = {};
   const historicalIndex: TransactionIndex = { ...index, cells: historicalCells };
   const cases: BacktestCase[] = [];
+  const directOnlyCases: ScenarioBacktestCase[] = [];
+  const directPlusImputedCases: ScenarioBacktestCase[] = [];
+  const parkingMaskedCases: MaskedParkingCase[] = [];
   let historicalInsertions = 0;
   for (let start = 0; start < entries.length;) {
     let end = start + 1;
@@ -287,34 +576,42 @@ export function backtestTransactions(index: TransactionIndex, options: BacktestO
     while (end < entries.length && entries[end]!.transaction.transactionDate === subjectDate) end += 1;
 
     for (const { transaction } of entries.slice(start, end)) {
-      if (!heldOutTransactionEligible(transaction)) continue;
-      const actual = transaction.buildingUnitPriceWan;
-      if (!finitePositive(actual)) continue;
-      const estimate = estimateMarket(
-        backtestSubjectFromTransaction(transaction),
-        historicalIndex,
-        BACKTEST_FRESHNESS,
-        transaction.transactionDate,
-        { allowMissingAskingUnitPrice: true, policy },
-      );
-      const median = estimate.marketUnitPriceMedian;
-      const p25 = estimate.marketUnitPriceP25;
-      const p75 = estimate.marketUnitPriceP75;
-      const canScore = median !== null && p25 !== null && p75 !== null;
-      cases.push({
-        subjectDate: transaction.transactionDate,
-        buildingType: transaction.buildingType,
-        confidence: estimate.confidence,
-        status: estimate.status,
-        actualUnitPriceWan: actual,
-        estimatedUnitPriceWan: median,
-        estimatedP25Wan: p25,
-        estimatedP75Wan: p75,
-        ape: canScore ? Math.abs(median - actual) / actual : null,
-        bias: canScore ? (median - actual) / actual : null,
-        intervalHit: canScore ? actual >= p25 && actual <= p75 : null,
-        comparableDates: estimate.comparables.map((candidate) => candidate.transaction.transactionDate).sort(),
-      });
+      if (heldOutTransactionEligible(transaction)) {
+        const actual = transaction.buildingUnitPriceWan;
+        if (finitePositive(actual)) {
+          const estimate = estimateMarket(
+            backtestSubjectFromTransaction(transaction),
+            historicalIndex,
+            BACKTEST_FRESHNESS,
+            transaction.transactionDate,
+            { allowMissingAskingUnitPrice: true, policy },
+          );
+          const median = estimate.marketUnitPriceMedian;
+          const p25 = estimate.marketUnitPriceP25;
+          const p75 = estimate.marketUnitPriceP75;
+          const canScore = median !== null && p25 !== null && p75 !== null;
+          cases.push({
+            subjectDate: transaction.transactionDate,
+            buildingType: transaction.buildingType,
+            confidence: estimate.confidence,
+            status: estimate.status,
+            actualUnitPriceWan: actual,
+            estimatedUnitPriceWan: median,
+            estimatedP25Wan: p25,
+            estimatedP75Wan: p75,
+            ape: canScore ? Math.abs(median - actual) / actual : null,
+            bias: canScore ? (median - actual) / actual : null,
+            intervalHit: canScore ? actual >= p25 && actual <= p75 : null,
+            comparableDates: estimate.comparables.map((candidate) => candidate.transaction.transactionDate).sort(),
+          });
+        }
+      }
+      if (scenarioHeldOutTransactionEligible(transaction)) {
+        directOnlyCases.push(scenarioBacktestCase(transaction, historicalIndex, policy, false));
+        directPlusImputedCases.push(scenarioBacktestCase(transaction, historicalIndex, policy, true));
+      }
+      const parkingCase = maskedParkingCase(transaction, historicalIndex, policy);
+      if (parkingCase) parkingMaskedCases.push(parkingCase);
     }
     for (const { cellKey, transaction } of entries.slice(start, end)) {
       (historicalCells[cellKey] ??= []).push(transaction);
@@ -322,6 +619,16 @@ export function backtestTransactions(index: TransactionIndex, options: BacktestO
     }
     start = end;
   }
+
+  const knownUses = NORMALIZED_PRIMARY_USES.filter(knownPrimaryUse);
+  const byPrimaryUse = Object.fromEntries(knownUses.map((primaryUse) => [
+    primaryUse,
+    metrics(directPlusImputedCases.filter((backtestCase) => backtestCase.primaryUse === primaryUse)),
+  ])) as Record<Exclude<NormalizedPrimaryUse, 'unknown'>, BacktestMetrics>;
+  const byParkingGrade = Object.fromEntries(PARKING_GRADES.map((parkingGrade) => [
+    parkingGrade,
+    metrics(directPlusImputedCases.filter((backtestCase) => backtestCase.parkingGrade === parkingGrade)),
+  ])) as Record<ParkingGrade, BacktestMetrics>;
 
   return {
     asOf: options.asOf,
@@ -342,6 +649,17 @@ export function backtestTransactions(index: TransactionIndex, options: BacktestO
       reliable: metrics(cases.filter((backtestCase) => backtestCase.status === 'reliable')),
       review: metrics(cases.filter((backtestCase) => backtestCase.status === 'review')),
       unavailable: metrics(cases.filter((backtestCase) => backtestCase.status === 'unavailable')),
+    },
+    byPrimaryUse,
+    byParkingGrade,
+    directOnly: metrics(directOnlyCases),
+    directPlusImputed: metrics(directPlusImputedCases),
+    parkingMaskedHoldout: {
+      overall: maskedParkingMetrics(parkingMaskedCases),
+      byParkingFamily: {
+        flat: maskedParkingMetrics(parkingMaskedCases.filter((item) => item.family === 'flat')),
+        mechanical: maskedParkingMetrics(parkingMaskedCases.filter((item) => item.family === 'mechanical')),
+      },
     },
     work: { historicalIndexBuilds: 1, historicalInsertions },
     cases,

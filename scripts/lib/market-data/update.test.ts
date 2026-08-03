@@ -666,7 +666,7 @@ test('unchanged legacy or old-provenance sources force current-semantic schema-3
     migrated?.backtestAcceptance?.transactionArtifactSha256,
     migrated?.manifest.artifacts['transactions-index.json']?.sha256,
   );
-  assert.equal(migrated?.backtestAcceptance?.schemaVersion, 2);
+  assert.equal(migrated?.backtestAcceptance?.schemaVersion, 3);
   assert.equal(migrated?.backtestAcceptance?.estimatorPolicyVersion, ESTIMATOR_POLICY_VERSION);
   assert.equal(marketDataBacktestAccepted(migrated!), true);
 

@@ -21,6 +21,14 @@ export const BACKTEST_ACCEPTANCE_THRESHOLDS = {
   minimumHighConfidenceImprovement: 0.01,
 } as const;
 
+export const SCENARIO_BACKTEST_GATE = {
+  minimumUseCohortCases: 20,
+  medianApeMax: 0.12,
+  p75ApeMax: 0.20,
+  maximumAbsoluteBiasRegression: 0.01,
+  maximumIntervalCoverageRegression: 0.05,
+} as const;
+
 export const PARKING_POLICY = {
   minimumDirectComparables: 3,
   nearbyRadiusM: 500,

@@ -318,9 +318,26 @@ export interface MarketDataManifest {
   }>;
 }
 
-/** Aggregate-only proof that one exact transaction index passed the quality gate. */
-export interface BacktestAcceptance {
-  schemaVersion: 2;
+export interface BacktestAcceptanceThresholds {
+  medianApeMax: number;
+  p75ApeMax: number;
+  minimumEstimateCoverage: number;
+  minimumConfidenceSliceCases: number;
+  minimumHighConfidenceImprovement: number;
+}
+
+export interface BacktestAcceptanceMetrics {
+  estimateCoverage: number;
+  reliableEstimatedCount: number;
+  reliableMedianApe: number;
+  reliableP75Ape: number;
+  highConfidenceEstimatedCount: number;
+  highConfidenceMedianApe: number;
+  mediumConfidenceEstimatedCount: number;
+  mediumConfidenceMedianApe: number;
+}
+
+interface BacktestAcceptanceIdentity {
   estimatorPolicyVersion: number;
   policyId: EstimatorPolicy['id'];
   transactionArtifactSha256: string;
@@ -328,24 +345,50 @@ export interface BacktestAcceptance {
   asOf: string;
   evaluatedThrough: string;
   latestEligibleTransactionDate: string;
-  thresholds: {
-    medianApeMax: number;
-    p75ApeMax: number;
-    minimumEstimateCoverage: number;
-    minimumConfidenceSliceCases: number;
-    minimumHighConfidenceImprovement: number;
+}
+
+/** Legacy residential-only proof retained until the scenario policy activates. */
+export interface LegacyBacktestAcceptance extends BacktestAcceptanceIdentity {
+  schemaVersion: 2;
+  thresholds: BacktestAcceptanceThresholds;
+  metrics: BacktestAcceptanceMetrics;
+}
+
+export interface ScenarioCohortAcceptance {
+  status: 'accepted' | 'diagnostic-only' | 'failed';
+  scoredCases: number;
+  estimateCoverage: number;
+  medianApe: number | null;
+  p75Ape: number | null;
+  bias: number | null;
+  intervalCoverage: number | null;
+  reasons: string[];
+}
+
+export interface ScenarioBacktestAcceptance extends BacktestAcceptanceIdentity {
+  schemaVersion: 3;
+  thresholds: BacktestAcceptanceThresholds & {
+    minimumUseCohortCases: number;
+    maximumAbsoluteBiasRegression: number;
+    maximumIntervalCoverageRegression: number;
   };
-  metrics: {
-    estimateCoverage: number;
-    reliableEstimatedCount: number;
-    reliableMedianApe: number;
-    reliableP75Ape: number;
-    highConfidenceEstimatedCount: number;
-    highConfidenceMedianApe: number;
-    mediumConfidenceEstimatedCount: number;
-    mediumConfidenceMedianApe: number;
+  metrics: BacktestAcceptanceMetrics;
+  useCohorts: Record<Exclude<NormalizedPrimaryUse, 'unknown'>, ScenarioCohortAcceptance>;
+  parkingImputationAccepted: boolean;
+  parkingComparison: {
+    directCoverage: number;
+    imputedCoverage: number;
+    directMedianApe: number | null;
+    imputedMedianApe: number | null;
+    directP75Ape: number | null;
+    imputedP75Ape: number | null;
+    biasRegression: number | null;
+    intervalCoverageRegression: number | null;
   };
 }
+
+/** Aggregate-only proof that one exact transaction index passed the residential global gate. */
+export type BacktestAcceptance = LegacyBacktestAcceptance | ScenarioBacktestAcceptance;
 
 export interface MarketDataBundle {
   manifest: MarketDataManifest;

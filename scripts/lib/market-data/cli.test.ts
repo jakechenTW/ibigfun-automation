@@ -401,6 +401,7 @@ test('backtest acceptance writer cannot race a locked update into a stale final 
   const writerCanFinish = new Promise<void>((resolve) => { releaseWriter = resolve; });
   const writerStarted = new Promise<void>((resolve) => { writerReached = resolve; });
   let recoveryRan = false;
+  let capturedAcceptance: BacktestAcceptance | null = null;
 
   const backtestRun = runMarketDataCommand(
     ['backtest', '--city', 'taipei'],
@@ -423,6 +424,7 @@ test('backtest acceptance writer cannot race a locked update into a stale final 
         },
         persistAcceptance: async (_root: string, acceptance: BacktestAcceptance) => {
           assert.equal(criticalSectionDepth, 1);
+          capturedAcceptance = acceptance;
           writerReached();
           await writerCanFinish;
           finalPair = {
@@ -446,4 +448,8 @@ test('backtest acceptance writer cannot race a locked update into a stale final 
     acceptanceChecksum: 'new-checksum',
   });
   assert.equal(recoveryRan, true);
+  const persisted = capturedAcceptance as BacktestAcceptance | null;
+  assert.equal(persisted?.schemaVersion, 3);
+  assert.equal('cases' in (persisted ?? {}), false);
+  assert.equal('scenarioCases' in (persisted ?? {}), false);
 });

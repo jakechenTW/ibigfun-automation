@@ -31,10 +31,10 @@ for (const transactions of Object.values(bundle.transactions.cells)) {
   }
 }
 
-function bundleWithAcceptance(transactionArtifactSha256 = 'fixture-transactions-index'): MarketDataBundle {
+function bundleWithAcceptance(transactionArtifactSha256 = 'a'.repeat(64)): MarketDataBundle {
   const accepted = structuredClone(bundle);
   accepted.manifest.artifacts['transactions-index.json'] = {
-    sha256: 'fixture-transactions-index',
+    sha256: 'a'.repeat(64),
     bytes: 1,
   };
   accepted.backtestAcceptance = {

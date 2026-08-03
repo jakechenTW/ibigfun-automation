@@ -6,6 +6,7 @@ import type {
   BacktestAcceptance,
   MarketTransaction,
   NormalizedPrimaryUse,
+  ScenarioBacktestAcceptance,
   ScenarioMarketSubject,
   SourceFreshness,
   TransactionIndex,
@@ -46,6 +47,60 @@ const acceptance: BacktestAcceptance = {
     highConfidenceMedianApe: 0.06,
     mediumConfidenceEstimatedCount: 50,
     mediumConfidenceMedianApe: 0.10,
+  },
+};
+
+const diagnosticOnlyCohort = {
+  status: 'diagnostic-only' as const,
+  scoredCases: 0,
+  estimateCoverage: 0,
+  medianApe: null,
+  p75Ape: null,
+  bias: null,
+  intervalCoverage: null,
+  reasons: ['insufficient-use-cohort-cases', 'incomplete-use-cohort-metrics'],
+};
+
+const acceptedCohort = {
+  status: 'accepted' as const,
+  scoredCases: 20,
+  estimateCoverage: 0.8,
+  medianApe: 0.08,
+  p75Ape: 0.16,
+  bias: 0,
+  intervalCoverage: 0.8,
+  reasons: [],
+};
+
+const scenarioAcceptance: ScenarioBacktestAcceptance = {
+  ...acceptance,
+  schemaVersion: 3,
+  transactionArtifactSha256: 'a'.repeat(64),
+  evaluatedThrough: AS_OF,
+  thresholds: {
+    ...acceptance.thresholds,
+    minimumUseCohortCases: 20,
+    maximumAbsoluteBiasRegression: 0.01,
+    maximumIntervalCoverageRegression: 0.05,
+  },
+  useCohorts: {
+    commercial: { ...diagnosticOnlyCohort },
+    industrial: { ...diagnosticOnlyCohort },
+    'mixed-industrial': { ...diagnosticOnlyCohort },
+    'mixed-residential': { ...diagnosticOnlyCohort },
+    office: { ...acceptedCohort },
+    residential: { ...acceptedCohort },
+  },
+  parkingImputationAccepted: true,
+  parkingComparison: {
+    directCoverage: 0.70,
+    imputedCoverage: 0.71,
+    directMedianApe: 0.10,
+    imputedMedianApe: 0.11,
+    directP75Ape: 0.18,
+    imputedP75Ape: 0.19,
+    biasRegression: 0.01,
+    intervalCoverageRegression: 0.05,
   },
 };
 
@@ -176,6 +231,116 @@ test('verified non-residential use emits its primary scenario before a residenti
     ['office', 'primary'],
     ['residential', 'residential-comparison'],
   ]);
+});
+
+test('validated schema-3 acceptance activates only the exact accepted use cohort', () => {
+  const subject = {
+    ...unknownUseSubject,
+    registeredUse: { value: 'office' as const, source: 'official' as const, detail: '使用執照' },
+  };
+  const accepted = estimateMarketScenarios(
+    subject,
+    indexWithTransactions(allUseTransactions()),
+    fresh,
+    AS_OF,
+    scenarioAcceptance,
+  );
+  const failedOffice = estimateMarketScenarios(
+    subject,
+    indexWithTransactions(allUseTransactions()),
+    fresh,
+    AS_OF,
+    {
+      ...scenarioAcceptance,
+      useCohorts: {
+        ...scenarioAcceptance.useCohorts,
+        office: {
+          ...scenarioAcceptance.useCohorts.office,
+          status: 'failed',
+          medianApe: 0.13,
+          reasons: ['median-ape-target-missed'],
+        },
+      },
+    },
+  );
+
+  assert.equal(accepted.scenarios[0]?.status, 'reliable');
+  assert.ok(!accepted.scenarios[0]?.reasons.includes('use-cohort-not-accepted'));
+  assert.equal(failedOffice.scenarios[0]?.status, 'diagnostic-only');
+  assert.ok(failedOffice.scenarios[0]?.reasons.includes('use-cohort-not-accepted'));
+});
+
+test('validated schema-3 parking acceptance independently activates grade-B building evidence', () => {
+  const imputation = {
+    asOf: '2025-12-15',
+    stage: 'nearby-500m' as const,
+    comparableIds: ['parking-a', 'parking-b', 'parking-c'],
+    comparableCount: 3,
+    priceP25Ntd: 1_800_000,
+    priceP50Ntd: 2_000_000,
+    priceP75Ntd: 2_200_000,
+    areaP25Ping: 9,
+    areaP50Ping: 10,
+    areaP75Ping: 11,
+  };
+  const gradeB = [99, 100, 101].map((price, index) => transaction(`accepted-grade-b-${index}`, 'residential', price, {
+    eligibility: 'review-only',
+    eligibilityReasons: ['parking-not-separable'],
+    parkingEvidence: {
+      grade: 'B', family: 'flat', originalType: '坡道平面',
+      officialPriceNtd: null, officialAreaPing: null, imputation, reasons: ['parking-not-separable'],
+    },
+  }));
+  const subject = {
+    ...unknownUseSubject,
+    registeredUse: { value: 'residential' as const, source: 'official' as const, detail: '使用執照' },
+  };
+  const accepted = estimateMarketScenarios(
+    subject,
+    indexWithTransactions(gradeB),
+    fresh,
+    AS_OF,
+    scenarioAcceptance,
+  );
+  const rejected = estimateMarketScenarios(
+    subject,
+    indexWithTransactions(gradeB),
+    fresh,
+    AS_OF,
+    {
+      ...scenarioAcceptance,
+      parkingImputationAccepted: false,
+      parkingComparison: {
+        ...scenarioAcceptance.parkingComparison,
+        imputedCoverage: scenarioAcceptance.parkingComparison.directCoverage,
+      },
+    },
+  );
+
+  assert.equal(accepted.scenarios[0]?.status, 'reliable');
+  assert.equal(accepted.scenarios[0]?.gradeCounts.B, 3);
+  assert.equal(rejected.scenarios[0]?.status, 'insufficient-sample');
+  assert.equal(rejected.scenarios[0]?.gradeCounts.B, 0);
+});
+
+test('malformed schema-3 acceptance cannot activate use or parking fields', () => {
+  const malformed = {
+    ...scenarioAcceptance,
+    thresholds: { ...scenarioAcceptance.thresholds, minimumUseCohortCases: 19 },
+  };
+  const result = estimateMarketScenarios(
+    {
+      ...unknownUseSubject,
+      registeredUse: { value: 'office', source: 'official', detail: '使用執照' },
+    },
+    indexWithTransactions(allUseTransactions()),
+    fresh,
+    AS_OF,
+    malformed,
+  );
+
+  assert.equal(result.scenarios[0]?.status, 'diagnostic-only');
+  assert.ok(result.scenarios[0]?.reasons.includes('use-cohort-not-accepted'));
 });
 
 test('schema-2 extras cannot activate office cohorts or grade-B building evidence', () => {

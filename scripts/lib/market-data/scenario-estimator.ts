@@ -10,6 +10,7 @@ import { neighborGridKeys } from './grid.ts';
 import { bundleValueQuantiles, estimateParking } from './parking.ts';
 import { selectScenarioComparables } from './selector.ts';
 import { weightedQuantile } from './statistics.ts';
+import { validBacktestAcceptance } from './store.ts';
 import type {
   BacktestAcceptance,
   BundleValueQuantiles,
@@ -85,12 +86,16 @@ function useCohortAccepted(
   primaryUse: Exclude<NormalizedPrimaryUse, 'unknown'>,
 ): boolean {
   // Schema-2 acceptance proves only the authoritative legacy residential cohort.
-  return acceptance !== null && primaryUse === 'residential';
+  if (acceptance?.schemaVersion === 2) return primaryUse === 'residential';
+  return acceptance?.schemaVersion === 3
+    && validBacktestAcceptance(acceptance)
+    && acceptance.useCohorts[primaryUse].status === 'accepted';
 }
 
-function parkingImputationAccepted(_acceptance: BacktestAcceptance | null): boolean {
-  // Schema-2 has no validated parking activation. Task 6 introduces that contract.
-  return false;
+function parkingImputationAccepted(acceptance: BacktestAcceptance | null): boolean {
+  return acceptance?.schemaVersion === 3
+    && validBacktestAcceptance(acceptance)
+    && acceptance.parkingImputationAccepted;
 }
 
 function scenarioRequests(subject: ScenarioMarketSubject): Array<{

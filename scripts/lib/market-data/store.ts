@@ -11,9 +11,13 @@ import {
   MARKET_SCHEMA_VERSION,
   MIN_PRODUCTION_DOORPLATES,
   MIN_PRODUCTION_TRANSACTIONS,
+  SCENARIO_BACKTEST_GATE,
   TRANSACTION_STALE_DAYS,
 } from './config.ts';
-import { latestEligibleTransactionDate } from './backtest.ts';
+import {
+  latestEligibleTransactionDate,
+  latestScenarioEligibleTransactionDate,
+} from './backtest.ts';
 import { NORMALIZED_PRIMARY_USES, PARKING_GRADES } from './types.ts';
 import type {
   BacktestAcceptance,
@@ -21,6 +25,8 @@ import type {
   MarketDataBundle,
   MarketDataManifest,
   SourceFreshness,
+  ScenarioBacktestAcceptance,
+  ScenarioCohortAcceptance,
   TransactionBuildDiagnostics,
   TransactionIndex,
 } from './types.ts';
@@ -197,50 +203,255 @@ function validateTransactionBuildDiagnostics(
   }
 }
 
-function approvedBacktestThresholds(thresholds: BacktestAcceptance['thresholds']): boolean {
-  return thresholds.medianApeMax === BACKTEST_ACCEPTANCE_THRESHOLDS.medianApeMax
-    && thresholds.p75ApeMax === BACKTEST_ACCEPTANCE_THRESHOLDS.p75ApeMax
-    && thresholds.minimumEstimateCoverage === BACKTEST_ACCEPTANCE_THRESHOLDS.minimumEstimateCoverage
-    && thresholds.minimumConfidenceSliceCases === BACKTEST_ACCEPTANCE_THRESHOLDS.minimumConfidenceSliceCases
-    && thresholds.minimumHighConfidenceImprovement === BACKTEST_ACCEPTANCE_THRESHOLDS.minimumHighConfidenceImprovement;
+function exactObject(value: unknown, expectedKeys: readonly string[]): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const keys = Object.keys(value as Record<string, unknown>).sort(compareStableText);
+  const expected = [...expectedKeys].sort(compareStableText);
+  return keys.length === expected.length && keys.every((key, index) => key === expected[index]);
 }
 
-function validBacktestAcceptance(value: BacktestAcceptance): boolean {
-  const { thresholds, metrics } = value;
-  if (value.schemaVersion !== 2 || value.estimatorPolicyVersion !== ESTIMATOR_POLICY_VERSION
-    || value.policyId !== ACTIVE_ESTIMATOR_POLICY.id
-    || !value.transactionArtifactSha256
-    || !Number.isFinite(Date.parse(value.approvedAt))
-    || !isValidDateString(value.asOf)
-    || !isValidDateString(value.evaluatedThrough)
-    || !isValidDateString(value.latestEligibleTransactionDate)
-    || value.asOf !== value.evaluatedThrough
-    || value.evaluatedThrough < value.latestEligibleTransactionDate
-    || !thresholds || !metrics) return false;
-  if (!finiteRatio(thresholds.medianApeMax) || !finiteRatio(thresholds.p75ApeMax)
-    || !finiteRatio(thresholds.minimumEstimateCoverage) || thresholds.minimumEstimateCoverage > 1
-    || !Number.isInteger(thresholds.minimumConfidenceSliceCases) || thresholds.minimumConfidenceSliceCases <= 0
-    || !finiteRatio(thresholds.minimumHighConfidenceImprovement)
-    || !approvedBacktestThresholds(thresholds)) return false;
-  if (!finiteRatio(metrics.estimateCoverage) || metrics.estimateCoverage > 1
-    || !Number.isInteger(metrics.reliableEstimatedCount) || metrics.reliableEstimatedCount < 0
-    || !finiteRatio(metrics.reliableMedianApe) || !finiteRatio(metrics.reliableP75Ape)
-    || !Number.isInteger(metrics.highConfidenceEstimatedCount)
-    || !Number.isInteger(metrics.mediumConfidenceEstimatedCount)
-    || !finiteRatio(metrics.highConfidenceMedianApe)
-    || !finiteRatio(metrics.mediumConfidenceMedianApe)) return false;
-  return metrics.estimateCoverage >= thresholds.minimumEstimateCoverage
-    && metrics.reliableMedianApe <= thresholds.medianApeMax
-    && metrics.reliableP75Ape <= thresholds.p75ApeMax
-    && metrics.highConfidenceEstimatedCount >= thresholds.minimumConfidenceSliceCases
-    && metrics.mediumConfidenceEstimatedCount >= thresholds.minimumConfidenceSliceCases
-    && metrics.highConfidenceMedianApe + thresholds.minimumHighConfidenceImprovement
-      <= metrics.mediumConfidenceMedianApe + Number.EPSILON;
+const ACCEPTANCE_IDENTITY_KEYS = [
+  'approvedAt',
+  'asOf',
+  'estimatorPolicyVersion',
+  'evaluatedThrough',
+  'latestEligibleTransactionDate',
+  'metrics',
+  'policyId',
+  'schemaVersion',
+  'thresholds',
+  'transactionArtifactSha256',
+] as const;
+const GLOBAL_THRESHOLD_KEYS = [
+  'medianApeMax',
+  'minimumConfidenceSliceCases',
+  'minimumEstimateCoverage',
+  'minimumHighConfidenceImprovement',
+  'p75ApeMax',
+] as const;
+const SCENARIO_THRESHOLD_KEYS = [
+  ...GLOBAL_THRESHOLD_KEYS,
+  'maximumAbsoluteBiasRegression',
+  'maximumIntervalCoverageRegression',
+  'minimumUseCohortCases',
+] as const;
+const ACCEPTANCE_METRIC_KEYS = [
+  'estimateCoverage',
+  'highConfidenceEstimatedCount',
+  'highConfidenceMedianApe',
+  'mediumConfidenceEstimatedCount',
+  'mediumConfidenceMedianApe',
+  'reliableEstimatedCount',
+  'reliableMedianApe',
+  'reliableP75Ape',
+] as const;
+const SCENARIO_COHORT_KEYS = [
+  'bias',
+  'estimateCoverage',
+  'intervalCoverage',
+  'medianApe',
+  'p75Ape',
+  'reasons',
+  'scoredCases',
+  'status',
+] as const;
+const PARKING_COMPARISON_KEYS = [
+  'biasRegression',
+  'directCoverage',
+  'directMedianApe',
+  'directP75Ape',
+  'imputedCoverage',
+  'imputedMedianApe',
+  'imputedP75Ape',
+  'intervalCoverageRegression',
+] as const;
+const KNOWN_PRIMARY_USES = NORMALIZED_PRIMARY_USES.filter((use) => use !== 'unknown');
+
+function approvedBacktestThresholds(thresholds: unknown, schemaVersion: 2 | 3): boolean {
+  const expectedKeys = schemaVersion === 3 ? SCENARIO_THRESHOLD_KEYS : GLOBAL_THRESHOLD_KEYS;
+  if (!exactObject(thresholds, expectedKeys)) return false;
+  const value = thresholds as Record<string, unknown>;
+  const globalApproved = value.medianApeMax === BACKTEST_ACCEPTANCE_THRESHOLDS.medianApeMax
+    && value.p75ApeMax === BACKTEST_ACCEPTANCE_THRESHOLDS.p75ApeMax
+    && value.minimumEstimateCoverage === BACKTEST_ACCEPTANCE_THRESHOLDS.minimumEstimateCoverage
+    && value.minimumConfidenceSliceCases === BACKTEST_ACCEPTANCE_THRESHOLDS.minimumConfidenceSliceCases
+    && value.minimumHighConfidenceImprovement === BACKTEST_ACCEPTANCE_THRESHOLDS.minimumHighConfidenceImprovement;
+  return globalApproved && (schemaVersion === 2
+    || (value.minimumUseCohortCases === SCENARIO_BACKTEST_GATE.minimumUseCohortCases
+      && value.maximumAbsoluteBiasRegression === SCENARIO_BACKTEST_GATE.maximumAbsoluteBiasRegression
+      && value.maximumIntervalCoverageRegression === SCENARIO_BACKTEST_GATE.maximumIntervalCoverageRegression));
+}
+
+function validAcceptanceMetrics(metrics: unknown, thresholds: Record<string, unknown>): boolean {
+  if (!exactObject(metrics, ACCEPTANCE_METRIC_KEYS)) return false;
+  const value = metrics as Record<string, unknown>;
+  const minimumCoverage = thresholds.minimumEstimateCoverage as number;
+  const minimumCases = thresholds.minimumConfidenceSliceCases as number;
+  const confidenceImprovement = thresholds.minimumHighConfidenceImprovement as number;
+  const medianApeMax = thresholds.medianApeMax as number;
+  const p75ApeMax = thresholds.p75ApeMax as number;
+  if (!finiteRatio(value.estimateCoverage) || value.estimateCoverage > 1
+    || !Number.isSafeInteger(value.reliableEstimatedCount) || (value.reliableEstimatedCount as number) <= 0
+    || !finiteRatio(value.reliableMedianApe) || !finiteRatio(value.reliableP75Ape)
+    || !Number.isSafeInteger(value.highConfidenceEstimatedCount) || (value.highConfidenceEstimatedCount as number) < 0
+    || !Number.isSafeInteger(value.mediumConfidenceEstimatedCount) || (value.mediumConfidenceEstimatedCount as number) < 0
+    || !finiteRatio(value.highConfidenceMedianApe)
+    || !finiteRatio(value.mediumConfidenceMedianApe)) return false;
+  return value.estimateCoverage >= minimumCoverage
+    && value.reliableMedianApe <= medianApeMax
+    && value.reliableP75Ape <= p75ApeMax
+    && (value.highConfidenceEstimatedCount as number) >= minimumCases
+    && (value.mediumConfidenceEstimatedCount as number) >= minimumCases
+    && (value.highConfidenceMedianApe as number) + confidenceImprovement
+      <= (value.mediumConfidenceMedianApe as number) + Number.EPSILON;
+}
+
+function nullableNonnegativeFinite(value: unknown): value is number | null {
+  return value === null || finiteRatio(value);
+}
+
+function nullableFinite(value: unknown): value is number | null {
+  return value === null || (typeof value === 'number' && Number.isFinite(value));
+}
+
+function expectedScenarioCohort(
+  cohort: ScenarioCohortAcceptance,
+): { status: ScenarioCohortAcceptance['status']; reasons: string[] } {
+  const reasons: string[] = [];
+  if (cohort.scoredCases < SCENARIO_BACKTEST_GATE.minimumUseCohortCases) {
+    reasons.push('insufficient-use-cohort-cases');
+  }
+  if (cohort.medianApe === null || cohort.p75Ape === null
+    || cohort.bias === null || cohort.intervalCoverage === null) {
+    reasons.push('incomplete-use-cohort-metrics');
+  } else {
+    if (cohort.medianApe > SCENARIO_BACKTEST_GATE.medianApeMax) {
+      reasons.push('median-ape-target-missed');
+    }
+    if (cohort.p75Ape > SCENARIO_BACKTEST_GATE.p75ApeMax) {
+      reasons.push('p75-ape-target-missed');
+    }
+  }
+  return {
+    status: cohort.scoredCases < SCENARIO_BACKTEST_GATE.minimumUseCohortCases
+      ? 'diagnostic-only'
+      : reasons.length === 0 ? 'accepted' : 'failed',
+    reasons,
+  };
+}
+
+function validScenarioCohort(value: unknown): value is ScenarioCohortAcceptance {
+  if (!exactObject(value, SCENARIO_COHORT_KEYS)) return false;
+  const cohort = value as unknown as ScenarioCohortAcceptance;
+  if ((cohort.status !== 'accepted' && cohort.status !== 'diagnostic-only' && cohort.status !== 'failed')
+    || !Number.isSafeInteger(cohort.scoredCases) || cohort.scoredCases < 0
+    || !finiteRatio(cohort.estimateCoverage) || cohort.estimateCoverage > 1
+    || !nullableNonnegativeFinite(cohort.medianApe)
+    || !nullableNonnegativeFinite(cohort.p75Ape)
+    || !nullableFinite(cohort.bias)
+    || !nullableNonnegativeFinite(cohort.intervalCoverage)
+    || (cohort.intervalCoverage !== null && cohort.intervalCoverage > 1)
+    || !Array.isArray(cohort.reasons)
+    || cohort.reasons.some((reason) => typeof reason !== 'string' || reason.length === 0)) return false;
+  const hasCompleteMetrics = cohort.medianApe !== null && cohort.p75Ape !== null
+    && cohort.bias !== null && cohort.intervalCoverage !== null;
+  const hasAnyMetrics = cohort.medianApe !== null || cohort.p75Ape !== null
+    || cohort.bias !== null || cohort.intervalCoverage !== null;
+  if ((cohort.scoredCases === 0 && (cohort.estimateCoverage !== 0 || hasAnyMetrics))
+    || (cohort.scoredCases > 0 && (cohort.estimateCoverage === 0 || !hasCompleteMetrics))) return false;
+  const expected = expectedScenarioCohort(cohort);
+  return cohort.status === expected.status
+    && cohort.reasons.length === expected.reasons.length
+    && cohort.reasons.every((reason, index) => reason === expected.reasons[index]);
+}
+
+function parkingComparisonAccepted(
+  comparison: ScenarioBacktestAcceptance['parkingComparison'],
+): boolean {
+  return comparison.imputedCoverage > comparison.directCoverage
+    && comparison.imputedMedianApe !== null
+    && comparison.imputedMedianApe <= SCENARIO_BACKTEST_GATE.medianApeMax
+    && comparison.imputedP75Ape !== null
+    && comparison.imputedP75Ape <= SCENARIO_BACKTEST_GATE.p75ApeMax
+    && comparison.biasRegression !== null
+    && comparison.biasRegression <= SCENARIO_BACKTEST_GATE.maximumAbsoluteBiasRegression + Number.EPSILON
+    && comparison.intervalCoverageRegression !== null
+    && comparison.intervalCoverageRegression <= SCENARIO_BACKTEST_GATE.maximumIntervalCoverageRegression + Number.EPSILON;
+}
+
+function validScenarioAcceptance(value: Record<string, unknown>): boolean {
+  if (!exactObject(value.useCohorts, KNOWN_PRIMARY_USES)) return false;
+  const cohorts = value.useCohorts as Record<string, unknown>;
+  if (KNOWN_PRIMARY_USES.some((use) => !validScenarioCohort(cohorts[use]))) return false;
+  if (typeof value.parkingImputationAccepted !== 'boolean'
+    || !exactObject(value.parkingComparison, PARKING_COMPARISON_KEYS)) return false;
+  const comparison = value.parkingComparison as unknown as ScenarioBacktestAcceptance['parkingComparison'];
+  if (!finiteRatio(comparison.directCoverage) || comparison.directCoverage > 1
+    || !finiteRatio(comparison.imputedCoverage) || comparison.imputedCoverage > 1
+    || !nullableNonnegativeFinite(comparison.directMedianApe)
+    || !nullableNonnegativeFinite(comparison.imputedMedianApe)
+    || !nullableNonnegativeFinite(comparison.directP75Ape)
+    || !nullableNonnegativeFinite(comparison.imputedP75Ape)
+    || !nullableFinite(comparison.biasRegression)
+    || !nullableFinite(comparison.intervalCoverageRegression)
+    || (comparison.intervalCoverageRegression !== null
+      && Math.abs(comparison.intervalCoverageRegression) > 1)) return false;
+  const directMetricsComplete = comparison.directMedianApe !== null
+    && comparison.directP75Ape !== null;
+  const imputedMetricsComplete = comparison.imputedMedianApe !== null
+    && comparison.imputedP75Ape !== null;
+  const directHasAnyMetric = comparison.directMedianApe !== null
+    || comparison.directP75Ape !== null;
+  const imputedHasAnyMetric = comparison.imputedMedianApe !== null
+    || comparison.imputedP75Ape !== null;
+  if ((comparison.directCoverage === 0 && directHasAnyMetric)
+    || (comparison.directCoverage > 0 && !directMetricsComplete)
+    || (comparison.imputedCoverage === 0 && imputedHasAnyMetric)
+    || (comparison.imputedCoverage > 0 && !imputedMetricsComplete)) return false;
+  const regressionsComplete = comparison.biasRegression !== null
+    && comparison.intervalCoverageRegression !== null;
+  if ((comparison.directCoverage > 0 && comparison.imputedCoverage > 0) !== regressionsComplete) {
+    return false;
+  }
+  return value.parkingImputationAccepted === parkingComparisonAccepted(comparison);
+}
+
+export function validBacktestAcceptance(value: unknown): value is BacktestAcceptance {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  const schemaVersion = record.schemaVersion;
+  if (schemaVersion !== 2 && schemaVersion !== 3) return false;
+  const topLevelKeys = schemaVersion === 3
+    ? [...ACCEPTANCE_IDENTITY_KEYS, 'parkingComparison', 'parkingImputationAccepted', 'useCohorts']
+    : ACCEPTANCE_IDENTITY_KEYS;
+  if (!exactObject(record, topLevelKeys)
+    || record.estimatorPolicyVersion !== ESTIMATOR_POLICY_VERSION
+    || record.policyId !== ACTIVE_ESTIMATOR_POLICY.id
+    || typeof record.transactionArtifactSha256 !== 'string'
+    || !/^[a-f0-9]{64}$/.test(record.transactionArtifactSha256)
+    || typeof record.approvedAt !== 'string' || !Number.isFinite(Date.parse(record.approvedAt))
+    || typeof record.asOf !== 'string' || !isValidDateString(record.asOf)
+    || typeof record.evaluatedThrough !== 'string' || !isValidDateString(record.evaluatedThrough)
+    || typeof record.latestEligibleTransactionDate !== 'string' || !isValidDateString(record.latestEligibleTransactionDate)
+    || record.asOf !== record.evaluatedThrough
+    || record.evaluatedThrough < record.latestEligibleTransactionDate
+    || !approvedBacktestThresholds(record.thresholds, schemaVersion)) return false;
+  return validAcceptanceMetrics(record.metrics, record.thresholds as Record<string, unknown>)
+    && (schemaVersion === 2 || validScenarioAcceptance(record));
 }
 
 export function readBacktestAcceptance(root: string): BacktestAcceptance | null {
-  const value = readJson<BacktestAcceptance>(backtestAcceptancePath(root));
+  const value = readJson<unknown>(backtestAcceptancePath(root));
   return value && validBacktestAcceptance(value) ? value : null;
+}
+
+function acceptanceLatestEligibleTransactionDate(
+  index: TransactionIndex,
+  acceptance: BacktestAcceptance,
+): string | null {
+  return acceptance.schemaVersion === 3
+    ? latestScenarioEligibleTransactionDate(index)
+    : latestEligibleTransactionDate(index);
 }
 
 /** Atomically replaces the aggregate-only local acceptance artifact. */
@@ -255,10 +466,10 @@ export async function writeBacktestAcceptance(root: string, acceptance: Backtest
   if (acceptance.policyId !== ACTIVE_ESTIMATOR_POLICY.id) {
     throw new Error('Backtest acceptance policy does not match the active estimator policy');
   }
-  if (!approvedBacktestThresholds(acceptance.thresholds)) {
+  if (!approvedBacktestThresholds(acceptance.thresholds, acceptance.schemaVersion)) {
     throw new Error('Backtest acceptance must use the approved quality thresholds');
   }
-  const latest = latestEligibleTransactionDate(active.transactions);
+  const latest = acceptanceLatestEligibleTransactionDate(active.transactions, acceptance);
   if (!latest || acceptance.latestEligibleTransactionDate !== latest
       || acceptance.evaluatedThrough < latest) {
     throw new Error('Backtest acceptance must cover the complete active transaction index');
@@ -284,7 +495,9 @@ export function marketDataBacktestAcceptanceDecision(
 ): MarketAcceptanceDecision {
   const acceptance = bundle.backtestAcceptance;
   if (diagnostics) diagnostics.eligibleTransactionScans += 1;
-  const latest = latestEligibleTransactionDate(bundle.transactions);
+  const latest = acceptance
+    ? acceptanceLatestEligibleTransactionDate(bundle.transactions, acceptance)
+    : null;
   const accepted = acceptance !== undefined
     && marketDataManifestHasCurrentPolicyProvenance(bundle.manifest)
     && validBacktestAcceptance(acceptance)
@@ -694,7 +907,7 @@ function validateAcceptanceForBundle(
   if (acceptance.transactionArtifactSha256 !== transactionArtifactChecksum(bundle.manifest)) {
     throw new Error('Backtest acceptance transaction artifact checksum does not match the staged build');
   }
-  const latest = latestEligibleTransactionDate(bundle.transactions);
+  const latest = acceptanceLatestEligibleTransactionDate(bundle.transactions, acceptance);
   if (!latest || acceptance.latestEligibleTransactionDate !== latest
       || acceptance.evaluatedThrough < latest) {
     throw new Error('Backtest acceptance must cover the complete staged transaction index');

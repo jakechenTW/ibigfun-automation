@@ -26,7 +26,14 @@ import {
   writeBacktestAcceptance,
 } from './store.ts';
 import { ensureTaipeiMarketData } from './update.ts';
-import type { BacktestAcceptance, DoorplateIndex, MarketDataManifest, TransactionIndex } from './types.ts';
+import type {
+  BacktestAcceptance,
+  DoorplateIndex,
+  LegacyBacktestAcceptance,
+  MarketDataManifest,
+  ScenarioBacktestAcceptance,
+  TransactionIndex,
+} from './types.ts';
 
 function manifest(buildId: string, recordCount = 1): MarketDataManifest {
   return {
@@ -171,11 +178,21 @@ async function downgradeBuildToLegacySchema(
   await writeFile(join(root, 'manifest.json'), `${JSON.stringify(legacyManifest)}\n`);
 }
 
-async function passingAcceptance(root: string): Promise<BacktestAcceptance> {
+async function passingAcceptance(root: string): Promise<ScenarioBacktestAcceptance> {
   const checksum = transactionArtifactChecksum(readManifest(root)!);
   assert.ok(checksum);
+  const diagnosticOnly = {
+    status: 'diagnostic-only' as const,
+    scoredCases: 0,
+    estimateCoverage: 0,
+    medianApe: null,
+    p75Ape: null,
+    bias: null,
+    intervalCoverage: null,
+    reasons: ['insufficient-use-cohort-cases', 'incomplete-use-cohort-metrics'],
+  };
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
     policyId: ACTIVE_ESTIMATOR_POLICY.id,
     transactionArtifactSha256: checksum,
@@ -189,6 +206,9 @@ async function passingAcceptance(root: string): Promise<BacktestAcceptance> {
       minimumEstimateCoverage: 0.70,
       minimumConfidenceSliceCases: 20,
       minimumHighConfidenceImprovement: 0.01,
+      minimumUseCohortCases: 20,
+      maximumAbsoluteBiasRegression: 0.01,
+      maximumIntervalCoverageRegression: 0.05,
     },
     metrics: {
       estimateCoverage: 0.8,
@@ -200,6 +220,56 @@ async function passingAcceptance(root: string): Promise<BacktestAcceptance> {
       mediumConfidenceEstimatedCount: 20,
       mediumConfidenceMedianApe: 0.09,
     },
+    useCohorts: {
+      commercial: { ...diagnosticOnly },
+      industrial: { ...diagnosticOnly },
+      'mixed-industrial': { ...diagnosticOnly },
+      'mixed-residential': { ...diagnosticOnly },
+      office: { ...diagnosticOnly },
+      residential: {
+        status: 'accepted',
+        scoredCases: 20,
+        estimateCoverage: 0.8,
+        medianApe: 0.08,
+        p75Ape: 0.16,
+        bias: 0,
+        intervalCoverage: 0.8,
+        reasons: [],
+      },
+    },
+    parkingImputationAccepted: true,
+    parkingComparison: {
+      directCoverage: 0.70,
+      imputedCoverage: 0.71,
+      directMedianApe: 0.10,
+      imputedMedianApe: 0.11,
+      directP75Ape: 0.18,
+      imputedP75Ape: 0.19,
+      biasRegression: 0.01,
+      intervalCoverageRegression: 0.05,
+    },
+  };
+}
+
+async function passingLegacyAcceptance(root: string): Promise<LegacyBacktestAcceptance> {
+  const current = await passingAcceptance(root);
+  return {
+    schemaVersion: 2,
+    estimatorPolicyVersion: current.estimatorPolicyVersion,
+    policyId: current.policyId,
+    transactionArtifactSha256: current.transactionArtifactSha256,
+    approvedAt: current.approvedAt,
+    asOf: current.asOf,
+    evaluatedThrough: current.evaluatedThrough,
+    latestEligibleTransactionDate: current.latestEligibleTransactionDate,
+    thresholds: {
+      medianApeMax: current.thresholds.medianApeMax,
+      p75ApeMax: current.thresholds.p75ApeMax,
+      minimumEstimateCoverage: current.thresholds.minimumEstimateCoverage,
+      minimumConfidenceSliceCases: current.thresholds.minimumConfidenceSliceCases,
+      minimumHighConfidenceImprovement: current.thresholds.minimumHighConfidenceImprovement,
+    },
+    metrics: { ...current.metrics },
   };
 }
 
@@ -875,6 +945,7 @@ test('backtest acceptance loads only for the active transaction artifact checksu
 
   const acceptance = await passingAcceptance(root);
   await writeBacktestAcceptance(root, acceptance);
+  assert.equal(readBacktestAcceptance(root)?.schemaVersion, 3);
   assert.equal(
     (await loadMarketData(root, { minDoorplates: 1, minTransactions: 0 }))?.backtestAcceptance?.transactionArtifactSha256,
     checksum,
@@ -940,6 +1011,113 @@ test('backtest acceptance loads only for the active transaction artifact checksu
     }),
     /transaction.*checksum/i,
   );
+});
+
+test('schema-3 acceptance is exact, aggregate-only, and internally consistent', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-scenario-acceptance-'));
+  const root = join(parent, 'taipei');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(root, 'scenario-acceptance');
+  const acceptance = await passingAcceptance(root);
+  await writeBacktestAcceptance(root, acceptance);
+  assert.deepEqual(readBacktestAcceptance(root), acceptance);
+
+  await assert.rejects(
+    () => writeBacktestAcceptance(root, {
+      ...acceptance,
+      cases: [{ originalAddress: 'must-not-persist' }],
+    } as unknown as BacktestAcceptance),
+    /non-passing backtest acceptance/,
+  );
+
+  const { office: _office, ...missingOffice } = acceptance.useCohorts;
+  const { intervalCoverageRegression: _interval, ...missingParkingMetric } = acceptance.parkingComparison;
+  const invalid: unknown[] = [
+    { ...acceptance, transactionArtifactSha256: 'not-a-sha256' },
+    { ...acceptance, unexpected: true },
+    { ...acceptance, useCohorts: missingOffice },
+    { ...acceptance, useCohorts: { ...acceptance.useCohorts, unknown: acceptance.useCohorts.office } },
+    {
+      ...acceptance,
+      useCohorts: {
+        ...acceptance.useCohorts,
+        office: { ...acceptance.useCohorts.office, caseIds: ['private-case-id'] },
+      },
+    },
+    {
+      ...acceptance,
+      useCohorts: {
+        ...acceptance.useCohorts,
+        office: {
+          ...acceptance.useCohorts.office,
+          status: 'accepted',
+          scoredCases: 19,
+          medianApe: 0.05,
+          p75Ape: 0.10,
+          bias: 0,
+          intervalCoverage: 0.8,
+          reasons: [],
+        },
+      },
+    },
+    {
+      ...acceptance,
+      useCohorts: {
+        ...acceptance.useCohorts,
+        residential: { ...acceptance.useCohorts.residential, scoredCases: 20.5 },
+      },
+    },
+    {
+      ...acceptance,
+      useCohorts: {
+        ...acceptance.useCohorts,
+        residential: { ...acceptance.useCohorts.residential, medianApe: Number.NaN },
+      },
+    },
+    {
+      ...acceptance,
+      useCohorts: {
+        ...acceptance.useCohorts,
+        office: { ...acceptance.useCohorts.office, estimateCoverage: 0.1 },
+      },
+    },
+    {
+      ...acceptance,
+      useCohorts: {
+        ...acceptance.useCohorts,
+        office: { ...acceptance.useCohorts.office, scoredCases: 1, estimateCoverage: 0.1 },
+      },
+    },
+    { ...acceptance, metrics: { ...acceptance.metrics, reliableEstimatedCount: 0 } },
+    { ...acceptance, parkingImputationAccepted: false },
+    { ...acceptance, parkingComparison: missingParkingMetric },
+    { ...acceptance, parkingComparison: { ...acceptance.parkingComparison, directCoverage: 1.1 } },
+    { ...acceptance, parkingComparison: { ...acceptance.parkingComparison, directMedianApe: null } },
+    {
+      ...acceptance,
+      parkingImputationAccepted: false,
+      parkingComparison: { ...acceptance.parkingComparison, intervalCoverageRegression: 2 },
+    },
+    { ...acceptance, thresholds: { ...acceptance.thresholds, minimumUseCohortCases: 19 } },
+  ];
+  for (const candidate of invalid) {
+    await writeFile(backtestAcceptancePath(root), JSON.stringify(candidate));
+    assert.equal(readBacktestAcceptance(root), null);
+  }
+});
+
+test('schema-2 acceptance remains a residential-only legacy proof before activation', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-legacy-acceptance-'));
+  const root = join(parent, 'taipei');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(root, 'legacy-acceptance');
+  const acceptance = await passingLegacyAcceptance(root);
+
+  await writeBacktestAcceptance(root, acceptance);
+  const loaded = await loadMarketData(root, { minDoorplates: 1, minTransactions: 0 });
+
+  assert.equal(loaded?.backtestAcceptance?.schemaVersion, 2);
+  assert.equal(marketDataBacktestAccepted(loaded!), true);
 });
 
 test('acceptance writer rejects old active index provenance before creating an artifact', async (t) => {
