@@ -207,9 +207,9 @@ test('candidate manifest records aggregate normalization diagnostics without row
   assert.deepEqual(bundle?.manifest.transactions.normalization, {
     rawRows: 75,
     reliableEligible: 73,
-    reviewOnly: 1,
-    excluded: 1,
-    excludedByReason: { 'non-residential-primary-use': 1 },
+    reviewOnly: 2,
+    excluded: 0,
+    excludedByReason: {},
   });
 });
 

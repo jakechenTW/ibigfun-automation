@@ -3,6 +3,10 @@ import { floorGroup, normalizeOfficialBuildingType } from './property.ts';
 import type {
   DoorplateIndex,
   MarketTransaction,
+  NormalizedPrimaryUse,
+  ParkingEvidence,
+  ParkingFamily,
+  RawParkingEvidence,
   TransactionEligibilityEvidence,
 } from './types.ts';
 
@@ -62,6 +66,26 @@ const REQUIRED_FIELDS = Object.keys(HEADER_ALIASES) as FieldName[];
 const PING_PER_SQUARE_METER = 0.3025;
 const SQUARE_METERS_PER_PING = 1 / PING_PER_SQUARE_METER;
 
+export function normalizePrimaryUse(raw: string): NormalizedPrimaryUse {
+  switch (raw.normalize('NFKC').replace(/\s+/gu, '')) {
+    case '住家用': return 'residential';
+    case '住商用': return 'mixed-residential';
+    case '辦公用': return 'office';
+    case '商業用': return 'commercial';
+    case '工業用': return 'industrial';
+    case '住工用': return 'mixed-industrial';
+    default: return 'unknown';
+  }
+}
+
+export function normalizeParkingFamily(raw: string): ParkingFamily {
+  const value = raw.normalize('NFKC').replace(/\s+/gu, '');
+  if (value === '' || value === '無車位') return 'none';
+  if (value.includes('平面')) return 'flat';
+  if (value.includes('機械')) return 'mechanical';
+  return 'unknown';
+}
+
 function canonicalHeader(header: string): string {
   return header.normalize('NFKC').replace(/[\s/／]/g, '');
 }
@@ -100,15 +124,6 @@ function isZeroOrEmpty(value: string): boolean {
   if (!value) return true;
   const parsed = Number(value.normalize('NFKC').replaceAll(',', ''));
   return Number.isFinite(parsed) && parsed === 0;
-}
-
-function isNoParkingType(value: string): boolean {
-  const normalized = value.normalize('NFKC').replace(/\s+/g, '');
-  return normalized === '' || normalized === '無車位';
-}
-
-function isExplicitNoParkingType(value: string): boolean {
-  return value.normalize('NFKC').replace(/\s+/g, '') === '無車位';
 }
 
 function chineseInteger(value: string): number | null {
@@ -170,23 +185,6 @@ function transferredBuildingCount(raw: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
-function reliableEligible(transferredBuildingCount: number): TransactionEligibilityEvidence {
-  return {
-    eligibility: 'reliable-eligible',
-    reasons: [],
-    primaryUse: 'residential',
-    transferredBuildingCount,
-  };
-}
-
-function reviewOnly(
-  primaryUse: TransactionEligibilityEvidence['primaryUse'],
-  transferredBuildingCount: number,
-  reasons: string[],
-): TransactionEligibilityEvidence {
-  return { eligibility: 'review-only', reasons, primaryUse, transferredBuildingCount };
-}
-
 export function classifyTransactionEligibility(
   primaryUseRaw: string,
   transactionCountsRaw: string,
@@ -194,19 +192,70 @@ export function classifyTransactionEligibility(
 ): TransactionEligibilityEvidence | { excludedReasons: string[] } {
   const count = transferredBuildingCount(transactionCountsRaw);
   if (/政府機關.*(?:標讓售|讓售)/u.test(notes)) return { excludedReasons: ['government-sale'] };
-  if (primaryUseRaw === '住家用' && count === 1) return reliableEligible(count);
-  if (primaryUseRaw === '住家用' && count !== null && count > 1) {
-    return reviewOnly('residential', count, ['multiple-buildings']);
+  const primaryUse = normalizePrimaryUse(primaryUseRaw);
+  const legacyReliable = primaryUse === 'residential' && count === 1;
+  return {
+    eligibility: legacyReliable ? 'reliable-eligible' : 'review-only',
+    reasons: legacyReliable ? [] : [
+      ...(primaryUse === 'residential' ? [] : [primaryUse === 'unknown' ? 'primary-use-unavailable' : 'scenario-only-primary-use']),
+      ...(count !== 1 ? ['multiple-buildings'] : []),
+    ],
+    primaryUse,
+    transferredBuildingCount: count,
+  };
+}
+
+export function classifyParkingEvidence(input: RawParkingEvidence): ParkingEvidence {
+  const family = normalizeParkingFamily(input.originalType);
+  const areaAvailable = input.areaSqM !== null;
+  const priceAvailable = input.priceNtd !== null;
+  const officialAreaPing = areaAvailable ? input.areaSqM! * PING_PER_SQUARE_METER : null;
+
+  if (family === 'none') {
+    if (!areaAvailable && !priceAvailable && input.areaWasZeroOrEmpty && input.priceWasZeroOrEmpty) {
+      return {
+        grade: 'A', family, originalType: input.originalType,
+        officialPriceNtd: 0, officialAreaPing: 0, imputation: null, reasons: [],
+      };
+    }
+    return {
+      grade: 'C', family, originalType: input.originalType,
+      officialPriceNtd: null, officialAreaPing: null, imputation: null,
+      reasons: ['parking-type-conflict'],
+    };
   }
-  if (primaryUseRaw === '住商用' && count !== null) {
-    return reviewOnly(
-      'mixed-residential',
-      count,
-      count > 1 ? ['mixed-residential-use', 'multiple-buildings'] : ['mixed-residential-use'],
-    );
+
+  if (family === 'unknown') {
+    return {
+      grade: 'C', family, originalType: input.originalType,
+      officialPriceNtd: null, officialAreaPing: null, imputation: null,
+      reasons: ['parking-family-unavailable'],
+    };
   }
-  if (!primaryUseRaw) return { excludedReasons: ['primary-use-unavailable'] };
-  return { excludedReasons: ['non-residential-primary-use'] };
+
+  if (areaAvailable && priceAvailable) {
+    return {
+      grade: 'A', family, originalType: input.originalType,
+      officialPriceNtd: input.priceNtd, officialAreaPing, imputation: null, reasons: [],
+    };
+  }
+
+  if ((!areaAvailable && !input.areaWasZeroOrEmpty) || (!priceAvailable && !input.priceWasZeroOrEmpty)) {
+    return {
+      grade: 'C', family, originalType: input.originalType,
+      officialPriceNtd: null, officialAreaPing: null, imputation: null,
+      reasons: ['parking-numeric-invalid'],
+    };
+  }
+
+  return {
+    grade: 'B', family, originalType: input.originalType,
+    officialPriceNtd: input.priceNtd, officialAreaPing, imputation: null,
+    reasons: [
+      ...(areaAvailable ? [] : ['parking-area-unavailable']),
+      ...(priceAvailable ? [] : ['parking-price-unavailable']),
+    ],
+  };
 }
 
 /** Detects the official explanatory row without relying on its position in the CSV. */
@@ -272,26 +321,30 @@ export function normalizeSaleTransaction(
   const parkingType = aliasValue(values, 'parkingType');
   const parkingAreaRaw = aliasValue(values, 'parkingArea');
   const parkingPriceRaw = aliasValue(values, 'parkingPrice');
-  const parkingAreaSqM = finitePositive(parkingAreaRaw);
-  const parkingPriceNtd = finitePositive(parkingPriceRaw);
-  if (isExplicitNoParkingType(parkingType) && (parkingAreaSqM || parkingPriceNtd)) {
-    return excluded(id, 'parking-not-separable');
+  const parkingEvidence = classifyParkingEvidence({
+    originalType: parkingType,
+    areaSqM: finitePositive(parkingAreaRaw),
+    priceNtd: finitePositive(parkingPriceRaw),
+    areaWasZeroOrEmpty: isZeroOrEmpty(parkingAreaRaw),
+    priceWasZeroOrEmpty: isZeroOrEmpty(parkingPriceRaw),
+    totalAreaSqM: buildingAreaSqM,
+    totalPriceNtd,
+  });
+
+  const parkingAreaSqM = parkingEvidence.grade === 'A'
+    ? parkingEvidence.officialAreaPing! * SQUARE_METERS_PER_PING
+    : null;
+  const parkingPriceNtd = parkingEvidence.grade === 'A' ? parkingEvidence.officialPriceNtd! : null;
+  const buildingAreaSqMNet = parkingAreaSqM === null ? null : buildingAreaSqM - parkingAreaSqM;
+  const buildingPriceNtd = parkingPriceNtd === null ? null : totalPriceNtd - parkingPriceNtd;
+  if (buildingAreaSqMNet !== null && buildingPriceNtd !== null && (buildingAreaSqMNet <= 0 || buildingPriceNtd <= 0)) {
+    return excluded(id, 'invalid-building-value');
   }
-  const parkingExists = !(
-    isNoParkingType(parkingType) &&
-    isZeroOrEmpty(parkingAreaRaw) &&
-    isZeroOrEmpty(parkingPriceRaw)
-  );
-  if (parkingExists && (!parkingAreaSqM || !parkingPriceNtd)) return excluded(id, 'parking-not-separable');
 
-  const parkingArea = parkingAreaSqM ?? 0;
-  const parkingPrice = parkingPriceNtd ?? 0;
-  const buildingAreaSqMNet = buildingAreaSqM - parkingArea;
-  const buildingPriceNtd = totalPriceNtd - parkingPrice;
-  if (buildingAreaSqMNet <= 0 || buildingPriceNtd <= 0) return excluded(id, 'invalid-building-value');
-
-  const derivedUnitPriceNtd = buildingPriceNtd / buildingAreaSqMNet;
-  if (Math.abs(derivedUnitPriceNtd - officialUnitPriceNtd) / officialUnitPriceNtd > 0.05) {
+  const derivedUnitPriceNtd = buildingAreaSqMNet === null || buildingPriceNtd === null
+    ? null
+    : buildingPriceNtd / buildingAreaSqMNet;
+  if (derivedUnitPriceNtd !== null && Math.abs(derivedUnitPriceNtd - officialUnitPriceNtd) / officialUnitPriceNtd > 0.05) {
     return excluded(id, 'unit-price-conflict');
   }
 
@@ -318,11 +371,13 @@ export function normalizeSaleTransaction(
       ownership: 'freehold',
       buildingType,
       totalPriceNtd,
+      totalAreaPing: buildingAreaSqM * PING_PER_SQUARE_METER,
       buildingPriceNtd,
-      buildingAreaPing: buildingAreaSqMNet * PING_PER_SQUARE_METER,
-      parkingPriceNtd: parkingPrice,
-      parkingAreaPing: parkingArea * PING_PER_SQUARE_METER,
-      buildingUnitPriceWan: derivedUnitPriceNtd * SQUARE_METERS_PER_PING / 10_000,
+      buildingAreaPing: buildingAreaSqMNet === null ? null : buildingAreaSqMNet * PING_PER_SQUARE_METER,
+      parkingPriceNtd,
+      parkingAreaPing: parkingEvidence.grade === 'A' ? parkingEvidence.officialAreaPing : null,
+      buildingUnitPriceWan: derivedUnitPriceNtd === null ? null : derivedUnitPriceNtd * SQUARE_METERS_PER_PING / 10_000,
+      parkingEvidence,
       floor,
       totalFloors,
       floorGroup: group,
@@ -331,6 +386,7 @@ export function normalizeSaleTransaction(
       exclusionFlags: [],
       eligibility: eligibility.eligibility,
       eligibilityReasons: eligibility.reasons,
+      originalPrimaryUse: aliasValue(values, 'primaryUse'),
       primaryUse: eligibility.primaryUse,
       transferredBuildingCount: eligibility.transferredBuildingCount,
     },

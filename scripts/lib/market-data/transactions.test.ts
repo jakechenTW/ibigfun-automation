@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { locateAddress } from './doorplates.ts';
 import {
   isSaleTransactionDataRow,
+  normalizePrimaryUse,
   normalizeSaleTransaction,
   rocDateToIso,
   specialTransactionFlags,
@@ -54,6 +55,20 @@ function row(overrides: Record<string, string> = {}): Record<string, string> {
   return { ...BASE_ROW, ...overrides };
 }
 
+for (const [raw, expected] of [
+  ['住家用', 'residential'],
+  ['住商用', 'mixed-residential'],
+  ['辦公用', 'office'],
+  ['商業用', 'commercial'],
+  ['工業用', 'industrial'],
+  ['住工用', 'mixed-industrial'],
+  ['', 'unknown'],
+] as const) {
+  test(`normalizes official primary use ${raw || 'blank'}`, () => {
+    assert.equal(normalizePrimaryUse(raw), expected);
+  });
+}
+
 test('converts ROC dates and computes building-only unit price', () => {
   const tx = normalizeSaleTransaction(row({
     '交易年月日': '1150105',
@@ -93,7 +108,7 @@ test('classifies mixed-residential sales as review-only', () => {
   assert.equal(tx.kind, 'included');
   if (tx.kind !== 'included') return;
   assert.equal(tx.transaction.eligibility, 'review-only');
-  assert.deepEqual(tx.transaction.eligibilityReasons, ['mixed-residential-use']);
+  assert.deepEqual(tx.transaction.eligibilityReasons, ['scenario-only-primary-use']);
   assert.equal(tx.transaction.primaryUse, 'mixed-residential');
   assert.equal(tx.transaction.transferredBuildingCount, 1);
 });
@@ -112,17 +127,23 @@ test('classifies multiple transferred buildings as review-only', () => {
   assert.equal(tx.transaction.transferredBuildingCount, 2);
 });
 
-test('excludes non-residential or unavailable primary uses', () => {
-  for (const primaryUse of ['商業用', '工業用', '辦公用', '']) {
+test('retains non-residential and unknown official primary uses as review-only evidence', () => {
+  for (const [primaryUse, expectedUse] of [
+    ['商業用', 'commercial'],
+    ['工業用', 'industrial'],
+    ['辦公用', 'office'],
+    ['住工用', 'mixed-industrial'],
+    ['', 'unknown'],
+  ] as const) {
     const tx = normalizeSaleTransaction(row({ '主要用途': primaryUse }), context);
 
-    assert.equal(tx.kind, 'excluded', primaryUse || 'blank primary use');
-    if (tx.kind !== 'excluded') continue;
-    assert.deepEqual(
-      tx.reasons,
-      primaryUse ? ['non-residential-primary-use'] : ['primary-use-unavailable'],
-      primaryUse || 'blank primary use',
-    );
+    assert.equal(tx.kind, 'included', primaryUse || 'blank primary use');
+    if (tx.kind !== 'included') continue;
+    assert.equal(tx.transaction.eligibility, 'review-only', primaryUse || 'blank primary use');
+    assert.equal(tx.transaction.primaryUse, expectedUse, primaryUse || 'blank primary use');
+    assert.ok(tx.transaction.eligibilityReasons.includes(
+      primaryUse ? 'scenario-only-primary-use' : 'primary-use-unavailable',
+    ));
   }
 });
 
@@ -136,16 +157,34 @@ test('excludes official government sale transactions', () => {
   });
 });
 
-test('parking that cannot be fully separated is excluded', () => {
-  const tx = normalizeSaleTransaction(row({
-    '車位類別': '坡道平面',
-    '車位移轉總面積平方公尺': '20',
-    '車位總價元': '0',
-  }), context);
+test('retains official parking evidence by A/B/C grade without inventing building-only values', () => {
+  const parkingCases = [
+    { patch: { '車位類別': '無車位', '車位移轉總面積平方公尺': '0', '車位總價元': '0' }, grade: 'A' },
+    { patch: { '車位類別': '坡道平面', '車位移轉總面積平方公尺': '20', '車位總價元': '3000000' }, grade: 'A' },
+    { patch: { '車位類別': '坡道平面', '車位移轉總面積平方公尺': '', '車位總價元': '3000000' }, grade: 'B' },
+    { patch: { '車位類別': '坡道平面', '車位移轉總面積平方公尺': '20', '車位總價元': '' }, grade: 'B' },
+    { patch: { '車位類別': '坡道平面', '車位移轉總面積平方公尺': '', '車位總價元': '' }, grade: 'B' },
+    { patch: { '車位類別': '', '車位移轉總面積平方公尺': '20', '車位總價元': '' }, grade: 'C' },
+    { patch: { '車位類別': '無車位', '車位移轉總面積平方公尺': '20', '車位總價元': '3000000' }, grade: 'C' },
+  ] as const;
 
-  assert.equal(tx.kind, 'excluded');
-  if (tx.kind !== 'excluded') return;
-  assert.deepEqual(tx.reasons, ['parking-not-separable']);
+  for (const { patch, grade } of parkingCases) {
+    const tx = normalizeSaleTransaction(row({
+      ...patch,
+      ...(patch['車位類別'] === '無車位' ? { '單價元平方公尺': '300000' } : {}),
+    }), context);
+
+    assert.equal(tx.kind, 'included', JSON.stringify(patch));
+    if (tx.kind !== 'included') continue;
+    assert.equal(tx.transaction.parkingEvidence.grade, grade, JSON.stringify(patch));
+    assert.equal(
+      tx.transaction.buildingPriceNtd !== null
+      && tx.transaction.buildingAreaPing !== null
+      && tx.transaction.buildingUnitPriceWan !== null,
+      grade === 'A',
+      JSON.stringify(patch),
+    );
+  }
 });
 
 test('treats conventional zero parking fields as no parking', () => {
@@ -167,28 +206,17 @@ test('treats conventional zero parking fields as no parking', () => {
   }
 });
 
-test('rejects partial parking fields even when the other field is zero', () => {
-  for (const partialParking of [
-    { '車位類別': '坡道平面', '車位移轉總面積平方公尺': '20', '車位總價元': '0' },
-    { '車位類別': '坡道平面', '車位移轉總面積平方公尺': '0', '車位總價元': '3000000' },
-  ]) {
-    const tx = normalizeSaleTransaction(row(partialParking), context);
-    assert.equal(tx.kind, 'excluded');
-    if (tx.kind !== 'excluded') continue;
-    assert.deepEqual(tx.reasons, ['parking-not-separable']);
-  }
-});
-
-test('rejects positive parking numerics that contradict an explicit no-parking type', () => {
+test('records contradictory parking as grade C review evidence', () => {
   const tx = normalizeSaleTransaction(row({
     '車位類別': '無車位',
     '車位移轉總面積平方公尺': '20',
     '車位總價元': '3000000',
   }), context);
 
-  assert.equal(tx.kind, 'excluded');
-  if (tx.kind !== 'excluded') return;
-  assert.deepEqual(tx.reasons, ['parking-not-separable']);
+  assert.equal(tx.kind, 'included');
+  if (tx.kind !== 'included') return;
+  assert.equal(tx.transaction.parkingEvidence.grade, 'C');
+  assert.ok(tx.transaction.parkingEvidence.reasons.includes('parking-type-conflict'));
 });
 
 test('explicit special relationship is excluded but ambiguous prose is reviewed', () => {

@@ -7,6 +7,16 @@ export type LocationMethod = 'exact-doorplate' | 'address-range' | 'nearest-door
 export type EstimateStatus = 'reliable' | 'review' | 'unavailable';
 export type EstimateConfidence = 'high' | 'medium' | 'low';
 export type TransactionEligibility = 'reliable-eligible' | 'review-only';
+export type NormalizedPrimaryUse =
+  | 'residential'
+  | 'mixed-residential'
+  | 'office'
+  | 'commercial'
+  | 'industrial'
+  | 'mixed-industrial'
+  | 'unknown';
+export type ParkingFamily = 'flat' | 'mechanical' | 'none' | 'unknown';
+export type ParkingGrade = 'A' | 'B' | 'C';
 export type SubjectOwnershipEvidence =
   | 'profile-default-freehold'
   | 'title-explicit-non-freehold'
@@ -43,6 +53,46 @@ export interface WeightBreakdown {
   total: number;
 }
 
+export interface ParkingImputationEvidence {
+  asOf: string;
+  stage: 'same-building' | 'nearby-500m';
+  comparableIds: string[];
+  comparableCount: number;
+  priceP25Ntd: number;
+  priceP50Ntd: number;
+  priceP75Ntd: number;
+  areaP25Ping: number;
+  areaP50Ping: number;
+  areaP75Ping: number;
+}
+
+export interface ParkingEvidence {
+  grade: ParkingGrade;
+  family: ParkingFamily;
+  originalType: string;
+  officialPriceNtd: number | null;
+  officialAreaPing: number | null;
+  imputation: ParkingImputationEvidence | null;
+  reasons: string[];
+}
+
+export interface RawParkingEvidence {
+  originalType: string;
+  areaSqM: number | null;
+  priceNtd: number | null;
+  areaWasZeroOrEmpty: boolean;
+  priceWasZeroOrEmpty: boolean;
+  totalAreaSqM: number;
+  totalPriceNtd: number;
+}
+
+export interface BundleValueQuantiles {
+  p25Ntd: number;
+  p50Ntd: number;
+  p75Ntd: number;
+  observationCount: number;
+}
+
 export interface MarketTransaction {
   id: string;
   transactionDate: string;
@@ -53,11 +103,13 @@ export interface MarketTransaction {
   ownership: 'freehold' | 'non-freehold' | 'unknown';
   buildingType: BuildingType;
   totalPriceNtd: number;
-  buildingPriceNtd: number;
-  buildingAreaPing: number;
-  parkingPriceNtd: number;
-  parkingAreaPing: number;
-  buildingUnitPriceWan: number;
+  totalAreaPing: number;
+  buildingPriceNtd: number | null;
+  buildingAreaPing: number | null;
+  parkingPriceNtd: number | null;
+  parkingAreaPing: number | null;
+  buildingUnitPriceWan: number | null;
+  parkingEvidence: ParkingEvidence;
   floor: number;
   totalFloors: number;
   floorGroup: FloorGroup;
@@ -66,15 +118,16 @@ export interface MarketTransaction {
   exclusionFlags: string[];
   eligibility: TransactionEligibility;
   eligibilityReasons: string[];
-  primaryUse: 'residential' | 'mixed-residential';
-  transferredBuildingCount: number;
+  originalPrimaryUse: string;
+  primaryUse: NormalizedPrimaryUse;
+  transferredBuildingCount: number | null;
 }
 
 export interface TransactionEligibilityEvidence {
   eligibility: TransactionEligibility;
   reasons: string[];
-  primaryUse: 'residential' | 'mixed-residential';
-  transferredBuildingCount: number;
+  primaryUse: NormalizedPrimaryUse;
+  transferredBuildingCount: number | null;
 }
 
 export interface MarketSubject {
