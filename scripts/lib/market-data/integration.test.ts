@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { attachMarketEstimates } from '../steps.ts';
 import type { PreMarketEnrichedListing } from '../types.ts';
 import { ACTIVE_ESTIMATOR_POLICY, ESTIMATOR_POLICY_VERSION } from './config.ts';
-import type { BacktestAcceptance, MarketDataBundle } from './types.ts';
+import type { BacktestAcceptance, CandidateBacktestAcceptance, MarketDataBundle } from './types.ts';
 
 const AS_OF = '2026-07-25';
 const bundle = JSON.parse(
@@ -42,7 +42,7 @@ function bundleWithAcceptance(transactionArtifactSha256 = 'a'.repeat(64)): Marke
     bytes: 1,
   };
   accepted.backtestAcceptance = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
     policyId: ACTIVE_ESTIMATOR_POLICY.id,
     transactionArtifactSha256,
@@ -56,6 +56,19 @@ function bundleWithAcceptance(transactionArtifactSha256 = 'a'.repeat(64)): Marke
       minimumEstimateCoverage: 0.70,
       minimumConfidenceSliceCases: 20,
       minimumHighConfidenceImprovement: 0.01,
+      minimumUseCohortCases: 20,
+      maximumAbsoluteBiasRegression: 0.01,
+      maximumIntervalCoverageRegression: 0.05,
+      maximumAbsoluteBias: 0.05,
+      minimumIntervalCoverage: 0.30,
+      minimumParkingFamilyCases: 20,
+      minimumParkingEstimateCoverage: 0.50,
+      parkingPriceMedianApeMax: 0.25,
+      parkingPriceP75ApeMax: 0.45,
+      parkingAreaMedianApeMax: 0.15,
+      parkingAreaP75ApeMax: 0.30,
+      minimumParkingPriceIntervalCoverage: 0.30,
+      minimumParkingAreaIntervalCoverage: 0.30,
     },
     metrics: {
       estimateCoverage: 0.8,
@@ -67,8 +80,60 @@ function bundleWithAcceptance(transactionArtifactSha256 = 'a'.repeat(64)): Marke
       mediumConfidenceEstimatedCount: 20,
       mediumConfidenceMedianApe: 0.09,
     },
-  } satisfies BacktestAcceptance;
+    useCohorts: Object.fromEntries([
+      'commercial', 'industrial', 'mixed-industrial', 'mixed-residential', 'office', 'residential',
+    ].map((use) => [use, use === 'residential' ? {
+      status: 'accepted', scoredCases: 20, estimateCoverage: 0.8,
+      medianApe: 0.08, p75Ape: 0.16, bias: 0, intervalCoverage: 0.5, reasons: [],
+    } : {
+      status: 'diagnostic-only', scoredCases: 0, estimateCoverage: 0,
+      medianApe: null, p75Ape: null, bias: null, intervalCoverage: null,
+      reasons: ['insufficient-use-cohort-cases', 'incomplete-use-cohort-metrics'],
+    }])) as CandidateBacktestAcceptance['useCohorts'],
+    parkingImputationAccepted: true,
+    parkingFamilies: {
+      flat: {
+        status: 'accepted', caseCount: 20, estimatedCount: 16, estimateCoverage: 0.8,
+        priceMedianApe: 0.1, priceP75Ape: 0.2, areaMedianApe: 0.08, areaP75Ape: 0.12,
+        priceIntervalCoverage: 0.5, areaIntervalCoverage: 0.5, reasons: [],
+      },
+      mechanical: {
+        status: 'accepted', caseCount: 20, estimatedCount: 16, estimateCoverage: 0.8,
+        priceMedianApe: 0.1, priceP75Ape: 0.2, areaMedianApe: 0.08, areaP75Ape: 0.12,
+        priceIntervalCoverage: 0.5, areaIntervalCoverage: 0.5, reasons: [],
+      },
+    },
+    parkingComparison: {
+      directCoverage: 0.7, imputedCoverage: 0.8,
+      directMedianApe: 0.08, imputedMedianApe: 0.08,
+      directP75Ape: 0.16, imputedP75Ape: 0.16,
+      biasRegression: 0, intervalCoverageRegression: 0,
+    },
+  } satisfies CandidateBacktestAcceptance;
   return accepted;
+}
+
+function legacyAcceptance(transactionArtifactSha256 = 'a'.repeat(64)): BacktestAcceptance {
+  return {
+    schemaVersion: 2,
+    estimatorPolicyVersion: 4,
+    policyId: ACTIVE_ESTIMATOR_POLICY.id,
+    transactionArtifactSha256,
+    approvedAt: '2026-07-25T01:00:00.000Z',
+    asOf: AS_OF,
+    evaluatedThrough: AS_OF,
+    latestEligibleTransactionDate: '2026-01-25',
+    thresholds: {
+      medianApeMax: 0.12, p75ApeMax: 0.20, minimumEstimateCoverage: 0.70,
+      minimumConfidenceSliceCases: 20, minimumHighConfidenceImprovement: 0.01,
+    },
+    metrics: {
+      estimateCoverage: 0.8, reliableEstimatedCount: 40,
+      reliableMedianApe: 0.08, reliableP75Ape: 0.16,
+      highConfidenceEstimatedCount: 20, highConfidenceMedianApe: 0.07,
+      mediumConfidenceEstimatedCount: 20, mediumConfidenceMedianApe: 0.09,
+    },
+  };
 }
 
 function listing(overrides: Partial<PreMarketEnrichedListing> = {}): PreMarketEnrichedListing {
@@ -155,8 +220,11 @@ test('production estimate stays review before approval and becomes reliable only
   );
 });
 
-test('untouched schema-3 rows keep legacy valuation authoritative without entering challenger selectors', () => {
+test('untouched schema-3 predecessor is review-only and never enters current scenario selectors', () => {
   const legacy = structuredClone(bundleWithAcceptance());
+  legacy.manifest.schemaVersion = 3;
+  legacy.manifest.estimatorPolicyVersion = 4;
+  legacy.backtestAcceptance = legacyAcceptance();
   for (const transactions of Object.values(legacy.transactions.cells)) {
     for (const transaction of transactions) {
       const row = transaction as unknown as Record<string, unknown>;
@@ -172,8 +240,8 @@ test('untouched schema-3 rows keep legacy valuation authoritative without enteri
 
   const [result] = attachMarketEstimates([listing()], legacy, AS_OF);
 
-  assert.equal(result.marketEstimate.status, 'reliable');
-  assert.equal(result.marketEstimate.comparables.length, 5);
+  assert.equal(result.marketEstimate.status, 'review');
+  assert.ok(result.marketEstimate.unavailableReasons.includes('market-backtest-not-approved'));
   assert.ok(result.marketScenarios.reasons.includes('legacy-compatibility-scenario-unavailable'));
   assert.ok(result.marketScenarios.scenarios.every((scenario) =>
     scenario.status === 'unavailable'

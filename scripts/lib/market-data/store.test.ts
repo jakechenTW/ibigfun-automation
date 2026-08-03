@@ -39,6 +39,7 @@ import type {
   DoorplateIndex,
   LegacyBacktestAcceptance,
   MarketDataManifest,
+  MarketTransaction,
   ScenarioBacktestAcceptance,
   TransactionIndex,
 } from './types.ts';
@@ -150,6 +151,51 @@ async function writeBuild(dir: string, buildId: string, count = 1): Promise<void
     value.artifacts[file] = { sha256: await sha256File(join(dir, file)), bytes: (await readFile(join(dir, file))).byteLength };
   }
   await writeFile(join(dir, 'manifest.json'), `${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function rewriteTransactionIndexChecksum(root: string, index: TransactionIndex): Promise<void> {
+  const indexPath = join(root, 'transactions-index.json');
+  await writeFile(indexPath, JSON.stringify(index));
+  const value = JSON.parse(await readFile(join(root, 'manifest.json'), 'utf8')) as MarketDataManifest;
+  value.artifacts['transactions-index.json'] = {
+    sha256: await sha256File(indexPath),
+    bytes: (await readFile(indexPath)).byteLength,
+  };
+  await writeFile(join(root, 'manifest.json'), JSON.stringify(value));
+}
+
+function consistentGradeBTransaction(): MarketTransaction {
+  return {
+    ...transaction,
+    id: 'grade-b-consistent',
+    transferredParkingCount: 1,
+    parkingPriceNtd: 2_000_000,
+    parkingAreaPing: 5,
+    buildingPriceNtd: 28_000_000,
+    buildingAreaPing: 25,
+    buildingUnitPriceWan: 112,
+    buildingUnitPriceBoundsWan: {
+      p25: 100,
+      p50: 112,
+      p75: 120,
+      relativeIqrRatio: 20 / 112,
+    },
+    parkingEvidence: {
+      grade: 'B', family: 'flat', originalType: '坡道平面',
+      officialPriceNtd: null, officialAreaPing: null, reasons: ['parking-components-incomplete'],
+      imputation: {
+        asOf: '2025-12-01', stage: 'same-building',
+        comparableIds: ['a', 'b', 'c'], comparableCount: 3,
+        priceP25Ntd: 1_000_000, priceP50Ntd: 2_000_000, priceP75Ntd: 3_000_000,
+        areaP25Ping: 4, areaP50Ping: 5, areaP75Ping: 6,
+        pairP25: { priceNtd: 1_200_000, areaPing: 4.2 },
+        pairP50: { priceNtd: 2_000_000, areaPing: 5 },
+        pairP75: { priceNtd: 2_800_000, areaPing: 5.8 },
+        priceIqrRatio: 1,
+        areaIqrRatio: 0.4,
+      },
+    },
+  };
 }
 
 async function downgradeBuildToLegacySchema(
@@ -540,6 +586,54 @@ test('acceptance publication failure restores the old build and acceptance pair'
   assert.equal(restored?.backtestAcceptance?.transactionArtifactSha256, oldAcceptance.transactionArtifactSha256);
   assert.deepEqual(await readFile(acceptancePath), oldAcceptanceBytes);
   assert.equal(marketDataBacktestAccepted(restored!), true);
+});
+
+test('publication rollback preserves exact accepted predecessor bytes', async (t) => {
+  for (const predecessor of [
+    { schemaVersion: 3 as const, policyVersion: 4, acceptanceSchema: 2 as const },
+    { schemaVersion: 4 as const, policyVersion: 5, acceptanceSchema: 3 as const },
+  ]) await t.test(`schema-${predecessor.schemaVersion} policy-${predecessor.policyVersion}`, async (t) => {
+    const parent = await mkdtemp(join(tmpdir(), 'market-store-predecessor-rollback-'));
+    const active = join(parent, 'taipei');
+    const stage = join(parent, '.taipei-staging-next');
+    t.after(() => rm(parent, { recursive: true, force: true }));
+    await writeBuild(active, `old-schema-${predecessor.schemaVersion}`);
+    await downgradeBuildToLegacySchema(active, predecessor.schemaVersion);
+    const oldAcceptance = predecessor.acceptanceSchema === 2
+      ? { ...await passingLegacyAcceptance(active), estimatorPolicyVersion: predecessor.policyVersion }
+      : { ...await passingAcceptance(active), estimatorPolicyVersion: predecessor.policyVersion };
+    await writeFile(backtestAcceptancePath(active), `${stableJson(oldAcceptance)}\n`);
+    const oldManifestBytes = await readFile(join(active, 'manifest.json'));
+    const oldTransactionBytes = await readFile(join(active, 'transactions-index.json'));
+    const oldAcceptanceBytes = await readFile(backtestAcceptancePath(active));
+    await writeBuild(stage, 'next-current-build');
+    const nextAcceptance = await passingAcceptance(stage);
+    const acceptancePath = backtestAcceptancePath(active);
+
+    await assert.rejects(
+      () => publishStagedBuildWithAcceptance(active, stage, nextAcceptance, {
+        minDoorplates: 1,
+        minTransactions: 0,
+        publicationFileOps: {
+          rename: async (from, to) => {
+            if (to === acceptancePath && from !== stage) {
+              throw new Error('injected pre-acceptance rename failure');
+            }
+            await rename(from, to);
+          },
+        },
+      }),
+      (error) => {
+        assert.equal(error instanceof AggregateError, false);
+        assert.match((error as Error).message, /injected pre-acceptance rename failure/);
+        return true;
+      },
+    );
+
+    assert.deepEqual(await readFile(join(active, 'manifest.json')), oldManifestBytes);
+    assert.deepEqual(await readFile(join(active, 'transactions-index.json')), oldTransactionBytes);
+    assert.deepEqual(await readFile(acceptancePath), oldAcceptanceBytes);
+  });
 });
 
 test('acceptance publication failure restores an absent old acceptance', async (t) => {
@@ -1656,6 +1750,116 @@ test('candidate validation rejects malformed persisted row invariants even with 
     () => validateCandidateStagedBuild(root, { minDoorplates: 1, minTransactions: 0 }),
     /candidate transaction row/i,
   );
+});
+
+test('schema-5 validation rejects checksum-consistent positive arithmetic tampering', async (t) => {
+  const mutations: Array<[string, (row: MarketTransaction) => void]> = [
+    ['building price', (row) => { row.buildingPriceNtd = 29_000_000; }],
+    ['building area', (row) => { row.buildingAreaPing = 24; }],
+    ['building unit price', (row) => { row.buildingUnitPriceWan = 999_999; }],
+    ['parking price IQR', (row) => { row.parkingEvidence.imputation!.priceIqrRatio = 0.5; }],
+    ['parking area IQR', (row) => { row.parkingEvidence.imputation!.areaIqrRatio = 0.5; }],
+    ['parking scalar P50', (row) => { row.parkingEvidence.imputation!.priceP50Ntd = 2_100_000; }],
+    ['building bounds P50', (row) => { row.buildingUnitPriceBoundsWan!.p50 = 113; }],
+    ['building bounds IQR', (row) => { row.buildingUnitPriceBoundsWan!.relativeIqrRatio = 0.1; }],
+    ['joint P50 pair', (row) => {
+      row.parkingEvidence.imputation!.pairP50.priceNtd = 2_100_000;
+      row.parkingPriceNtd = 2_100_000;
+      row.buildingPriceNtd = 27_900_000;
+      row.buildingUnitPriceWan = 111.6;
+      row.buildingUnitPriceBoundsWan!.p50 = 111.6;
+    }],
+  ];
+
+  for (const [label, mutate] of mutations) await t.test(label, async (t) => {
+    const parent = await mkdtemp(join(tmpdir(), 'market-store-arithmetic-tamper-'));
+    const root = join(parent, 'taipei');
+    t.after(() => rm(parent, { recursive: true, force: true }));
+    await writeBuild(root, `arithmetic-${label}`);
+    await convertBuildToCandidate(root);
+    const index = JSON.parse(await readFile(join(root, 'transactions-index.json'), 'utf8')) as TransactionIndex;
+    const row = consistentGradeBTransaction();
+    mutate(row);
+    index.cells[Object.keys(index.cells)[0]!] = [row];
+    const value = JSON.parse(await readFile(join(root, 'manifest.json'), 'utf8')) as MarketDataManifest;
+    value.transactions.normalization.byParkingGrade = { A: 0, B: 1, C: 0 };
+    value.transactions.normalization.gradeBByComponent = {
+      missingBoth: 1, officialAreaOnly: 0, officialPriceOnly: 0,
+    };
+    value.transactions.normalization.gradeBImputed = 1;
+    value.transactions.normalization.gradeBUnresolved = 0;
+    await writeFile(join(root, 'manifest.json'), JSON.stringify(value));
+    await rewriteTransactionIndexChecksum(root, index);
+
+    await assert.rejects(
+      () => validateCandidateStagedBuild(root, { minDoorplates: 1, minTransactions: 0 }),
+      /arithmetic|derived|imputation evidence/i,
+    );
+  });
+});
+
+test('schema-5 validation accepts a checksum-consistent arithmetically valid grade-B row', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-arithmetic-valid-'));
+  const root = join(parent, 'taipei');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(root, 'arithmetic-valid');
+  await convertBuildToCandidate(root);
+  const index = JSON.parse(await readFile(join(root, 'transactions-index.json'), 'utf8')) as TransactionIndex;
+  index.cells[Object.keys(index.cells)[0]!] = [consistentGradeBTransaction()];
+  const value = JSON.parse(await readFile(join(root, 'manifest.json'), 'utf8')) as MarketDataManifest;
+  value.transactions.normalization.byParkingGrade = { A: 0, B: 1, C: 0 };
+  value.transactions.normalization.gradeBByComponent = {
+    missingBoth: 1, officialAreaOnly: 0, officialPriceOnly: 0,
+  };
+  value.transactions.normalization.gradeBImputed = 1;
+  value.transactions.normalization.gradeBUnresolved = 0;
+  await writeFile(join(root, 'manifest.json'), JSON.stringify(value));
+  await rewriteTransactionIndexChecksum(root, index);
+
+  await validateCandidateStagedBuild(root, { minDoorplates: 1, minTransactions: 0 });
+});
+
+test('schema-5 validation rejects a Grade-B pair that contradicts its official component total', async (t) => {
+  for (const component of ['price', 'area'] as const) await t.test(component, async (t) => {
+    const parent = await mkdtemp(join(tmpdir(), 'market-store-official-component-'));
+    const root = join(parent, 'taipei');
+    t.after(() => rm(parent, { recursive: true, force: true }));
+    await writeBuild(root, `official-${component}`);
+    await convertBuildToCandidate(root);
+    const index = JSON.parse(await readFile(join(root, 'transactions-index.json'), 'utf8')) as TransactionIndex;
+    const row = consistentGradeBTransaction();
+    const imputation = row.parkingEvidence.imputation!;
+    if (component === 'price') {
+      row.parkingEvidence.officialPriceNtd = 2_000_000;
+      imputation.priceP25Ntd = 2_000_000;
+      imputation.priceP75Ntd = 2_000_000;
+      imputation.priceIqrRatio = 0;
+      imputation.pairP25.priceNtd = 1_900_000;
+      imputation.pairP75.priceNtd = 2_000_000;
+    } else {
+      row.parkingEvidence.officialAreaPing = 5;
+      imputation.areaP25Ping = 5;
+      imputation.areaP75Ping = 5;
+      imputation.areaIqrRatio = 0;
+      imputation.pairP25.areaPing = 4.9;
+      imputation.pairP75.areaPing = 5;
+    }
+    index.cells[Object.keys(index.cells)[0]!] = [row];
+    const value = JSON.parse(await readFile(join(root, 'manifest.json'), 'utf8')) as MarketDataManifest;
+    value.transactions.normalization.byParkingGrade = { A: 0, B: 1, C: 0 };
+    value.transactions.normalization.gradeBByComponent = component === 'price'
+      ? { missingBoth: 0, officialAreaOnly: 0, officialPriceOnly: 1 }
+      : { missingBoth: 0, officialAreaOnly: 1, officialPriceOnly: 0 };
+    value.transactions.normalization.gradeBImputed = 1;
+    value.transactions.normalization.gradeBUnresolved = 0;
+    await writeFile(join(root, 'manifest.json'), JSON.stringify(value));
+    await rewriteTransactionIndexChecksum(root, index);
+
+    await assert.rejects(
+      () => validateCandidateStagedBuild(root, { minDoorplates: 1, minTransactions: 0 }),
+      /arithmetic|imputation evidence/i,
+    );
+  });
 });
 
 test('candidate acceptance rejects an artifact unless residential and both parking families passed', async (t) => {

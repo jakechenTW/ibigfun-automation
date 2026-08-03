@@ -14,7 +14,7 @@ that state-changing local publication command.
 | Contract | Build schema | Estimator policy | Acceptance schema | Runtime authority |
 |---|---:|---:|---:|---|
 | Production | 5 | 7 | 3 | `marketEstimate`, approved scenarios, and report buckets |
-| Legacy audit compatibility | 3 | 4 | 2 | One-release read compatibility only |
+| Rollback predecessor | 3 / 4 | 4 / 5 | 2 / 3 | Recovery validation only; never runtime authority |
 | Candidate | 5 | 7 | 3 | Aggregate evaluation; never publishes |
 
 Candidate staging remains isolated and non-publishing. Production publication
@@ -37,7 +37,7 @@ The fixed thresholds were not changed after observing the result:
 - Global production gate: median / P75 APE at most 0.12 / 0.20, estimate
   coverage at least 0.70, at least 20 high- and medium-confidence estimates,
   and high confidence at least 0.01 better than medium.
-- Exact-use challenger cohorts: at least 20 scored cases, median / P75 APE at
+- Exact-use candidate cohorts: at least 20 scored cases, median / P75 APE at
   most 0.12 / 0.20, absolute bias at most 0.05, and interval coverage at least
   0.30.
 - Direct-to-imputed comparison: strict coverage improvement, absolute-bias
@@ -75,8 +75,9 @@ held-out cases, transaction rows, IDs, or addresses were retained.
 ## Runtime Safety and Authority
 
 - Production loading requires a checksum-closed schema-5 / policy-7 build and
-  matching aggregate schema-3 acceptance. A valid legacy schema-3/policy-4
-  pair remains readable for one release only as compatibility evidence.
+  matching aggregate schema-3 acceptance. Older accepted pairs are validated
+  only long enough for byte-exact publication rollback and never attach to the
+  current runtime.
 - Candidate staging is isolated and disposable, validates schema 5 / policy 7,
   and rejects every publication request.
 - `market-data update` recovers interrupted publication first, then fetches,
@@ -92,6 +93,24 @@ held-out cases, transaction rows, IDs, or addresses were retained.
   cohorts and parking families explicitly approved by the matching acceptance.
 - Unsupported or unresolved parking evidence remains review-only.
 
+## Fix Wave 3 Hardening
+
+- Schema-5 validation now recomputes every persisted building price, area, and
+  unit price from total minus parking values. Builder and loader share the same
+  pure arithmetic helpers.
+- Grade-B validation recomputes scalar/P50 and price/area IQR relationships,
+  building-bound P50 and relative IQR, joint P50 building arithmetic, and any
+  official price/area component across all persisted joint pairs. Positive but
+  checksum-consistent tampering therefore fails closed.
+- Publication recovery validates a predecessor acceptance against its own exact
+  contract: schema-3/policy-4/acceptance-2 or
+  schema-4/policy-5/acceptance-3. Fault injection after the build renames proves
+  both build and acceptance bytes roll back atomically; neither predecessor can
+  authorize a current runtime load.
+- A normal update whose strict gate fails removes staging and returns an
+  existing accepted bundle as `last-known-good`, including the explicit gate
+  reasons and exit-3 semantics. With no accepted bundle it remains unavailable.
+
 ## Activated Model Corrections
 
 Policy 7 keeps the corrected official building and
@@ -102,19 +121,22 @@ exact-use cohort calibration, and aggregate masked-family holdouts.
 
 ## Verification Evidence
 
-All verification below used the final code state after the second fix wave:
+All verification below used the final code state after the third fix wave:
 
-- Complete repository suite (`npm test`): 473 / 473 passed, 0 failed.
+- Complete repository suite (`npm test`): 491 / 491 passed, 0 failed.
 - TypeScript (`npx tsc --noEmit`): exit 0.
 - Whitespace/error-marker check (`git diff --check`): exit 0.
 - Production-pair tests prove schema-5 / policy-7 plus matching schema-3
-  acceptance loads, and cover the one-release legacy compatibility boundary.
+  acceptance loads, while predecessor pairs remain rollback-only.
 - Byte-identity tests prove pending-journal candidate refusal, failed candidate
   evaluation, and rejected candidate publication do not change the production manifest,
   transaction checksum, acceptance bytes, or build ID.
 - Recovery tests prove interrupted production publication is handled before
   load, malformed journals fail closed before network work, and candidate
   validation cannot cross-authorize production.
+- Arithmetic tamper tests cover nine independent derived-value mutations plus
+  contradictory official price/area pair totals; all use checksum-consistent
+  files, and a valid Grade-B row remains accepted.
 
 The real baseline candidate was rerun and passed. Its disposable stage was
 removed and no acceptance or production state was published. No production
@@ -129,9 +151,9 @@ pair.
   configuration, types, backtest, store, and their tests.
 - Gated atomic update and evaluation-only candidate behavior: updater, CLI,
   candidate staging, and their tests.
-- Report authority and one-release compatibility: enrichment attachment, integration
+- Report authority and rollback-only predecessor handling: enrichment attachment, integration
   tests, runbook, prompts, reporting rules, profiles, and templates.
-- Retained challenger corrections: transaction normalization, parking model,
+- Activated candidate corrections: transaction normalization, parking model,
   selector, acceptance policy, and focused regression tests.
 - Durable design, implementation plan, and this aggregate-only handoff report.
 

@@ -81,11 +81,12 @@ exclusion.
   unresolved。相同 base key 的所有保留點必須有完全相同的經緯度才可 exact match；座標衝突時
   不得任選一點。原始地址、完整正規化地址、配對門牌、方法與不確定範圍仍完整保留在本機
   evidence。不可用模糊文字補猜缺失的市、區、路或號。
-- 官方交易先分成三類：一般市場的單一建物 `住家用` 且通過所有硬性品質檢查者為
-  `reliable-eligible`；`住商用` 或一次移轉多棟建物者為 `review-only`；非住宅／空白用途、
-  政府標讓售、特殊交易、無法定位、無法分離車位或其他硬性衝突者為 `excluded`。
-  `review-only` evidence 可留供人工查核，但不得補足 reliable 所需的三筆可比，也不得產生
-  median/P25/P75；只剩這類 evidence 時估值必須為 `review`。
+- 官方交易先分成三類：一般市場、單一建物、`住家用` 且車位為 Grade A（明確無車位，或
+  價格與面積皆可直接分離）並通過所有硬性品質檢查者為 `reliable-eligible`。已知的
+  `住商用`／辦公／商業／工業／住工用途、多棟移轉，或車位為 Grade B（僅缺一項或兩項）
+  者保留為 `review-only`，可供 acceptance 核准的同用途／車位情境使用，但不會冒充住宅
+  reliable 可比。空白／未知用途、政府標讓售、特殊交易、無法定位、Grade C 車位或其他
+  硬性衝突才是 `excluded`。只剩 review-only 且沒有已核准情境時，估值必須為 `review`。
 - 投資分桶的開價溢價以 **P25 保守行情** 計算/覆核；中位數溢價只能用於說明，不能單獨使物件進入推薦。
 - 只有當本機 backtest acceptance 的 `transactions-index.json` checksum、`ESTIMATOR_POLICY_VERSION`、
   active policy id、schema-5 manifest 的 index-policy provenance、schema-3 acceptance，以及完整有效
@@ -98,17 +99,20 @@ exclusion.
   已更新時一律降為 `review`，不得自動推薦。任何 eligibility、selector、weight、outlier、
   confidence、status、coverage 或 backtest 語意變更都必須提高 `ESTIMATOR_POLICY_VERSION`
   並重新通過完整 backtest。
-- 2026-08-03 修正兩車位遮罩總額與住宅專屬 Grade-B 比較後，policy-7 baseline challenger 已通過
-  全部固定 gate，之後以明確變更啟用 schema-5／policy-7／acceptance-schema-3 正式契約。
+- 2026-08-03 修正兩車位遮罩總額與住宅專屬 Grade-B 比較後，policy-7 baseline candidate 已通過
+  全部固定 gate，並啟用 schema-5／policy-7／acceptance-schema-3 正式契約。
   `update` 只有在完整 gate 通過後才可原子發布，否則保留 last-known-good。
-  `marketEstimate` 保留一個版本作相容／稽核；`marketScenarios` 依已核准用途與車位家族提供正式情境證據。
+  `marketEstimate` 仍是保守 P25 與資料品質的基準；`marketScenarios` 只依 acceptance 已核准的用途與
+  車位家族補充情境證據，不得繞過用途、車位數、地址、freshness 或信心檢查。
   詳見 [safe-stop design](superpowers/specs/2026-08-03-multi-use-parking-safe-stop-design.md)。
-- Challenger coverage 不足只能依序評估 baseline → 48-month → 1000-meter；只有前一政策「單純 coverage
+- Candidate coverage 不足只能依序評估 baseline → 48-month → 1000-meter；只有前一政策「單純 coverage
   <70%」時才可擴張，任何 accuracy／confidence calibration failure 都必須停止。Fallback 必須全面
   通過相同門檻，且仍須另行明確啟用與 provenance review；目前 `update` 不會因未來 data-only pass
   自動發佈。不得降低門檻或混用建物型態。
 - `status: reliable` 且兩個官方來源均未過期，才可能進入推薦；`low` 信心、`review`、`unavailable`，或只靠中位數才符合門檻者，最多是待人工覆核的候選。
-- 車位價格/面積無法與建物分離（含 `listing-parking-not-separable`）時，不得自動推薦。
+- 待售物件含車位時，保守 `marketEstimate` 會標為 `listing-parking-not-separable`／review；只有
+  車位家族與數量已確認、該家族 acceptance 已通過且 `marketScenarios` 其餘證據也完整時，車位估值
+  才能作補充情境，不能單獨把物件升為自動推薦。
 - 任一官方來源過期時，受影響物件不得推薦，快速摘要必須寫明資料偏舊，整則通知一律使用 `warn`。
 
 ### 有界外部覆核（非靜默覆寫）

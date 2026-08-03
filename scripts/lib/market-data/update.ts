@@ -3,6 +3,7 @@ import { createReadStream, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { parse } from 'csv-parse';
 import type { Logger } from '../journal.ts';
+import { deriveBuildingValues, relativeIqrRatio } from './arithmetic.ts';
 import {
   backtestCandidateTransactions,
   candidateBacktestAcceptance,
@@ -255,8 +256,8 @@ function acceptedParkingImputation(
   const priceP75Ntd = Math.max(componentQuantile('priceNtd', 0.75), pairP50.priceNtd);
   const areaP25Ping = Math.min(componentQuantile('areaPing', 0.25), pairP50.areaPing);
   const areaP75Ping = Math.max(componentQuantile('areaPing', 0.75), pairP50.areaPing);
-  const priceIqrRatio = (priceP75Ntd - priceP25Ntd) / pairP50.priceNtd;
-  const areaIqrRatio = (areaP75Ping - areaP25Ping) / pairP50.areaPing;
+  const priceIqrRatio = relativeIqrRatio(priceP25Ntd, pairP50.priceNtd, priceP75Ntd);
+  const areaIqrRatio = relativeIqrRatio(areaP25Ping, pairP50.areaPing, areaP75Ping);
   const buildingObservations = finalPairs.flatMap((pair) => {
     const buildingPriceNtd = transaction.totalPriceNtd - pair.priceNtd;
     const buildingAreaPing = transaction.totalAreaPing - pair.areaPing;
@@ -266,12 +267,15 @@ function acceptedParkingImputation(
       : [];
   });
   if (buildingObservations.length !== finalPairs.length) return null;
-  const buildingPriceNtd = transaction.totalPriceNtd - pairP50.priceNtd;
-  const buildingAreaPing = transaction.totalAreaPing - pairP50.areaPing;
-  const buildingUnitPriceWan = buildingPriceNtd / buildingAreaPing / 10_000;
+  const { buildingPriceNtd, buildingAreaPing, buildingUnitPriceWan } = deriveBuildingValues(
+    transaction.totalPriceNtd,
+    transaction.totalAreaPing,
+    pairP50.priceNtd,
+    pairP50.areaPing,
+  );
   const p25 = Math.min(weightedQuantile(buildingObservations, 0.25), buildingUnitPriceWan);
   const p75 = Math.max(weightedQuantile(buildingObservations, 0.75), buildingUnitPriceWan);
-  const buildingIqrRatio = (p75 - p25) / buildingUnitPriceWan;
+  const buildingIqrRatio = relativeIqrRatio(p25, buildingUnitPriceWan, p75);
   if (buildingPriceNtd <= 0 || buildingAreaPing <= 0
       || !Number.isFinite(priceIqrRatio) || priceIqrRatio > PARKING_POLICY.maximumPriceIqrRatio
       || !Number.isFinite(areaIqrRatio) || areaIqrRatio > PARKING_POLICY.maximumAreaIqrRatio
@@ -634,6 +638,22 @@ async function evaluateTaipeiMarketDataCandidateUnlocked(
     if (!gate.passed) {
       await fs.rm(stage, { recursive: true, force: true });
       stage = null;
+      if (execution.publish) {
+        const reason = `candidate-gate-failed: ${gate.reasons.join(', ') || 'incomplete-candidate-gate'}`;
+        log(
+          options.logger,
+          existing ? 'warn' : 'error',
+          existing ? 'market-data.last-known-good' : 'market-data.unavailable',
+          existing
+            ? 'market-data candidate gate failed; retaining last-known-good build'
+            : 'market-data candidate gate failed and no accepted build is available',
+          { reason },
+        );
+        if (existing) {
+          existing.refresh = { status: 'last-known-good', failure: reason };
+          return existing;
+        }
+      }
       return null;
     }
     if (!acceptance) {
@@ -705,7 +725,7 @@ export async function evaluateTaipeiMarketDataCandidate(
   options: EvaluateTaipeiMarketDataCandidateOptions,
 ): Promise<CandidateEvaluation> {
   if (options.publish) {
-    throw new Error('Challenger activation is withheld; candidate evaluation cannot publish');
+    throw new Error('Candidate evaluation is non-publishing; use market-data update for gated publication');
   }
   const capture: NonNullable<CandidateExecution['capture']> = {};
   const root = options.rootPath ?? MARKET_DATA_ROOT;

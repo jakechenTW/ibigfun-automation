@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
+import { marketUpdateExitCode } from '../../market-data.ts';
 import {
   augmentParkingEvidenceCausally,
   ensureTaipeiMarketData,
@@ -435,7 +436,7 @@ test('candidate evaluation rejects every publish request before doing work', asy
       policy: ACTIVE_ESTIMATOR_POLICY,
       publish: true,
     }),
-    /challenger activation is withheld/i,
+    /candidate evaluation is non-publishing/i,
   );
 });
 
@@ -495,7 +496,7 @@ test('candidate evaluation refuses a pending production journal without mutating
         throw new Error('candidate must fail before network work');
       },
     }),
-    /frozen update.*recover|recover.*frozen update/i,
+    /market-data update.*recover|recover.*market-data update/i,
   );
 
   assert.equal(fetchCalls, 0);
@@ -629,6 +630,39 @@ test('failed update retains a valid accepted active build', async (t) => {
   assert.deepEqual(events, ['market-data.check', 'market-data.last-known-good']);
 });
 
+test('normal update gate failure retains accepted bytes with an explicit exit-3 reason', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-update-gate-failure-'));
+  const rootPath = join(parent, 'taipei');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await seedValidAcceptedBuild(rootPath);
+  const fixture = await candidateFixtureInputs();
+  const beforeManifest = await readFile(join(rootPath, 'manifest.json'));
+  const beforeTransactions = await readFile(join(rootPath, 'transactions-index.json'));
+  const beforeAcceptance = await readFile(backtestAcceptancePath(rootPath));
+
+  const bundle = await ensureTaipeiMarketData({
+    asOf: '2026-07-25',
+    rootPath,
+    minDoorplates: 1,
+    minTransactions: 1,
+    fetch: fixture.fetch,
+    openZip: fixture.openZip,
+    clock: () => new Date('2026-07-25T01:00:00.000Z'),
+  });
+
+  assert.equal(bundle?.manifest.buildId, 'known-good');
+  assert.equal(bundle?.refresh?.status, 'last-known-good');
+  assert.equal(
+    bundle?.refresh?.failure,
+    'candidate-gate-failed: parking-imputation-comparison-failed',
+  );
+  assert.equal(marketUpdateExitCode(bundle?.refresh?.status), 3);
+  assert.deepEqual(await readFile(join(rootPath, 'manifest.json')), beforeManifest);
+  assert.deepEqual(await readFile(join(rootPath, 'transactions-index.json')), beforeTransactions);
+  assert.deepEqual(await readFile(backtestAcceptancePath(rootPath)), beforeAcceptance);
+  assert.deepEqual((await readdir(parent)).sort(), ['taipei', 'taipei-backtest-acceptance.json']);
+});
+
 test('candidate evaluation builds schema-5 evidence and disposes a newly failing candidate stage', async (t) => {
   const parent = await mkdtemp(join(tmpdir(), 'market-candidate-isolated-'));
   const rootPath = join(parent, 'taipei');
@@ -709,7 +743,7 @@ test('failed candidate gate never publishes and leaves production bytes unchange
   ]);
 });
 
-test('load-only ensure never migrates schema-1, schema-2, or schema-4 state', async (t) => {
+test('failed normal update never mutates schema-1, schema-2, or schema-4 predecessors', async (t) => {
   for (const schemaVersion of [1, 2, 4] as const) {
     await t.test(`schema ${schemaVersion}`, async (t) => {
       const parent = await mkdtemp(join(tmpdir(), `market-no-migrate-${schemaVersion}-`));

@@ -1,13 +1,13 @@
-/** Active production build contract retained from merge base ab54d11. */
+/** Active production build contract. */
 export const MARKET_SCHEMA_VERSION = 5;
 /**
  * Intentional acceptance compatibility contract. Bump whenever selector,
  * weighting, outlier, confidence, status, or backtest semantics change.
  */
 export const ESTIMATOR_POLICY_VERSION = 7;
-/** Non-authoritative challenger build contract. It cannot authorize runtime use. */
+/** Candidate evaluation uses the production schema but never publishes. */
 export const CANDIDATE_MARKET_SCHEMA_VERSION = 5;
-/** Non-authoritative challenger estimator contract. */
+/** Candidate evaluation uses the production estimator contract. */
 export const CANDIDATE_ESTIMATOR_POLICY_VERSION = 7;
 export const MARKET_DATA_ROOT = 'state/market-data/taipei';
 export const MARKET_BACKTEST_DIAGNOSTIC_ROOT = 'state/market-data/backtests/taipei';

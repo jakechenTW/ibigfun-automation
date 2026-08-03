@@ -83,7 +83,7 @@ export interface BacktestReport {
   cases: BacktestCase[];
 }
 
-/** Challenger-only diagnostics; never accepted by the production writer. */
+/** Full policy-7 diagnostics used by candidate and production backtests. */
 export interface CandidateBacktestReport extends BacktestReport {
   /** Exact-use metrics with grade-B building evidence disabled. */
   byPrimaryUseDirectOnly: Record<Exclude<NormalizedPrimaryUse, 'unknown'>, BacktestMetrics>;
@@ -539,7 +539,7 @@ function parkingFamilyAcceptances(
   };
 }
 
-/** Strict challenger gate; it cannot authorize the legacy production runtime. */
+/** Strict policy-7 publication and acceptance gate. */
 export function evaluateCandidateBacktestGate(report: CandidateBacktestReport): BacktestGateResult {
   const legacy = evaluateBacktestGate(report);
   const reasons = [...legacy.reasons];
@@ -564,7 +564,7 @@ export function evaluateCandidateBacktestGate(report: CandidateBacktestReport): 
   };
 }
 
-/** Builds the active schema-2 / policy-4 aggregate production proof. */
+/** Builds the legacy schema-2 / policy-4 proof for compatibility tests only. */
 export function backtestAcceptance(
   report: BacktestReport,
   transactionArtifactSha256: string,
@@ -602,7 +602,7 @@ export function backtestAcceptance(
   };
 }
 
-/** Builds a strict aggregate challenger proof after every policy-7 gate passes. */
+/** Builds the current aggregate acceptance after every policy-7 gate passes. */
 export function candidateBacktestAcceptance(
   report: CandidateBacktestReport,
   transactionArtifactSha256: string,
@@ -686,8 +686,7 @@ function scenarioCohortAcceptance(metric: BacktestMetrics): ScenarioCohortAccept
 }
 
 /**
- * Frozen production backtest. This deliberately uses only the merge-base
- * eligibility, boundary, estimator, and report contract.
+ * Legacy report-shape backtest retained for compatibility audits only.
  */
 export function backtestTransactions(index: TransactionIndex, options: BacktestOptions): BacktestReport {
   const asOf = parseIsoDate(options.asOf);
@@ -771,7 +770,7 @@ export function backtestTransactions(index: TransactionIndex, options: BacktestO
   };
 }
 
-/** Challenger backtest with use cohorts, imputation comparison, and masked parking. */
+/** Current backtest with use cohorts, imputation comparison, and masked parking. */
 export function backtestCandidateTransactions(
   index: TransactionIndex,
   options: BacktestOptions,

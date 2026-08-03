@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
+import { deriveBuildingValues, relativeIqrRatio, sameDerivedNumber } from './arithmetic.ts';
 import { isValidDateString } from '../date.ts';
 import {
   decideParkingFamily,
@@ -31,9 +32,12 @@ import { NORMALIZED_PRIMARY_USES, PARKING_GRADES } from './types.ts';
 import type {
   BacktestAcceptance,
   CandidateBacktestAcceptance,
+  BuildingUnitPriceBoundsWan,
   DoorplateIndex,
   MarketDataBundle,
   MarketDataManifest,
+  MarketTransaction,
+  ParkingImputationEvidence,
   SourceFreshness,
   ScenarioCohortAcceptance,
   ParkingFamilyAcceptance,
@@ -551,13 +555,17 @@ function validScenarioAcceptance(value: Record<string, unknown>): boolean {
     && (cohorts.residential as ScenarioCohortAcceptance).status === 'accepted';
 }
 
-export function validBacktestAcceptance(value: unknown): value is BacktestAcceptance {
+function validBacktestAcceptanceForPolicy(
+  value: unknown,
+  estimatorPolicyVersion: number,
+  policyId: PolicyId,
+): value is BacktestAcceptance {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
   if (!exactObject(record, ACCEPTANCE_IDENTITY_KEYS)
     || record.schemaVersion !== 2
-    || record.estimatorPolicyVersion !== ESTIMATOR_POLICY_VERSION
-    || record.policyId !== ACTIVE_ESTIMATOR_POLICY.id
+    || record.estimatorPolicyVersion !== estimatorPolicyVersion
+    || record.policyId !== policyId
     || typeof record.transactionArtifactSha256 !== 'string'
     || !/^[a-f0-9]{64}$/.test(record.transactionArtifactSha256)
     || typeof record.approvedAt !== 'string' || !Number.isFinite(Date.parse(record.approvedAt))
@@ -570,9 +578,18 @@ export function validBacktestAcceptance(value: unknown): value is BacktestAccept
   return validAcceptanceMetrics(record.metrics, record.thresholds as Record<string, unknown>);
 }
 
-export function validCandidateBacktestAcceptance(
+export function validBacktestAcceptance(value: unknown): value is BacktestAcceptance {
+  return validBacktestAcceptanceForPolicy(
+    value,
+    ESTIMATOR_POLICY_VERSION,
+    ACTIVE_ESTIMATOR_POLICY.id,
+  );
+}
+
+function validCandidateBacktestAcceptanceForPolicy(
   value: unknown,
   expectedPolicyId: PolicyId,
+  estimatorPolicyVersion: number,
 ): value is CandidateBacktestAcceptance {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
@@ -585,7 +602,7 @@ export function validCandidateBacktestAcceptance(
   ];
   if (!exactObject(record, topLevelKeys)
     || record.schemaVersion !== 3
-    || record.estimatorPolicyVersion !== CANDIDATE_ESTIMATOR_POLICY_VERSION
+    || record.estimatorPolicyVersion !== estimatorPolicyVersion
     || record.policyId !== expectedPolicyId
     || typeof record.transactionArtifactSha256 !== 'string'
     || !/^[a-f0-9]{64}$/.test(record.transactionArtifactSha256)
@@ -598,6 +615,17 @@ export function validCandidateBacktestAcceptance(
     || !approvedCandidateBacktestThresholds(record.thresholds)) return false;
   return validAcceptanceMetrics(record.metrics, record.thresholds as Record<string, unknown>)
     && validScenarioAcceptance(record);
+}
+
+export function validCandidateBacktestAcceptance(
+  value: unknown,
+  expectedPolicyId: PolicyId,
+): value is CandidateBacktestAcceptance {
+  return validCandidateBacktestAcceptanceForPolicy(
+    value,
+    expectedPolicyId,
+    CANDIDATE_ESTIMATOR_POLICY_VERSION,
+  );
 }
 
 export function readBacktestAcceptance(root: string): CandidateBacktestAcceptance | null {
@@ -665,8 +693,7 @@ export function marketDataBacktestAcceptanceDecision(
     : null;
   const accepted = acceptance !== undefined
     && marketDataManifestHasCurrentPolicyProvenance(bundle.manifest)
-    && (validCandidateBacktestAcceptance(acceptance, ACTIVE_ESTIMATOR_POLICY.id)
-      || validBacktestAcceptance(acceptance))
+    && validCandidateBacktestAcceptance(acceptance, ACTIVE_ESTIMATOR_POLICY.id)
     && acceptance.transactionArtifactSha256 === transactionArtifactChecksum(bundle.manifest)
     && latest !== null
     && acceptance.latestEligibleTransactionDate === latest
@@ -819,6 +846,67 @@ function validBuildingBounds(value: unknown): boolean {
     && Number.isFinite(bounds.relativeIqrRatio) && bounds.relativeIqrRatio >= 0;
 }
 
+function equalPersistedNumber(actual: unknown, expected: number): boolean {
+  return typeof actual === 'number' && sameDerivedNumber(actual, expected);
+}
+
+function candidateBuildingArithmeticValid(
+  row: MarketTransaction,
+  parkingPriceNtd: number,
+  parkingAreaPing: number,
+): boolean {
+  const derived = deriveBuildingValues(
+    row.totalPriceNtd,
+    row.totalAreaPing,
+    parkingPriceNtd,
+    parkingAreaPing,
+  );
+  return positiveNumber(derived.buildingPriceNtd)
+    && positiveNumber(derived.buildingAreaPing)
+    && positiveNumber(derived.buildingUnitPriceWan)
+    && equalPersistedNumber(row.buildingPriceNtd, derived.buildingPriceNtd)
+    && equalPersistedNumber(row.buildingAreaPing, derived.buildingAreaPing)
+    && equalPersistedNumber(row.buildingUnitPriceWan, derived.buildingUnitPriceWan);
+}
+
+function candidateImputationArithmeticValid(
+  row: MarketTransaction,
+  imputation: ParkingImputationEvidence,
+  bounds: BuildingUnitPriceBoundsWan,
+): boolean {
+  const priceIqr = relativeIqrRatio(
+    imputation.priceP25Ntd,
+    imputation.priceP50Ntd,
+    imputation.priceP75Ntd,
+  );
+  const areaIqr = relativeIqrRatio(
+    imputation.areaP25Ping,
+    imputation.areaP50Ping,
+    imputation.areaP75Ping,
+  );
+  const boundsIqr = relativeIqrRatio(bounds.p25, bounds.p50, bounds.p75);
+  const officialPrice = row.parkingEvidence.officialPriceNtd;
+  const officialArea = row.parkingEvidence.officialAreaPing;
+  const pairs = [imputation.pairP25, imputation.pairP50, imputation.pairP75];
+  const officialPriceConsistent = !positiveNumber(officialPrice)
+    || ([imputation.priceP25Ntd, imputation.priceP50Ntd, imputation.priceP75Ntd]
+      .every((value) => sameDerivedNumber(value, officialPrice))
+      && pairs.every((pair) => sameDerivedNumber(pair.priceNtd, officialPrice)));
+  const officialAreaConsistent = !positiveNumber(officialArea)
+    || ([imputation.areaP25Ping, imputation.areaP50Ping, imputation.areaP75Ping]
+      .every((value) => sameDerivedNumber(value, officialArea))
+      && pairs.every((pair) => sameDerivedNumber(pair.areaPing, officialArea)));
+  return sameDerivedNumber(imputation.priceP50Ntd, imputation.pairP50.priceNtd)
+    && sameDerivedNumber(imputation.areaP50Ping, imputation.pairP50.areaPing)
+    && sameDerivedNumber(imputation.priceIqrRatio, priceIqr)
+    && sameDerivedNumber(imputation.areaIqrRatio, areaIqr)
+    && sameDerivedNumber(bounds.p50, row.buildingUnitPriceWan!)
+    && sameDerivedNumber(bounds.relativeIqrRatio, boundsIqr)
+    && candidateBuildingArithmeticValid(row, imputation.pairP50.priceNtd, imputation.pairP50.areaPing)
+    && officialPriceConsistent
+    && officialAreaConsistent;
+}
+
 function validateCandidateTransactionRows(
   transactions: TransactionIndex,
   expected: TransactionBuildDiagnostics,
@@ -879,7 +967,12 @@ function validateCandidateTransactionRows(
       if ((!noParking && !directParking) || !buildingComplete
         || row.parkingPriceNtd !== row.parkingEvidence.officialPriceNtd
         || row.parkingAreaPing !== row.parkingEvidence.officialAreaPing
-        || row.parkingEvidence.imputation !== null || row.buildingUnitPriceBoundsWan !== null) {
+        || row.parkingEvidence.imputation !== null || row.buildingUnitPriceBoundsWan !== null
+        || !candidateBuildingArithmeticValid(
+          row,
+          row.parkingEvidence.officialPriceNtd!,
+          row.parkingEvidence.officialAreaPing!,
+        )) {
         throw new Error('Candidate grade-A transaction row violates direct-evidence invariants');
       }
     } else if (grade === 'B') {
@@ -894,6 +987,11 @@ function validateCandidateTransactionRows(
           || !validBuildingBounds(row.buildingUnitPriceBoundsWan) || !buildingComplete))
         || (imputed && (row.parkingPriceNtd !== imputation!.pairP50.priceNtd
           || row.parkingAreaPing !== imputation!.pairP50.areaPing))
+        || (imputed && !candidateImputationArithmeticValid(
+          row,
+          imputation!,
+          row.buildingUnitPriceBoundsWan!,
+        ))
         || (!imputed && (!buildingEmpty
           || row.parkingPriceNtd !== row.parkingEvidence.officialPriceNtd
           || row.parkingAreaPing !== row.parkingEvidence.officialAreaPing))) {
@@ -1086,7 +1184,7 @@ export async function validateStagedBuild(
   return validateBuild(stageRoot, options);
 }
 
-/** Validates an isolated schema-5 / policy-7 challenger build only. */
+/** Validates an isolated schema-5 / policy-7 candidate build only. */
 export async function validateCandidateStagedBuild(
   stageRoot: string,
   options: PublishOptions = {},
@@ -1308,8 +1406,8 @@ async function readPublicationJournal(activeRoot: string): Promise<PublicationJo
 
 /**
  * Candidate evaluation is deliberately non-authoritative: it must never recover
- * or otherwise mutate a pending production publication.  The frozen production
- * update path owns recovery under the same refresh lock.
+ * or otherwise mutate a pending production publication. The normal update path
+ * owns recovery under the same refresh lock.
  */
 export async function assertNoPendingMarketDataPublication(activeRoot: string): Promise<void> {
   const file = publicationJournalPath(activeRoot);
@@ -1320,29 +1418,40 @@ export async function assertNoPendingMarketDataPublication(activeRoot: string): 
     throw error;
   }
   throw new Error(
-    'Pending production publication journal detected; run the frozen update path to recover before candidate evaluation',
+    'Pending production publication journal detected; run market-data update to recover before candidate evaluation',
   );
 }
 
 function validateAcceptanceForBundle(
   acceptance: BacktestAcceptance | CandidateBacktestAcceptance,
   bundle: MarketDataBundle,
+  mode: 'current' | 'restorable' = 'current',
 ): void {
-  assertCurrentMarketDataIndexPolicy(bundle.manifest);
-  if (acceptance.estimatorPolicyVersion !== ESTIMATOR_POLICY_VERSION
-      || acceptance.policyId !== ACTIVE_ESTIMATOR_POLICY.id) {
-    throw new Error('Backtest acceptance does not match the active estimator policy');
+  const manifest = bundle.manifest;
+  const current = manifest.schemaVersion === MARKET_SCHEMA_VERSION
+    && manifest.estimatorPolicyVersion === ESTIMATOR_POLICY_VERSION;
+  const legacySchema3 = mode === 'restorable'
+    && manifest.schemaVersion === 3 && manifest.estimatorPolicyVersion === 4;
+  const legacySchema4 = mode === 'restorable'
+    && manifest.schemaVersion === 4 && manifest.estimatorPolicyVersion === 5;
+  if (!current && !legacySchema3 && !legacySchema4) {
+    throw new Error('Backtest acceptance does not match a restorable build policy');
   }
   if (acceptance.transactionArtifactSha256 !== transactionArtifactChecksum(bundle.manifest)) {
     throw new Error('Backtest acceptance transaction artifact checksum does not match the staged build');
+  }
+  const validShape = current
+    ? validCandidateBacktestAcceptanceForPolicy(acceptance, ACTIVE_ESTIMATOR_POLICY.id, 7)
+    : legacySchema3
+      ? validBacktestAcceptanceForPolicy(acceptance, 4, ACTIVE_ESTIMATOR_POLICY.id)
+      : validCandidateBacktestAcceptanceForPolicy(acceptance, ACTIVE_ESTIMATOR_POLICY.id, 5);
+  if (!validShape) {
+    throw new Error('Refusing to publish a non-passing backtest acceptance');
   }
   const latest = acceptanceLatestEligibleTransactionDate(bundle.transactions, acceptance);
   if (!latest || acceptance.latestEligibleTransactionDate !== latest
       || acceptance.evaluatedThrough < latest) {
     throw new Error('Backtest acceptance must cover the complete staged transaction index');
-  }
-  if (!validCandidateBacktestAcceptance(acceptance, ACTIVE_ESTIMATOR_POLICY.id)) {
-    throw new Error('Refusing to publish a non-passing backtest acceptance');
   }
 }
 
@@ -1372,13 +1481,14 @@ async function validatedAcceptanceFile(
   file: string,
   bundle: MarketDataBundle,
   expectedSha256: string | null,
+  mode: 'current' | 'restorable' = 'current',
 ): Promise<{ acceptance: BacktestAcceptance | CandidateBacktestAcceptance; bytes: Buffer } | null> {
   const bytes = await readOptionalFile(ops, file);
   if (!bytes || (expectedSha256 !== null && sha256Bytes(bytes) !== expectedSha256)) return null;
   const acceptance = acceptanceFromBytes(bytes);
   if (!acceptance) return null;
   try {
-    validateAcceptanceForBundle(acceptance, bundle);
+    validateAcceptanceForBundle(acceptance, bundle, mode);
   } catch {
     return null;
   }
@@ -1529,6 +1639,7 @@ async function restoreOldPair(
       paths.acceptanceTarget,
       old,
       journal.oldAcceptanceSha256,
+      'restorable',
     );
     if (!restored) {
       const backup = await validatedAcceptanceFile(
@@ -1536,6 +1647,7 @@ async function restoreOldPair(
         paths.acceptanceBackup,
         old,
         journal.oldAcceptanceSha256,
+        'restorable',
       );
       if (!backup) throw new Error('Publication journal has no validated old acceptance to restore');
       await renameAndSync(ops, paths.acceptanceBackup, paths.acceptanceTarget, paths.parent);
@@ -1544,6 +1656,7 @@ async function restoreOldPair(
         paths.acceptanceTarget,
         old,
         journal.oldAcceptanceSha256,
+        'restorable',
       );
     }
     if (!restored) throw new Error('Restored old market-data acceptance failed validation');
@@ -1552,11 +1665,8 @@ async function restoreOldPair(
     await syncDirectory(paths.parent);
   }
 
+  if (!marketDataManifestHasCurrentPolicyProvenance(old.manifest)) return null;
   const loaded = await loadMarketData(paths.activeRoot, options);
-  if (!loaded && !journal.oldAcceptancePresent
-      && !marketDataManifestHasCurrentPolicyProvenance(old.manifest)) {
-    return null;
-  }
   if (!loaded || loaded.manifest.buildId !== journal.oldBuildId
       || (journal.oldAcceptancePresent
         && (!loaded.backtestAcceptance || !marketDataBacktestAccepted(loaded)))) {
@@ -1622,7 +1732,7 @@ async function publishAcceptedBuild(
   }
   const oldAcceptanceBytes = await readOptionalFile(ops, acceptanceTarget);
   const matchingOldAcceptance = oldBuild && oldAcceptanceBytes
-    ? await validatedAcceptanceFile(ops, acceptanceTarget, oldBuild, null)
+    ? await validatedAcceptanceFile(ops, acceptanceTarget, oldBuild, null, 'restorable')
     : null;
   const candidateBytes = Buffer.from(`${stableJson(acceptance)}\n`);
   const journal: PublicationJournal = {

@@ -87,25 +87,26 @@ are never inferred from marketing prose.
 Normalization assigns each usable official row one production class before
 selection:
 
-- `reliable-eligible`: `住家用`, exactly one transferred building, and all
-  existing general-market, building-type, freehold, floor/area/price/date,
-  location, unit-price, and separable-parking checks pass. Only this class can
-  count toward a reliable estimate or the held-out coverage denominator.
-- `review-only`: `住商用` or a transaction containing multiple transferred
-  buildings. The row remains in the local index as explicit audit evidence but
-  never fills the three-comparable reliable minimum. If these are the only
-  otherwise matching rows, the estimate is `review` with no computed
-  median/P25/P75.
-- `excluded`: blank or non-residential primary use, government sale, explicit
-  special/non-freehold transaction, unsupported type, unresolved location,
-  invalid or contradictory required values, inseparable parking, and other
-  hard failures. Excluded rows do not enter the transaction index.
+- `reliable-eligible`: `住家用`, exactly one transferred building, direct
+  Grade-A parking evidence (including explicit no-parking), and all general-
+  market, building-type, freehold, floor/area/price/date, location, and unit-
+  price checks pass. This is the conservative residential coverage denominator.
+- `review-only`: a known non-residential use (`住商用`, office, commercial,
+  industrial, or mixed-industrial), multiple transferred buildings, or Grade-B
+  partial parking evidence. These rows stay indexed for exact-use and parking
+  scenarios, but contribute only when the matching schema-3 acceptance cohort
+  or family is approved; they never masquerade as residential reliable rows.
+- `excluded`: blank/unknown primary use, government sale, explicit special or
+  non-freehold transaction, unsupported type, unresolved location, invalid or
+  contradictory required values, Grade-C parking, and other hard failures.
 
-The schema-5 manifest publishes only aggregate normalization totals:
-`rawRows`, `reliableEligible`, `reviewOnly`, `excluded`, and
-`excludedByReason`, plus the required `estimatorPolicyVersion` provenance that
-identifies the normalization/eligibility semantics used to build both indexes.
-Full rows and addresses remain only in git-ignored local evidence.
+The schema-5 manifest publishes aggregate normalization totals: `rawRows`,
+`reliableEligible`, `reviewOnly`, `excluded`, `excludedByReason`, exact counts
+by normalized primary use and parking grade, Grade-B missing-component counts,
+and Grade-B imputed/unresolved counts. The strict loader recomputes those totals
+from persisted rows and checks all derivable building/parking arithmetic even
+when file checksums match. Full rows and addresses remain only in git-ignored
+local evidence.
 
 Refresh and validate the production pair with:
 
@@ -191,7 +192,7 @@ write the required `valuation-review.json` when it changes a report bucket.
 
 ## Backtesting
 
-For an explicit fresh-data challenger evaluation, run the non-publishing
+For an explicit fresh-data candidate evaluation, run the non-publishing
 `candidate` command:
 
 ```bash
@@ -227,8 +228,9 @@ evaluated. That initial rollout kept the baseline policy, used manifest/index
 schema 2, and advanced the compatibility version from 3 to 4 for the stricter
 address/location eligibility semantics. The subsequent provenance migration
 rebuilt those same policy-v4 semantics into manifest/index schema 3; the
-independent acceptance artifact used schema 2. It remains supported for one
-release as read-only legacy audit evidence, not as current production authority.
+independent acceptance artifact used schema 2. That paragraph is historical:
+current loading rejects the old pair, while publication recovery validates it
+only to restore exact predecessor bytes after an interrupted upgrade.
 
 That full candidate measured a peak resident set of 2,781,609,984 bytes
 (2.59 GiB). Count validation no longer creates `.flat()` copies of complete
@@ -334,5 +336,5 @@ recalibrate selection/weight constants with tests and backtest evidence.
 | `market-data-unavailable` | Run `npm run market-data -- update --city taipei`. If rebuilding or any gate fails and no valid prior pair exists, continue with market estimates unavailable and use `warn`, without substituting a guessed price. |
 | `listing-coordinate-unavailable` or `listing-coordinate-unreliable` | Use the existing listing location-triage procedure. Do not force a coordinate into the market index; the listing stays unavailable until reliable. |
 | `no-comparables`, low confidence, or `review` | Read included and excluded evidence. Fewer than three retained comparables, a wide interval, stale data, or a hard conflict is review-only; do not relax criteria in report prose. |
-| `listing-parking-not-separable` | Do not estimate a parking adjustment. The listing stays review-only unless the asking building and parking amounts/areas can be separated according to the reporting rules. |
+| `listing-parking-not-separable` | The conservative base estimate stays review-only. A policy-7 scenario may show an approved parking-family adjustment only when listing family/count and all other evidence are verified; it does not independently authorize automatic recommendation. |
 | Active build appears corrupt | Do not edit it. Run the updater so journal recovery and a fresh fully gated build can replace it atomically; if that fails, keep market evidence unavailable. |
