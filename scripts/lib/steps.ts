@@ -258,24 +258,6 @@ function unavailableMarketScenarios(
   };
 }
 
-export function labelLegacyCompatibilityEstimate(
-  estimate: MarketEstimate,
-  scenarios: LocalMarketScenarioEstimate,
-): MarketEstimate {
-  const useUnverified = scenarios.registeredUse.value === 'unknown'
-    || scenarios.registeredUse.source === 'unknown';
-  const parkingImputed = scenarios.scenarios.some((scenario) => scenario.parkingEstimate !== null);
-  if (!useUnverified && !parkingImputed) return estimate;
-  return {
-    ...estimate,
-    status: estimate.status === 'reliable' ? 'review' : estimate.status,
-    unavailableReasons: [...new Set([
-      ...estimate.unavailableReasons,
-      'legacy-residential-baseline-not-authoritative',
-    ])],
-  };
-}
-
 /**
  * Adds an estimate from one already-loaded local market-data bundle. This is
  * intentionally pure so routing behaviour and offline valuation stay separate.
@@ -290,7 +272,7 @@ export function attachMarketEstimates(
   const acceptanceDecision = bundle
     ? marketDataBacktestAcceptanceDecision(bundle, acceptanceDiagnostics)
     : null;
-  const valued = listings.map((listing) => {
+  return listings.map((listing) => {
     const ownership = listingOwnership(listing.title);
     const parking = listingParkingAssumption(listing.parking);
     if (!bundle) {
@@ -406,8 +388,8 @@ export function attachMarketEstimates(
       parkingFamily: parking.family,
       parkingCount: parking.count,
       matchedAddress: locationEvidence.address.matchedAddress,
-    }, bundle.transactions, freshness, asOf,
-    acceptanceDecision?.accepted && bundle.backtestAcceptance ? bundle.backtestAcceptance : null));
+      subjectLocationEvidence: locationEvidence,
+    }, bundle.transactions, freshness, asOf, null));
 
     return {
       ...listing,
@@ -415,13 +397,6 @@ export function attachMarketEstimates(
       marketScenarios,
     };
   });
-  return valued.map((listing) => ({
-    ...listing,
-    marketEstimate: labelLegacyCompatibilityEstimate(
-      listing.marketEstimate,
-      listing.marketScenarios,
-    ),
-  }));
 }
 
 export async function enrichStep(ctx: RunContext, logger: Logger): Promise<StepOutput> {

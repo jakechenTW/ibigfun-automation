@@ -31,11 +31,7 @@ Trigger 也會在訊息裡告訴你要監測的區間。把它對應成 pipeline
 
    它會跑 fetch + enrich，然後**停在 agent `report` 步**並印出需求；已經 ok 的步會被 skip（重跑＝自動續跑）。若它印出 `report` 步的需求，繼續第 2 步；若它以非 0 結束（fetch/enrich 失敗），跳到「Headless 失敗政策」。
 
-2. 親手完成 `report` 步：對 `state/runs/<profile>/<label>/enriched.json` 做 `withinWalk:null` 三角定位、估價/評估、跨日彙整，依 `docs/reporting-rules.md`、profile 規則檔與 profile 模板寫出**一份**合併報告到 orchestrator 指定的 `state/runs/<profile>/<label>/report.md`。
-
-   分桶行情一律先讀權威 `marketScenarios`：按 exact official primary use 分開評估建物與含車位總價 P25/P50/P75，揭露 A（直接）／B（accepted 因果推估）／C（bundle-only）證據。用途已驗證時只有 accepted 同用途 primary 情境控制，住宅情境只能比較；用途未知時至少兩個 accepted/supported 情境（必含住宅）須全部通過 profile P25 gate，且不得有 rejected/disabled 但仍有可用 P25 的情境得出相反 gate 結果，才可標條件式推薦。unknown-use 情境的 `status` 依設計最多為 `review`，不可據此判成未 accepted；依非空 quantiles／profile 所需 P25 與 `use-cohort-not-accepted`、`parking-cohort-not-accepted`、`parking-estimate-unavailable`、`parking-family-unknown`、`parking-count-unknown`、`parking-count-family-conflict`、`invalid-parking-count` 及 `bundle-evidence-conflicts` 等實際 reasons 執行 `docs/reporting-rules.md` 的順序。不得因 listing 車位不能直接拆價就 blanket reject；B 未 accepted、組件未知/衝突、bundle conflict、low 信心或資料過期仍依受影響情境降級。報告須呈現情境表、最多兩筆最具影響可比與內政部查詢入口；入口不是精確交易列。
-
-   `marketEstimate` 只保留一版作相容與 `valuation-review.json`／pipeline 稽核，不得取代 `marketScenarios` 分桶。只在低信心/review/unavailable 或中位數才達標的少數邊界物件做外部覆核，絕不可靜默覆寫官方情境值；若覆核改變 bucket，於同一 run 寫 `valuation-review.json`（來源 URL、查核時間、外部回傳值或 `null`、官方 status/unavailable reasons 與可用區間、`(外部單價−官方中位)/官方中位*100` 差異、理由、結果 bucket 完整記錄）。為維持既有 `mark report` 契約，這些官方稽核欄位仍必須逐欄複製同一 listing 的相容 `marketEstimate`，不可自行填補；未取得外部價格時必須 `accepted: false`；相容行情為 unavailable/review 時不得因外部值升為推薦。通知只放一行精簡覆核結論，不貼完整可比、外部原始資料、raw transaction 或 backtest case。
+2. 親手完成 `report` 步：對 `state/runs/<profile>/<label>/enriched.json` 做 `withinWalk:null` 三角定位、估價/評估、跨日彙整，依 `docs/reporting-rules.md`、profile 規則檔與 profile 模板寫出**一份**合併報告到 orchestrator 指定的 `state/runs/<profile>/<label>/report.md`。行情一律先讀 `marketEstimate`：顯示 reliable/review/unavailable、官方中位與 P25–P75、信心、可比筆數、選用階段及資料日期；投資推薦以 P25 保守溢價為閘門。Policy-6 `marketScenarios` 僅供診斷，不得改變 bucket、升降 `marketEstimate` 或取代 P25 閘門。`review`/`unavailable`、low 信心、資料過期或車位不可分離不得自動推薦。只在低信心/review/unavailable 或中位數才達標的少數邊界物件做外部覆核，絕不可靜默覆寫官方值；若覆核改變 bucket，於同一 run 寫 `valuation-review.json`（來源 URL、查核時間、外部回傳值或 `null`、官方 status/unavailable reasons 與可用區間、`(外部單價−官方中位)/官方中位*100` 差異、理由、結果 bucket 完整記錄）。官方欄位必須逐欄複製同一 listing 的 `marketEstimate`，不可自行填補；未取得外部價格時必須 `accepted: false`；官方 unavailable/review 不得因外部值升為推薦。通知只放一行精簡覆核結論，不貼完整可比或外部原始資料。
 
 3. 標記完成（會自動觸發 notify，idempotent）：
 

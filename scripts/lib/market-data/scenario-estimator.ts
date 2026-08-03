@@ -4,15 +4,17 @@ import {
   HIGH_CONFIDENCE_MIN_COMPARABLES,
   HIGH_IQR_RATIO,
   MEDIUM_IQR_RATIO,
+  PARKING_POLICY,
 } from './config.ts';
 import { estimateWeightedBuildingPrices } from './estimator.ts';
 import { neighborGridKeys } from './grid.ts';
 import { bundleValueQuantiles, estimateParking } from './parking.ts';
 import { selectScenarioComparables } from './selector.ts';
 import { weightedQuantile } from './statistics.ts';
-import { validBacktestAcceptance } from './store.ts';
+import { validCandidateBacktestAcceptance } from './store.ts';
 import type {
   BacktestAcceptance,
+  CandidateBacktestAcceptance,
   BundleValueQuantiles,
   ComparableEvidence,
   EstimateConfidence,
@@ -27,6 +29,8 @@ import type {
   TransactionIndex,
   UseScenarioEstimate,
 } from './types.ts';
+
+type ScenarioAcceptance = BacktestAcceptance | CandidateBacktestAcceptance;
 
 const SCENARIO_USE_ORDER: ReadonlyArray<Exclude<NormalizedPrimaryUse, 'unknown'>> = [
   'residential',
@@ -50,6 +54,12 @@ function validParkingCount(value: unknown): value is 0 | 1 | 2 | null {
 
 function subjectReasons(subject: ScenarioMarketSubject): string[] {
   const reasons: string[] = [];
+  const locationEvidence = subject.subjectLocationEvidence;
+  if (locationEvidence) {
+    reasons.push(...locationEvidence.reasons);
+    if (locationEvidence.verdict === 'uncertain') reasons.push('location-uncertain');
+    if (locationEvidence.verdict === 'conflict') reasons.push('location-unreliable');
+  }
   if (!Number.isFinite(subject.coordinate.lat) || !Number.isFinite(subject.coordinate.lng)) reasons.push('location-unreliable');
   if (!subject.district) reasons.push('missing-district');
   if (subject.ownership === 'unknown') reasons.push('ownership-unknown');
@@ -69,7 +79,7 @@ function subjectReasons(subject: ScenarioMarketSubject): string[] {
     }
     if (subject.parkingFamily === 'unknown' && parkingCount !== null) reasons.push('parking-count-family-conflict');
   }
-  return reasons;
+  return [...new Set(reasons)];
 }
 
 function nearbyTransactions(subject: ScenarioMarketSubject, index: TransactionIndex): MarketTransaction[] {
@@ -82,18 +92,23 @@ function nearbyTransactions(subject: ScenarioMarketSubject, index: TransactionIn
 }
 
 function useCohortAccepted(
-  acceptance: BacktestAcceptance | null,
+  acceptance: ScenarioAcceptance | null,
   primaryUse: Exclude<NormalizedPrimaryUse, 'unknown'>,
 ): boolean {
   return acceptance?.schemaVersion === 3
-    && validBacktestAcceptance(acceptance)
+    && validCandidateBacktestAcceptance(acceptance)
     && acceptance.useCohorts[primaryUse].status === 'accepted';
 }
 
-function parkingImputationAccepted(acceptance: BacktestAcceptance | null): boolean {
-  return acceptance?.schemaVersion === 3
-    && validBacktestAcceptance(acceptance)
-    && acceptance.parkingImputationAccepted;
+function acceptedParkingFamilies(
+  acceptance: ScenarioAcceptance | null,
+): Array<'flat' | 'mechanical'> {
+  if (acceptance?.schemaVersion !== 3
+    || !validCandidateBacktestAcceptance(acceptance)
+    || !acceptance.parkingImputationAccepted) return [];
+  return (['flat', 'mechanical'] as const).filter((family) =>
+    acceptance.parkingFamilies[family].status === 'accepted',
+  );
 }
 
 function scenarioRequests(subject: ScenarioMarketSubject): Array<{
@@ -183,6 +198,11 @@ function publicParkingEvidence(estimate: ReturnType<typeof estimateParking>): Pa
     areaP25Ping: estimate.areaP25Ping,
     areaP50Ping: estimate.areaP50Ping,
     areaP75Ping: estimate.areaP75Ping,
+    pairP25: estimate.pairP25,
+    pairP50: estimate.pairP50,
+    pairP75: estimate.pairP75,
+    priceIqrRatio: estimate.priceIqrRatio,
+    areaIqrRatio: estimate.areaIqrRatio,
   };
 }
 
@@ -292,13 +312,16 @@ function estimateScenario(
   candidates: readonly MarketTransaction[],
   freshness: SourceFreshness,
   asOf: string,
-  acceptance: BacktestAcceptance | null,
+  acceptance: ScenarioAcceptance | null,
   primaryUse: Exclude<NormalizedPrimaryUse, 'unknown'>,
   role: ScenarioRole,
   commonReasons: readonly string[],
 ): UseScenarioEstimate {
   const useAccepted = useCohortAccepted(acceptance, primaryUse);
-  const imputedParkingAccepted = parkingImputationAccepted(acceptance);
+  const parkingFamilies = acceptedParkingFamilies(acceptance);
+  const imputedParkingAccepted = (subject.parkingFamily === 'flat'
+    || subject.parkingFamily === 'mechanical')
+    && parkingFamilies.includes(subject.parkingFamily);
   const parking = subject.parkingFamily === 'flat' || subject.parkingFamily === 'mechanical'
     ? estimateParking({
       coordinate: subject.coordinate,
@@ -314,7 +337,8 @@ function estimateScenario(
   const buildingSubject = marketSubject(subject, derivedBuildingArea);
   const selection = selectScenarioComparables(buildingSubject, candidates, asOf, {
     primaryUse,
-    allowImputedParking: imputedParkingAccepted,
+    allowImputedParking: parkingFamilies.length > 0,
+    acceptedParkingFamilies: parkingFamilies,
   });
   const weighted = estimateWeightedBuildingPrices(selection.included);
   const bundleSelection = selectScenarioComparables(
@@ -346,7 +370,15 @@ function estimateScenario(
   const p25 = weighted.marketUnitPriceP25!;
   const median = weighted.marketUnitPriceMedian!;
   const p75 = weighted.marketUnitPriceP75!;
+  const highParkingUncertainty = weighted.comparables.some((candidate) =>
+    candidate.transaction.parkingEvidence.grade === 'B'
+      && (candidate.transaction.buildingUnitPriceBoundsWan?.relativeIqrRatio ?? 0)
+        > PARKING_POLICY.reviewBuildingUnitPriceIqrRatio,
+  );
+  if (highParkingUncertainty) scenarioReasons.push('parking-imputation-uncertainty-high');
   const confidence = commonReasons.includes('parking-family-unknown')
+      || commonReasons.includes('location-uncertain')
+      || highParkingUncertainty
     ? 'low'
     : confidenceFor(weighted.comparables.length, p25, median, p75, selection.selectedStage, freshness);
   const bundleValue = bundleFor(subject, weighted.comparables, parking);
@@ -404,7 +436,7 @@ export function estimateMarketScenarios(
   index: TransactionIndex,
   freshness: SourceFreshness,
   asOf: string,
-  acceptance: BacktestAcceptance | null,
+  acceptance: ScenarioAcceptance | null,
 ): MarketScenarioEstimate {
   const reasons = subjectReasons(subject);
   const blocking = reasons.some((reason) => [

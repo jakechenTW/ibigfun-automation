@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ESTIMATOR_POLICY_VERSION } from './config.ts';
+import { CANDIDATE_ESTIMATOR_POLICY_VERSION } from './config.ts';
 import { gridKey } from './grid.ts';
 import { estimateMarketScenarios } from './scenario-estimator.ts';
 import type {
@@ -76,7 +76,7 @@ const acceptedCohort = {
 const scenarioAcceptance: ScenarioBacktestAcceptance = {
   ...acceptance,
   schemaVersion: 3,
-  estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
+  estimatorPolicyVersion: CANDIDATE_ESTIMATOR_POLICY_VERSION,
   transactionArtifactSha256: 'a'.repeat(64),
   evaluatedThrough: AS_OF,
   thresholds: {
@@ -84,6 +84,16 @@ const scenarioAcceptance: ScenarioBacktestAcceptance = {
     minimumUseCohortCases: 20,
     maximumAbsoluteBiasRegression: 0.01,
     maximumIntervalCoverageRegression: 0.05,
+    maximumAbsoluteBias: 0.05,
+    minimumIntervalCoverage: 0.30,
+    minimumParkingFamilyCases: 20,
+    minimumParkingEstimateCoverage: 0.50,
+    parkingPriceMedianApeMax: 0.25,
+    parkingPriceP75ApeMax: 0.45,
+    parkingAreaMedianApeMax: 0.15,
+    parkingAreaP75ApeMax: 0.30,
+    minimumParkingPriceIntervalCoverage: 0.30,
+    minimumParkingAreaIntervalCoverage: 0.30,
   },
   useCohorts: {
     commercial: { ...diagnosticOnlyCohort },
@@ -94,6 +104,20 @@ const scenarioAcceptance: ScenarioBacktestAcceptance = {
     residential: { ...acceptedCohort },
   },
   parkingImputationAccepted: true,
+  parkingFamilies: {
+    flat: {
+      status: 'accepted', caseCount: 20, estimatedCount: 16, estimateCoverage: 0.8,
+      priceMedianApe: 0.10, priceP75Ape: 0.20,
+      areaMedianApe: 0.08, areaP75Ape: 0.12,
+      priceIntervalCoverage: 0.5, areaIntervalCoverage: 0.5, reasons: [],
+    },
+    mechanical: {
+      status: 'accepted', caseCount: 20, estimatedCount: 16, estimateCoverage: 0.8,
+      priceMedianApe: 0.10, priceP75Ape: 0.20,
+      areaMedianApe: 0.08, areaP75Ape: 0.12,
+      priceIntervalCoverage: 0.5, areaIntervalCoverage: 0.5, reasons: [],
+    },
+  },
   parkingComparison: {
     directCoverage: 0.70,
     imputedCoverage: 0.71,
@@ -163,6 +187,7 @@ function transaction(
     parkingPriceNtd: 0,
     parkingAreaPing: 0,
     buildingUnitPriceWan: unitPriceWan,
+    buildingUnitPriceBoundsWan: null,
     parkingEvidence: {
       grade: 'A', family: 'none', originalType: '無車位',
       officialPriceNtd: 0, officialAreaPing: 0, imputation: null, reasons: [],
@@ -178,6 +203,7 @@ function transaction(
     originalPrimaryUse: originalUse[primaryUse],
     primaryUse,
     transferredBuildingCount: 1,
+    transferredParkingCount: 0,
     ...overrides,
   };
 }
@@ -284,6 +310,11 @@ test('validated schema-3 parking acceptance independently activates grade-B buil
     areaP25Ping: 9,
     areaP50Ping: 10,
     areaP75Ping: 11,
+    pairP25: { priceNtd: 1_800_000, areaPing: 9 },
+    pairP50: { priceNtd: 2_000_000, areaPing: 10 },
+    pairP75: { priceNtd: 2_200_000, areaPing: 11 },
+    priceIqrRatio: 0.2,
+    areaIqrRatio: 0.2,
   };
   const gradeB = [99, 100, 101].map((price, index) => transaction(`accepted-grade-b-${index}`, 'residential', price, {
     eligibility: 'review-only',
@@ -292,6 +323,10 @@ test('validated schema-3 parking acceptance independently activates grade-B buil
       grade: 'B', family: 'flat', originalType: '坡道平面',
       officialPriceNtd: null, officialAreaPing: null, imputation, reasons: ['parking-not-separable'],
     },
+    buildingUnitPriceBoundsWan: {
+      p25: price * 0.98, p50: price, p75: price * 1.02, relativeIqrRatio: 0.04,
+    },
+    transferredParkingCount: 1,
   }));
   const subject = {
     ...unknownUseSubject,
@@ -381,6 +416,11 @@ test('schema-2 extras cannot activate office cohorts or grade-B building evidenc
     areaP25Ping: 9,
     areaP50Ping: 10,
     areaP75Ping: 11,
+    pairP25: { priceNtd: 1_800_000, areaPing: 9 },
+    pairP50: { priceNtd: 2_000_000, areaPing: 10 },
+    pairP75: { priceNtd: 2_200_000, areaPing: 11 },
+    priceIqrRatio: 0.2,
+    areaIqrRatio: 0.2,
   };
   const gradeB = [99, 100, 101].map((price, index) => transaction(`grade-b-${index}`, 'residential', price, {
     eligibility: 'review-only',
@@ -389,6 +429,10 @@ test('schema-2 extras cannot activate office cohorts or grade-B building evidenc
       grade: 'B', family: 'flat', originalType: '坡道平面',
       officialPriceNtd: null, officialAreaPing: null, imputation, reasons: ['parking-not-separable'],
     },
+    buildingUnitPriceBoundsWan: {
+      p25: price * 0.98, p50: price, p75: price * 1.02, relativeIqrRatio: 0.04,
+    },
+    transferredParkingCount: 1,
   }));
   const residential = estimateMarketScenarios(
     {
@@ -468,6 +512,126 @@ test('invalid subject coordinates return unavailable scenarios without entering 
 
   assert.ok(result.scenarios.every((scenario) => scenario.status === 'unavailable'));
   assert.ok(result.scenarios.every((scenario) => scenario.reasons.includes('location-unreliable')));
+});
+
+test('uncertain listing location forces every otherwise-authoritative scenario to low-confidence review', () => {
+  const result = estimateMarketScenarios(
+    {
+      ...unknownUseSubject,
+      registeredUse: { value: 'residential', source: 'official', detail: '使用執照' },
+      subjectLocationEvidence: {
+        verdict: 'uncertain',
+        address: {
+          method: 'address-range', coordinate, normalizedAddress: '台北市中正區測試路1~30號',
+          matchedAddress: '台北市中正區測試路1號', uncertaintyMeters: 90,
+          confidence: 'medium', datasetVersion: 'fixture',
+        },
+        nearestDoorplate: {
+          method: 'exact-doorplate', coordinate, normalizedAddress: '台北市中正區測試路1號',
+          matchedAddress: '台北市中正區測試路1號', uncertaintyMeters: 0,
+          confidence: 'high', datasetVersion: 'fixture',
+        },
+        addressDistanceMeters: 30,
+        distanceBeyondUncertaintyMeters: 0,
+        thresholdMeters: 300,
+        reasons: ['listing-address-range-uncertain'],
+      },
+    },
+    indexWithTransactions([99, 100, 101, 102, 103].map((price, index) =>
+      transaction(`residential-${index}`, 'residential', price),
+    )),
+    fresh,
+    AS_OF,
+    scenarioAcceptance,
+  );
+
+  assert.ok(result.reasons.includes('listing-address-range-uncertain'));
+  assert.ok(result.reasons.includes('location-uncertain'));
+  assert.ok(result.scenarios.every((scenario) => scenario.confidence === 'low'));
+  assert.ok(result.scenarios.every((scenario) => scenario.status === 'review'));
+  assert.ok(result.scenarios.every((scenario) => scenario.reasons.includes('location-uncertain')));
+});
+
+test('conflicting listing location blocks scenario derivation with its exact evidence reason', () => {
+  const result = estimateMarketScenarios(
+    {
+      ...unknownUseSubject,
+      registeredUse: { value: 'residential', source: 'official', detail: '使用執照' },
+      subjectLocationEvidence: {
+        verdict: 'conflict',
+        address: {
+          method: 'exact-doorplate', coordinate, normalizedAddress: '台北市中正區測試路1號',
+          matchedAddress: '台北市中正區測試路1號', uncertaintyMeters: 0,
+          confidence: 'high', datasetVersion: 'fixture',
+        },
+        nearestDoorplate: {
+          method: 'exact-doorplate', coordinate, normalizedAddress: '台北市中正區另一街99號',
+          matchedAddress: '台北市中正區另一街99號', uncertaintyMeters: 0,
+          confidence: 'high', datasetVersion: 'fixture',
+        },
+        addressDistanceMeters: 500,
+        distanceBeyondUncertaintyMeters: 500,
+        thresholdMeters: 300,
+        reasons: ['listing-coordinate-address-conflict'],
+      },
+    },
+    indexWithTransactions(allUseTransactions()),
+    fresh,
+    AS_OF,
+    scenarioAcceptance,
+  );
+
+  assert.ok(result.scenarios.every((scenario) => scenario.status === 'unavailable'));
+  assert.ok(result.scenarios.every((scenario) => scenario.reasons.includes(
+    'listing-coordinate-address-conflict',
+  )));
+  assert.ok(result.scenarios.every((scenario) => scenario.reasons.includes('location-unreliable')));
+});
+
+test('high joint parking uncertainty downgrades accepted grade-B evidence to low-confidence review', () => {
+  const imputation = {
+    asOf: '2025-12-15', stage: 'nearby-500m' as const,
+    comparableIds: ['parking-a', 'parking-b', 'parking-c'], comparableCount: 3,
+    priceP25Ntd: 1_800_000, priceP50Ntd: 2_000_000, priceP75Ntd: 2_200_000,
+    areaP25Ping: 9, areaP50Ping: 10, areaP75Ping: 11,
+    pairP25: { priceNtd: 1_800_000, areaPing: 9 },
+    pairP50: { priceNtd: 2_000_000, areaPing: 10 },
+    pairP75: { priceNtd: 2_200_000, areaPing: 11 },
+    priceIqrRatio: 0.2, areaIqrRatio: 0.2,
+  };
+  const gradeB = [99, 100, 101, 102, 103].map((price, index) => transaction(
+    `uncertain-grade-b-${index}`,
+    'residential',
+    price,
+    {
+      eligibility: 'review-only',
+      eligibilityReasons: ['parking-not-separable'],
+      transferredParkingCount: 1,
+      parkingEvidence: {
+        grade: 'B', family: 'flat', originalType: '坡道平面',
+        officialPriceNtd: null, officialAreaPing: null, imputation,
+        reasons: ['parking-not-separable'],
+      },
+      buildingUnitPriceBoundsWan: {
+        p25: price * 0.85, p50: price, p75: price * 1.10, relativeIqrRatio: 0.25,
+      },
+    },
+  ));
+  const scenario = estimateMarketScenarios(
+    {
+      ...unknownUseSubject,
+      registeredUse: { value: 'residential', source: 'official', detail: '使用執照' },
+    },
+    indexWithTransactions(gradeB),
+    fresh,
+    AS_OF,
+    scenarioAcceptance,
+  ).scenarios[0]!;
+
+  assert.equal(scenario.gradeCounts.B, 5);
+  assert.equal(scenario.confidence, 'low');
+  assert.equal(scenario.status, 'review');
+  assert.ok(scenario.reasons.includes('parking-imputation-uncertainty-high'));
 });
 
 test('invalid asking totals cannot leak NaN into a scenario premium', () => {
@@ -570,6 +734,7 @@ test('three grade-C bundle observations outside the paired interval force review
     buildingAreaPing: 30,
     parkingPriceNtd: 2_000_000 + index * 100_000,
     parkingAreaPing: 10,
+    transferredParkingCount: 1,
     parkingEvidence: {
       grade: 'A', family: 'flat', originalType: '坡道平面',
       officialPriceNtd: 2_000_000 + index * 100_000,

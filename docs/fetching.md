@@ -239,25 +239,16 @@ The `.gitignore` covers the cookie jar and output artifacts (`.cookies.json`,
 
 ## Official Market-Data Inputs (enrich)
 
-`enrich` attaches authoritative local `marketScenarios` when a validated Taipei
-build is available. The output preserves registered-use evidence, exact-use
-scenario separation, building and whole-property P25/P50/P75, A/B/C parking
-grade counts, component/imputation provenance, source freshness, comparable
-evidence, and official-query locator fields. Reports use these scenarios for
-valuation and bucket decisions. The residential `marketEstimate` remains for
-one release only as explicitly labeled compatibility and
-`valuation-review.json`/pipeline audit evidence; it must not replace
-`marketScenarios`.
-
-This needs **no additional credential** and is independent of the iBigFun
-login: it reads the Taipei City doorplate dataset detail page
+`enrich` attaches a local `marketEstimate` when a validated Taipei build is
+available. This needs **no additional credential** and is independent of the
+iBigFun login: it reads the Taipei City doorplate dataset detail page
 (`https://data.taipei/dataset/detail?id=b7c8e724-1e98-45ee-a0bd-f3840623ed97`)
 to resolve the current CSV resource, and the Ministry of the Interior real-price
 season download endpoint (`https://plvr.land.moi.gov.tw/DownloadSeason?...`).
 The updater retains `queryHouseType` provenance and uses it to select
 like-for-like comparables.
 
-Build/update and offline evaluation commands:
+Frozen-load and offline evaluation commands:
 
 ```bash
 npm run market-data -- update --city taipei
@@ -265,9 +256,10 @@ npm run market-data -- backtest --city taipei --as-of 2026-07-26
 ```
 
 The build is local, git-ignored `state/market-data/taipei/` (raw source files,
-validated indexes, manifest and checksums). A refresh is staged atomically; a
-source/schema failure keeps the last-known-good build. Transaction source checks
-older than 30 days or doorplate checks older than 60 days are stale. Enrich still
-emits scenario plus compatibility evidence and flags freshness, but reports with
-stale official data must use `warn` and cannot automatically recommend affected
-listings.
+validated indexes, manifest and checksums). While challenger activation is
+withheld, `update` only recovers and loads the existing legacy pair; it does not
+fetch, rebuild, or publish. Transaction source checks older than 30 days or
+doorplate checks older than 60 days are stale. Enrich still emits the estimate
+and flags freshness, but reports with stale official data must use `warn` and
+cannot automatically recommend affected listings. Policy-6 `marketScenarios`
+is diagnostic-only and never controls report buckets.
