@@ -404,10 +404,13 @@ export function validBacktestAcceptance(value: unknown): value is BacktestAccept
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
   const schemaVersion = record.schemaVersion;
-  if (schemaVersion !== 2 && schemaVersion !== 3) return false;
-  const topLevelKeys = schemaVersion === 3
-    ? [...ACCEPTANCE_IDENTITY_KEYS, 'parkingComparison', 'parkingImputationAccepted', 'useCohorts']
-    : ACCEPTANCE_IDENTITY_KEYS;
+  if (schemaVersion !== 3) return false;
+  const topLevelKeys = [
+    ...ACCEPTANCE_IDENTITY_KEYS,
+    'parkingComparison',
+    'parkingImputationAccepted',
+    'useCohorts',
+  ];
   if (!exactObject(record, topLevelKeys)
     || record.estimatorPolicyVersion !== ESTIMATOR_POLICY_VERSION
     || record.policyId !== ACTIVE_ESTIMATOR_POLICY.id
@@ -421,7 +424,7 @@ export function validBacktestAcceptance(value: unknown): value is BacktestAccept
     || record.evaluatedThrough < record.latestEligibleTransactionDate
     || !approvedBacktestThresholds(record.thresholds, schemaVersion)) return false;
   return validAcceptanceMetrics(record.metrics, record.thresholds as Record<string, unknown>)
-    && (schemaVersion === 2 || validScenarioAcceptance(record));
+    && validScenarioAcceptance(record);
 }
 
 export function readBacktestAcceptance(root: string): BacktestAcceptance | null {
@@ -444,6 +447,11 @@ export async function writeBacktestAcceptance(root: string, acceptance: Backtest
     minDoorplates: 0,
     minTransactions: 0,
   });
+  if (acceptance.schemaVersion !== 3) {
+    throw new Error(
+      'Backtest acceptance policy provenance does not match the runtime policy; run update first',
+    );
+  }
   if (acceptance.estimatorPolicyVersion !== ESTIMATOR_POLICY_VERSION) {
     throw new Error('Backtest acceptance estimator policy does not match the runtime policy');
   }
@@ -615,6 +623,7 @@ function validateManifestPolicy(
   }
   if (manifest.schemaVersion !== 1
       && manifest.schemaVersion !== 2
+      && manifest.schemaVersion !== 3
       && manifest.schemaVersion !== MARKET_SCHEMA_VERSION) {
     throw new Error('Market manifest schema version is not restorable');
   }

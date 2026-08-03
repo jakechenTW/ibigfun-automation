@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { ESTIMATOR_POLICY_VERSION } from './config.ts';
 import { gridKey } from './grid.ts';
 import { estimateMarketScenarios } from './scenario-estimator.ts';
 import type {
@@ -24,7 +25,7 @@ const fresh: SourceFreshness = {
 
 const acceptance: BacktestAcceptance = {
   schemaVersion: 2,
-  estimatorPolicyVersion: 4,
+  estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
   policyId: 'baseline',
   transactionArtifactSha256: 'fixture',
   approvedAt: '2026-01-31T00:00:00.000Z',

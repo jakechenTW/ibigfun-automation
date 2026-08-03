@@ -514,7 +514,7 @@ test('injected passing gate cannot bootstrap a production-gate failure without a
   assert.equal(publisherCalls, 0);
 });
 
-test('unchanged legacy or old-provenance sources force current-semantic schema-3 publication', async (t) => {
+test('unchanged legacy or old-provenance sources force current-semantic schema-4 publication', async (t) => {
   const rootPath = join(await mkdtemp(join(tmpdir(), 'market-update-provenance-')), 'taipei');
   t.after(() => rm(join(rootPath, '..'), { recursive: true, force: true }));
   const doorplateCsv = await readFile(
@@ -618,7 +618,7 @@ test('unchanged legacy or old-provenance sources force current-semantic schema-3
 
   assert.equal(migratedFromSchema1?.refresh?.status, 'updated');
   assert.equal(publisherCalls, 1);
-  assert.equal(migratedFromSchema1?.manifest.schemaVersion, 3);
+  assert.equal(migratedFromSchema1?.manifest.schemaVersion, 4);
   assert.equal(
     migratedFromSchema1?.manifest.estimatorPolicyVersion,
     ESTIMATOR_POLICY_VERSION,
@@ -644,7 +644,7 @@ test('unchanged legacy or old-provenance sources force current-semantic schema-3
 
   assert.equal(migrated?.refresh?.status, 'updated');
   assert.equal(publisherCalls, 2);
-  assert.equal(migrated?.manifest.schemaVersion, 3);
+  assert.equal(migrated?.manifest.schemaVersion, 4);
   assert.equal(
     (migrated?.manifest as unknown as { estimatorPolicyVersion?: number })
       .estimatorPolicyVersion,
@@ -696,7 +696,7 @@ test('unchanged legacy or old-provenance sources force current-semantic schema-3
     rebuiltFromOldProvenance?.manifest.estimatorPolicyVersion,
     ESTIMATOR_POLICY_VERSION,
   );
-  assert.equal(rebuiltFromOldProvenance?.manifest.schemaVersion, 3);
+  assert.equal(rebuiltFromOldProvenance?.manifest.schemaVersion, 4);
   assert.equal(marketDataBacktestAccepted(rebuiltFromOldProvenance!), true);
 });
 

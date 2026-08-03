@@ -400,7 +400,7 @@ function estimateScenario(
   };
 }
 
-/** Produces isolated official-use scenarios while the legacy estimate remains authoritative. */
+/** Produces the isolated official-use scenarios used by activated report evaluation. */
 export function estimateMarketScenarios(
   subject: ScenarioMarketSubject,
   index: TransactionIndex,

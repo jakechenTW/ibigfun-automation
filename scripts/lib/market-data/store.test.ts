@@ -151,7 +151,7 @@ async function writeBuild(dir: string, buildId: string, count = 1): Promise<void
 
 async function downgradeBuildToLegacySchema(
   root: string,
-  schemaVersion: 1 | 2,
+  schemaVersion: 1 | 2 | 3,
 ): Promise<void> {
   for (const indexFile of ['doorplates-index.json', 'transactions-index.json']) {
     const index = JSON.parse(await readFile(join(root, indexFile), 'utf8')) as {
@@ -167,7 +167,8 @@ async function downgradeBuildToLegacySchema(
     transactions: Record<string, unknown>;
   };
   legacyManifest.schemaVersion = schemaVersion;
-  delete legacyManifest.estimatorPolicyVersion;
+  if (schemaVersion <= 2) delete legacyManifest.estimatorPolicyVersion;
+  else legacyManifest.estimatorPolicyVersion = 4;
   if (schemaVersion === 1) delete legacyManifest.transactions.normalization;
   for (const indexFile of ['doorplates-index.json', 'transactions-index.json']) {
     legacyManifest.artifacts[indexFile] = {
@@ -177,6 +178,19 @@ async function downgradeBuildToLegacySchema(
   }
   await writeFile(join(root, 'manifest.json'), `${JSON.stringify(legacyManifest)}\n`);
 }
+
+test('scenario activation uses schema 4, policy 5, and schema-3 acceptance', async (t) => {
+  assert.equal(MARKET_SCHEMA_VERSION, 4);
+  assert.equal(ESTIMATOR_POLICY_VERSION, 5);
+
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-activation-contract-'));
+  const root = join(parent, 'taipei');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(root, 'activation-contract');
+
+  const acceptance = await passingAcceptance(root);
+  assert.equal(acceptance.schemaVersion, 3);
+});
 
 async function passingAcceptance(root: string): Promise<ScenarioBacktestAcceptance> {
   const checksum = transactionArtifactChecksum(readManifest(root)!);
@@ -575,8 +589,8 @@ test('restart recovery yields a validated old or new pair after every publicatio
   }
 });
 
-test('restart recovery restores legacy migration sources fail-closed after the first rename', async (t) => {
-  for (const schemaVersion of [1, 2] as const) {
+test('restart recovery restores schema 1-3 predecessors fail-closed after the first schema-4 rename', async (t) => {
+  for (const schemaVersion of [1, 2, 3] as const) {
     await t.test(`schema ${schemaVersion}`, async (t) => {
       const parent = await mkdtemp(
         join(tmpdir(), `market-store-schema${schemaVersion}-crash-`),
@@ -586,7 +600,7 @@ test('restart recovery restores legacy migration sources fail-closed after the f
       t.after(() => rm(parent, { recursive: true, force: true }));
       await writeBuild(active, `schema${schemaVersion}-build`);
       await downgradeBuildToLegacySchema(active, schemaVersion);
-      await writeBuild(stage, 'schema3-build');
+      await writeBuild(stage, 'schema4-build');
 
       await crashPublicationAfterRename(
         active,
@@ -609,6 +623,33 @@ test('restart recovery restores legacy migration sources fail-closed after the f
       assert.deepEqual(await readdir(parent), ['taipei']);
     });
   }
+});
+
+test('current-load rejects a schema-3 build and schema-2 acceptance pair after activation', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-prior-pair-'));
+  const root = join(parent, 'taipei');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(root, 'schema3-policy4-build');
+  await downgradeBuildToLegacySchema(root, 3);
+  await writeFile(backtestAcceptancePath(root), JSON.stringify({
+    ...await passingLegacyAcceptance(root),
+    estimatorPolicyVersion: 4,
+  }));
+
+  await assert.rejects(
+    () => runMarketDataCommand(
+      ['backtest', '--city', 'taipei', '--as-of', '2026-07-25'],
+      new Date('2026-07-26T01:00:00.000Z'),
+      {
+        backtest: {
+          root,
+          lock: async (_root, operation) => operation(),
+          recover: async () => null,
+        },
+      },
+    ),
+    /index policy provenance.*run update first/i,
+  );
 });
 
 test('production backtest recovers an interrupted publication before its locked load', async (t) => {
@@ -1152,18 +1193,22 @@ test('schema-3 acceptance is exact, aggregate-only, and internally consistent', 
   }
 });
 
-test('schema-2 acceptance remains a residential-only legacy proof before activation', async (t) => {
+test('schema-2 acceptance cannot authorize the activated scenario runtime', async (t) => {
   const parent = await mkdtemp(join(tmpdir(), 'market-store-legacy-acceptance-'));
   const root = join(parent, 'taipei');
   t.after(() => rm(parent, { recursive: true, force: true }));
   await writeBuild(root, 'legacy-acceptance');
   const acceptance = await passingLegacyAcceptance(root);
 
-  await writeBacktestAcceptance(root, acceptance);
+  await assert.rejects(
+    () => writeBacktestAcceptance(root, acceptance),
+    /acceptance policy provenance.*run update first/i,
+  );
+  await writeFile(backtestAcceptancePath(root), JSON.stringify(acceptance));
+  assert.equal(readBacktestAcceptance(root), null);
   const loaded = await loadMarketData(root, { minDoorplates: 1, minTransactions: 0 });
-
-  assert.equal(loaded?.backtestAcceptance?.schemaVersion, 2);
-  assert.equal(marketDataBacktestAccepted(loaded!), true);
+  assert.equal(loaded?.backtestAcceptance, undefined);
+  assert.equal(marketDataBacktestAccepted(loaded!), false);
 });
 
 test('acceptance writer rejects old active index provenance before creating an artifact', async (t) => {

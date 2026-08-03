@@ -34,8 +34,8 @@ test('approved weights and stale windows are centralized', () => {
 });
 
 test('estimator acceptance uses an intentional policy compatibility version', () => {
-  assert.equal(ESTIMATOR_POLICY_VERSION, 4);
-  assert.equal(MARKET_SCHEMA_VERSION, 3);
+  assert.equal(ESTIMATOR_POLICY_VERSION, 5);
+  assert.equal(MARKET_SCHEMA_VERSION, 4);
 });
 
 test('backtest diagnostics live outside the checksum-closed active build', () => {

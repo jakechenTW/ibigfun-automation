@@ -258,6 +258,23 @@ function unavailableMarketScenarios(
   };
 }
 
+export function labelLegacyCompatibilityEstimate(
+  estimate: MarketEstimate,
+  scenarios: LocalMarketScenarioEstimate,
+): MarketEstimate {
+  const useUnknown = scenarios.registeredUse.value === 'unknown';
+  const parkingImputed = scenarios.scenarios.some((scenario) => scenario.parkingEstimate !== null);
+  if (!useUnknown && !parkingImputed) return estimate;
+  return {
+    ...estimate,
+    status: estimate.status === 'reliable' ? 'review' : estimate.status,
+    unavailableReasons: [...new Set([
+      ...estimate.unavailableReasons,
+      'legacy-residential-baseline-not-authoritative',
+    ])],
+  };
+}
+
 /**
  * Adds an estimate from one already-loaded local market-data bundle. This is
  * intentionally pure so routing behaviour and offline valuation stay separate.
@@ -272,7 +289,7 @@ export function attachMarketEstimates(
   const acceptanceDecision = bundle
     ? marketDataBacktestAcceptanceDecision(bundle, acceptanceDiagnostics)
     : null;
-  return listings.map((listing) => {
+  const valued = listings.map((listing) => {
     const ownership = listingOwnership(listing.title);
     const parking = listingParkingAssumption(listing.parking);
     if (!bundle) {
@@ -397,6 +414,13 @@ export function attachMarketEstimates(
       marketScenarios,
     };
   });
+  return valued.map((listing) => ({
+    ...listing,
+    marketEstimate: labelLegacyCompatibilityEstimate(
+      listing.marketEstimate,
+      listing.marketScenarios,
+    ),
+  }));
 }
 
 export async function enrichStep(ctx: RunContext, logger: Logger): Promise<StepOutput> {

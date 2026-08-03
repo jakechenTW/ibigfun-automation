@@ -1,9 +1,17 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { attachMarketEstimates, listingParkingFamily } from '../steps.ts';
+import {
+  attachMarketEstimates,
+  labelLegacyCompatibilityEstimate,
+  listingParkingFamily,
+} from '../steps.ts';
 import type { PreMarketEnrichedListing } from '../types.ts';
-import { ACTIVE_ESTIMATOR_POLICY, ESTIMATOR_POLICY_VERSION } from './config.ts';
+import {
+  ACTIVE_ESTIMATOR_POLICY,
+  ESTIMATOR_POLICY_VERSION,
+  MARKET_SCHEMA_VERSION,
+} from './config.ts';
 import type { BacktestAcceptance, MarketDataBundle } from './types.ts';
 
 const AS_OF = '2026-07-25';
@@ -33,12 +41,36 @@ for (const transactions of Object.values(bundle.transactions.cells)) {
 
 function bundleWithAcceptance(transactionArtifactSha256 = 'a'.repeat(64)): MarketDataBundle {
   const accepted = structuredClone(bundle);
+  accepted.manifest.schemaVersion = MARKET_SCHEMA_VERSION;
+  accepted.manifest.estimatorPolicyVersion = ESTIMATOR_POLICY_VERSION;
+  accepted.doorplates.schemaVersion = MARKET_SCHEMA_VERSION;
+  accepted.transactions.schemaVersion = MARKET_SCHEMA_VERSION;
   accepted.manifest.artifacts['transactions-index.json'] = {
     sha256: 'a'.repeat(64),
     bytes: 1,
   };
+  const diagnosticOnly = {
+    status: 'diagnostic-only' as const,
+    scoredCases: 0,
+    estimateCoverage: 0,
+    medianApe: null,
+    p75Ape: null,
+    bias: null,
+    intervalCoverage: null,
+    reasons: ['insufficient-use-cohort-cases', 'incomplete-use-cohort-metrics'],
+  };
+  const acceptedCohort = {
+    status: 'accepted' as const,
+    scoredCases: 20,
+    estimateCoverage: 0.8,
+    medianApe: 0.08,
+    p75Ape: 0.16,
+    bias: 0,
+    intervalCoverage: 0.8,
+    reasons: [],
+  };
   accepted.backtestAcceptance = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     estimatorPolicyVersion: ESTIMATOR_POLICY_VERSION,
     policyId: ACTIVE_ESTIMATOR_POLICY.id,
     transactionArtifactSha256,
@@ -52,6 +84,9 @@ function bundleWithAcceptance(transactionArtifactSha256 = 'a'.repeat(64)): Marke
       minimumEstimateCoverage: 0.70,
       minimumConfidenceSliceCases: 20,
       minimumHighConfidenceImprovement: 0.01,
+      minimumUseCohortCases: 20,
+      maximumAbsoluteBiasRegression: 0.01,
+      maximumIntervalCoverageRegression: 0.05,
     },
     metrics: {
       estimateCoverage: 0.8,
@@ -62,6 +97,25 @@ function bundleWithAcceptance(transactionArtifactSha256 = 'a'.repeat(64)): Marke
       highConfidenceMedianApe: 0.07,
       mediumConfidenceEstimatedCount: 20,
       mediumConfidenceMedianApe: 0.09,
+    },
+    useCohorts: {
+      commercial: { ...diagnosticOnly },
+      industrial: { ...diagnosticOnly },
+      'mixed-industrial': { ...diagnosticOnly },
+      'mixed-residential': { ...diagnosticOnly },
+      office: { ...diagnosticOnly },
+      residential: { ...acceptedCohort },
+    },
+    parkingImputationAccepted: true,
+    parkingComparison: {
+      directCoverage: 0.70,
+      imputedCoverage: 0.71,
+      directMedianApe: 0.10,
+      imputedMedianApe: 0.11,
+      directP75Ape: 0.18,
+      imputedP75Ape: 0.19,
+      biasRegression: 0.01,
+      intervalCoverageRegression: 0.05,
     },
   } satisfies BacktestAcceptance;
   return accepted;
@@ -118,7 +172,7 @@ test('maps listing parking labels to strict scenario families', () => {
   assert.equal(listingParkingFamily(null), 'unknown');
 });
 
-test('production estimate stays review before approval and becomes reliable only for matching acceptance', () => {
+test('scenario output becomes authoritative while unknown-use legacy output stays compatibility-only', () => {
   const [unapproved] = attachMarketEstimates([listing()], bundle, AS_OF);
   const [mismatched] = attachMarketEstimates([listing()], bundleWithAcceptance('different-dataset'), AS_OF);
   const policyV2Bundle = bundleWithAcceptance();
@@ -141,10 +195,19 @@ test('production estimate stays review before approval and becomes reliable only
   assert.ok(policyV2.marketEstimate.unavailableReasons.includes('market-backtest-not-approved'));
   assert.equal(staleCoverage.marketEstimate.status, 'review');
   assert.ok(staleCoverage.marketEstimate.unavailableReasons.includes('market-backtest-not-approved'));
-  assert.equal(result.marketEstimate.status, 'reliable');
+  assert.equal(result.marketEstimate.status, 'review');
+  assert.ok(result.marketEstimate.unavailableReasons.includes(
+    'legacy-residential-baseline-not-authoritative',
+  ));
   assert.equal(result.marketEstimate.comparables.length, 5);
   assert.equal(result.marketEstimate.selectedStage, 1);
   assert.equal(result.marketEstimate.subjectOwnershipEvidence, 'profile-default-freehold');
+  const residentialScenario = result.marketScenarios.scenarios.find(
+    (scenario) => scenario.primaryUse === 'residential',
+  );
+  assert.equal(residentialScenario?.status, 'review');
+  assert.equal(typeof residentialScenario?.marketUnitPriceP25, 'number');
+  assert.equal(residentialScenario?.reasons.includes('use-cohort-not-accepted'), false);
   const evidence = result.marketEstimate.subjectLocationEvidence;
   assert.equal(evidence?.verdict, 'matched');
   assert.equal(evidence?.address.method, 'exact-doorplate');
@@ -157,8 +220,46 @@ test('one listing batch scans acceptance coverage exactly once', () => {
 
   const results = attachMarketEstimates(listings, bundleWithAcceptance(), AS_OF, diagnostics);
 
-  assert.ok(results.every((result) => result.marketEstimate.status === 'reliable'));
+  assert.ok(results.every((result) => result.marketEstimate.status === 'review'));
+  assert.ok(results.every((result) => result.marketEstimate.unavailableReasons.includes(
+    'legacy-residential-baseline-not-authoritative',
+  )));
   assert.equal(diagnostics.eligibleTransactionScans, 1);
+});
+
+test('an imputed parking component keeps the legacy baseline non-authoritative even for verified use', () => {
+  const [attached] = attachMarketEstimates([listing()], bundleWithAcceptance(), AS_OF);
+  const scenarios = structuredClone(attached.marketScenarios);
+  scenarios.registeredUse = {
+    value: 'residential',
+    source: 'official',
+    detail: 'synthetic verified use',
+  };
+  const residential = scenarios.scenarios.find((scenario) => scenario.primaryUse === 'residential');
+  assert.ok(residential);
+  residential.parkingEstimate = {
+    asOf: AS_OF,
+    stage: 'same-building',
+    comparableIds: ['synthetic-a', 'synthetic-b', 'synthetic-c'],
+    comparableCount: 3,
+    priceP25Ntd: 2_000_000,
+    priceP50Ntd: 2_200_000,
+    priceP75Ntd: 2_400_000,
+    areaP25Ping: 9,
+    areaP50Ping: 10,
+    areaP75Ping: 11,
+  };
+
+  const legacy = labelLegacyCompatibilityEstimate({
+    ...attached.marketEstimate,
+    status: 'reliable',
+    unavailableReasons: [],
+  }, scenarios);
+
+  assert.equal(legacy.status, 'review');
+  assert.ok(legacy.unavailableReasons.includes(
+    'legacy-residential-baseline-not-authoritative',
+  ));
 });
 
 test('same-district wrong-neighborhood GPS pin cannot receive an automatic estimate', () => {
@@ -170,7 +271,10 @@ test('same-district wrong-neighborhood GPS pin cannot receive an automatic estim
   ], bundle, AS_OF);
 
   assert.equal(result.marketEstimate.status, 'unavailable');
-  assert.deepEqual(result.marketEstimate.unavailableReasons, ['listing-coordinate-address-conflict']);
+  assert.deepEqual(result.marketEstimate.unavailableReasons, [
+    'listing-coordinate-address-conflict',
+    'legacy-residential-baseline-not-authoritative',
+  ]);
   const evidence = result.marketEstimate.subjectLocationEvidence;
   assert.equal(evidence?.verdict, 'conflict');
   assert.ok((evidence?.distanceBeyondUncertaintyMeters ?? 0) > 300);
@@ -210,15 +314,24 @@ test('untyped and unreliable GPS listings stay unavailable', () => {
     listing({ reliability: { coordPresent: true, coordConsistent: false, routeOk: null, ratio: null, reason: 'district mismatch' } }),
   ], bundle, AS_OF)[0]!;
 
-  assert.deepEqual(untyped.marketEstimate.unavailableReasons, ['listing-building-type-unavailable']);
-  assert.deepEqual(unreliable.marketEstimate.unavailableReasons, ['listing-coordinate-unreliable']);
+  assert.deepEqual(untyped.marketEstimate.unavailableReasons, [
+    'listing-building-type-unavailable',
+    'legacy-residential-baseline-not-authoritative',
+  ]);
+  assert.deepEqual(unreliable.marketEstimate.unavailableReasons, [
+    'listing-coordinate-unreliable',
+    'legacy-residential-baseline-not-authoritative',
+  ]);
 });
 
-test('known listing parking gets a parallel one-space scenario while legacy authority stays review', () => {
+test('known listing parking gets a one-space authoritative scenario and a labeled legacy review', () => {
   const [result] = attachMarketEstimates([listing({ parking: '平面' })], bundle, AS_OF);
 
   assert.equal(result.marketEstimate.status, 'review');
-  assert.deepEqual(result.marketEstimate.unavailableReasons, ['listing-parking-not-separable']);
+  assert.deepEqual(result.marketEstimate.unavailableReasons, [
+    'listing-parking-not-separable',
+    'legacy-residential-baseline-not-authoritative',
+  ]);
   assert.equal(result.marketScenarios.parkingFamily, 'flat');
   assert.equal(result.marketScenarios.parkingCountAssumption, 1);
   assert.ok(result.marketScenarios.scenarios.length > 0);
@@ -228,7 +341,10 @@ test('known parking preserves the legacy parking review when scenario floor data
   const [result] = attachMarketEstimates([listing({ parking: '平面', floor: null })], bundle, AS_OF);
 
   assert.equal(result.marketEstimate.status, 'review');
-  assert.deepEqual(result.marketEstimate.unavailableReasons, ['listing-parking-not-separable']);
+  assert.deepEqual(result.marketEstimate.unavailableReasons, [
+    'listing-parking-not-separable',
+    'legacy-residential-baseline-not-authoritative',
+  ]);
   assert.ok(result.marketScenarios.reasons.includes('listing-floor-group-unavailable'));
   assert.ok(result.marketScenarios.scenarios.every((scenario) => scenario.status === 'unavailable'));
 });
@@ -303,7 +419,10 @@ test('missing local market data leaves the independent enrichment record usable'
   const [result] = attachMarketEstimates([listing()], null, AS_OF);
 
   assert.equal(result.marketEstimate.status, 'unavailable');
-  assert.deepEqual(result.marketEstimate.unavailableReasons, ['market-data-unavailable']);
+  assert.deepEqual(result.marketEstimate.unavailableReasons, [
+    'market-data-unavailable',
+    'legacy-residential-baseline-not-authoritative',
+  ]);
   assert.equal(result.walk, null);
   assert.equal(result.withinWalk, null);
 });

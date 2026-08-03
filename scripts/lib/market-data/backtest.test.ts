@@ -424,7 +424,7 @@ test('passing acceptance records policy identity, scenario thresholds, and compl
   const acceptance = backtestAcceptance(passing, 'a'.repeat(64), '2026-07-26T01:00:00.000Z');
 
   assert.equal(acceptance.schemaVersion, 3);
-  assert.equal(acceptance.estimatorPolicyVersion, 4);
+  assert.equal(acceptance.estimatorPolicyVersion, 5);
   assert.equal(acceptance.policyId, 'baseline');
   assert.equal(acceptance.evaluatedThrough, '2025-12-01');
   assert.equal(acceptance.latestEligibleTransactionDate, '2025-12-01');

@@ -114,7 +114,7 @@ export interface EnrichedListing extends Listing {
   hardExclusion: { excluded: boolean; reasons: string[] };
   tenure: ListingTenure;
   marketEstimate: MarketEstimate;
-  /** Parallel candidate scenarios; `marketEstimate` remains authoritative until activation. */
+  /** Authoritative exact-use scenarios; `marketEstimate` is retained as labeled compatibility evidence. */
   marketScenarios: LocalMarketScenarioEstimate;
 }
 
