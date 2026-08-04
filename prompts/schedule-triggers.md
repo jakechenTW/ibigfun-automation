@@ -1,12 +1,27 @@
 # Schedule Triggers — 每日監測排程用 trigger（Codex / Claude Code 通用）
 
-這份檔案是**排程觸發訊息**的可複製範本。行為腳本（完整 SOP）在
-`prompts/daily-run.md`；這裡只負責把它需要的三個變數注入：**profile、tool
-name、日期範圍**。排程 agent 不用重寫 SOP，把對應段落整段貼進 trigger 即可。
+這份檔案是**排程觸發訊息**的可複製範本：先跑一個獨立市場資料 writer，
+再跑兩個 profile reader。Reader 的完整 SOP 在 `prompts/daily-run.md`；其 trigger
+只負責注入三個變數：**profile、tool name、日期範圍**。排程 agent 不用重寫
+SOP，把對應段落整段貼進 trigger 即可。
 
 通用做法：trigger 內容對 Codex 與 Claude Code 完全相同，**唯一要改的是
 `tool:` 這一行**——填你這個排程實際執行的 agent（`codex` 或 `claude`），且必須
 和真正執行的 agent 相符（見 `prompts/daily-run.md`「監測 profile 與區間」）。
+
+## Trigger M — 每日市場資料 writer
+
+此 job 必須每天先獨立完成，兩個 profile trigger 才能開始。它是唯一會更新、
+重建、完整回測並發布市場資料的排程：
+
+```
+請依 AGENTS.md 與 docs/market-data.md 執行每日台北市場資料更新。
+執行：npm run market-data -- update --city taipei
+全程 headless；完成發布或保留 last-known-good 後停止，不執行任何 profile pipeline。
+```
+
+Profile worker 不得自行補跑此命令。Writer 失敗時由 writer job 回報；profile
+只讀取本機仍有效的 active pair，並遵守 stale／review 的 fail-closed 規則。
 
 ## 變數說明
 
@@ -39,7 +54,10 @@ tool: <codex 或 claude，填你實際執行的 agent>
 
 ---
 
-## 錯開時間（重要）
+## Writer 先行與錯開時間（重要）
+
+先等待 Trigger M 完整結束，再啟動第一個 profile。市場資料 writer 不使用
+iBigFun 登入；profile 之間仍因共享登入而必須錯開。
 
 iBigFun 是**單一共享登入**——同一帳號同時 fetch 會互踢登入 session
 （見 `docs/automation-state.md`、`AGENTS.md`）。所以兩個 profile **絕不能同時
@@ -53,6 +71,7 @@ iBigFun 是**單一共享登入**——同一帳號同時 fetch 會互踢登入 
 
   | 時間（Asia/Taipei） | Job |
   | --- | --- |
+  | 02:30 | Trigger M（市場資料 writer，完成後才繼續） |
   | 03:00 | Trigger A（example-investment） |
   | 03:30 | Trigger B（example-owner-occupied） |
 

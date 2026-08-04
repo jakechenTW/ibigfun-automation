@@ -123,9 +123,26 @@ Grade-B comparison, and parking-family gate, then atomically publishes the
 build with its schema-3 acceptance. Failure retains the last-known-good pair
 and exits `3`; an invalid older build is never silently promoted.
 
-Enrichment calls this update path once per run before estimates are attached.
-If refresh fails it may use only a still-valid accepted pair; otherwise
-`marketEstimate` is unavailable.
+### Scheduled writer and read-only consumers
+
+Run the expensive writer once per Taipei calendar day, before either property
+profile:
+
+1. Run `npm run market-data -- update --city taipei` once.
+2. Wait for the command to publish or retain last-known-good.
+3. Run the investment and owner-occupied pipelines sequentially.
+
+`npm run enrich` calls `loadMarketData` only. It validates and reads the active
+build plus matching acceptance artifact without acquiring the refresh lock,
+recovering or publishing staging state, checking remote sources, rebuilding
+indexes, or running a backtest. Both profile runs therefore reuse the same
+accepted pair. When the pair is missing or invalid, `marketEstimate` is
+unavailable; when it is stale or lacks matching acceptance, the existing
+fail-closed review and notification rules apply.
+
+If the independent writer fails, it retains last-known-good and reports its
+existing non-success status. A property worker must not run an inline update as
+recovery.
 
 Candidate downloads, parsing, indexing, and validation occur under the
 explicit `candidate` command in a disposable sibling staging directory. Gate

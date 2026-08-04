@@ -21,6 +21,8 @@ Trigger 也會在訊息裡告訴你要監測的區間。把它對應成 pipeline
 
 `AGENTS.md`、`docs/reporting-rules.md`、`docs/credentials.md`、`docs/automation-state.md`、`profiles/<profile>/profile.json`，以及該 profile folder 的 `evaluation.md` 規則檔與 `notify-template.md` 模板——估價、評估、走路距離三角定位、可疑物件判斷都以它們為準。
 
+本 prompt 只負責 profile reader；排程應已先完成獨立的每日 market-data writer。本 worker 不更新市場資料。
+
 ## 執行流程（指令照抄）
 
 1. 跑 orchestrator：
@@ -54,6 +56,8 @@ Trigger 也會在訊息裡告訴你要監測的區間。把它對應成 pipeline
 
 - 登入被 CAPTCHA / 2FA / 帳號風控擋住：**絕不繞過**。走失敗逃生口。
 - 任何 fetch / enrich 不可恢復的錯誤（pipeline 以非 0 結束）：走失敗逃生口，不要無限重試。
+- Profile worker 絕不把 `market-data update` 當作復原動作；市場資料更新屬於獨立的每日 writer job。
+- 依 journal 最後完成的元件邊界判斷卡住位置：尚未出現 `market-data.ready` 時，只能描述為市場資料載入／驗證；ORS 必須在 `market-data.ready` 之後才會開始，只有 readiness 已記錄且當前邊界確為路由處理時，才能標為 ORS 卡住。
 - **部分失敗不是 fail**：例如 ORS 路由全掛時，受影響物件標記為 manual-review、照常出 `warn`，不要當成 fail（`AGENTS.md`：走路距離不可靠者永不自動排除）。
 - 失敗逃生口（唯一一條）：
 

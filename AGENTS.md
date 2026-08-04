@@ -27,6 +27,17 @@ Do these once before the first run; stop and ask the user if any fails:
   enrich step's walking distances (free key at openrouteservice.org/dev).
 - [ ] Toolchain installed: `npm install`.
 
+## Scheduled Market-Data Writer
+
+The scheduled market-data writer is independent from profile runs. Run
+`npm run market-data -- update --city taipei` once per Taipei calendar day and
+wait for it to finish before starting profile pipelines. Profile `enrich` is a
+read-only consumer: it never refreshes, rebuilds, backtests, or publishes market
+data. A failed writer retains last-known-good; profile runs may use only the
+validated active pair and remain subject to freshness warnings and fail-closed
+recommendation rules. Profile workers must not invoke an inline refresh as a
+recovery action.
+
 ## Daily Run Sequence
 
 1. Read this file, `docs/reporting-rules.md`, `docs/credentials.md`, and
@@ -45,7 +56,8 @@ Do these once before the first run; stop and ask the user if any fails:
    <target>` writes `state/runs/<profile>/<label>/enriched.json`): nearest MRT
    exit by **walking distance** (OpenRouteService foot routing over OSM),
    monthly mortgage, parsed numbers, reusable walk signals (`withinWalk`),
-   reliability flags, official `marketEstimate` evidence, and an advisory `signals.auctionKeyword` flag
+   reliability flags, official `marketEstimate` evidence loaded read-only from
+   the active validated market-data pair, and an advisory `signals.auctionKeyword` flag
    the agent weighs (no longer an auto-exclusion — see Quality /
    Suspicious-Listing Judgment in docs/reporting-rules.md). Listings with an
    unreliable coordinate/route are marked `withinWalk: null` for manual review,
@@ -88,11 +100,13 @@ evaluation, and writing the report.
 - `npm run enrich -- --profile <profile> --date <target>` — reads that file and
   adds walking distance to the nearest MRT exit (needs `ORS_API_KEY` in `.env`;
   results cached in `state/route-cache.json`), mortgage, parsed numbers, a
-  reliability gate for walking distance, and the advisory auction-keyword
+  reliability gate for walking distance, read-only estimates from the active
+  validated market-data pair, and the advisory auction-keyword
   signal → `state/runs/<profile>/<label>/enriched.json`. Profile-specific
   estimation and final include/exclude judgment stay with the agent. The walk
   decision is `withinWalk` (true ≤10-min walk / false too far / null
-  unreliable→manual).
+  unreliable→manual). This command never refreshes official sources, rebuilds
+  indexes, runs a full backtest, or publishes market data.
 - `npm run market-data -- update --city taipei` — refreshes, validates, fully
   backtests, and atomically publishes a schema-5 / policy-7 build with its
   matching aggregate schema-3 acceptance. Every global, residential-use,
