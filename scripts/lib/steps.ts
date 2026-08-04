@@ -22,12 +22,13 @@ import { locateAddress, nearestDoorplate } from './market-data/doorplates.ts';
 import { normalizeTaiwanAddress } from './market-data/address.ts';
 import { floorGroup } from './market-data/property.ts';
 import {
+  loadMarketData,
   marketDataBacktestAcceptanceDecision,
   marketDataFreshness,
   type MarketAcceptanceDecision,
   type MarketAcceptanceDiagnostics,
 } from './market-data/store.ts';
-import { ensureTaipeiMarketData } from './market-data/update.ts';
+import { MARKET_DATA_ROOT } from './market-data/config.ts';
 import type {
   MarketDataBundle,
   MarketEstimate,
@@ -419,7 +420,7 @@ export async function enrichStep(ctx: RunContext, logger: Logger): Promise<StepO
   const input = JSON.parse(fs.readFileSync(inPath, 'utf8')) as FetchResult;
   const exits = loadExits(MRT_CSV);
   const cache = loadCache();
-  const marketBundle = await ensureTaipeiMarketData({ asOf: range.to, logger });
+  const marketBundle = await loadMarketData(MARKET_DATA_ROOT);
   if (marketBundle) {
     const freshness = marketDataFreshness(marketBundle.manifest, range.to);
     logger.event('info', 'market-data.ready', 'using validated Taipei market-data build', {
