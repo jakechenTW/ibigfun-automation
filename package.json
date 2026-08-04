@@ -1,6 +1,6 @@
 {
   "name": "ibigfun-automation",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "private": true,
   "type": "module",
   "description": "Template: monitor iBigFun property listings via configurable profiles and send profile-specific report notifications.",
