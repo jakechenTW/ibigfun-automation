@@ -13,7 +13,7 @@ Use this profile for rental-yield-oriented investment screening.
   `likely-within` 才可視為通過，`likely-within` 單獨不等同 `regionGate === 'in'`。agent verdict 為
   `clean`，官方行情 `reliable`、信心非 `low`、
   兩個官方來源均未過期，且車位、產權、用途與其他資料品質規則全部通過。
-- 候選：只收錄外觀正常、未命中硬性排除，且因刊登年限、走路、行情或其他可解決的資料不確定
+- 候選：只收錄 agent verdict 為 `clean`、未命中硬性排除，且因刊登年限、走路、行情或其他可解決的資料不確定
   而無法自動推薦的物件。
 - 風險：非 expired 物件若為 `suspicious` / `likely-auction`，或有重大產權、用途、資訊品質風險，
   放入 `風險物件／待查`。

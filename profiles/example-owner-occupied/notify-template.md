@@ -10,7 +10,7 @@
 - 符合條件：{{matched_count}} 筆
 - 候選／資料待確認：{{candidate_count}} 筆
 - 風險物件／待查：{{risk_count}} 筆
-- 排除：{{excluded_count}} 筆
+- 排除摘要：{{excluded_count}} 筆
 - 官方行情｜可靠：{{market_reliable_count}} 筆・待覆核：{{market_review_count}} 筆・不可用：{{market_unavailable_count}} 筆・資料偏舊：{{market_stale_count}} 筆
 - 主要排除原因：{{main_exclusion_reasons}}
 - Filter 對照狀態：{{filter_verification_status}}
