@@ -32,6 +32,7 @@
 - Modify locally: `profiles/investment-taipei.local/profile.json`
 - Modify locally: `profiles/owner-occupied-taipei.local/profile.json`
 - Modify: `profiles/README.md`
+- Modify: `scripts/lib/steps.test.ts`
 
 **Interfaces:**
 - Produces `ProfileEvaluation { maxDaysOnMarket: number }`
@@ -118,16 +119,20 @@ Update `profiles/README.md` examples and schema table. Declare the field require
 
 - [ ] **Step 6: Verify and commit**
 
+Add `evaluation: { maxDaysOnMarket: 365 }` to the test-only profile literal in
+`scripts/lib/steps.test.ts`, so the required `Profile` contract is complete in
+this task.
+
 Run: `node --import tsx --test scripts/lib/profiles.test.ts`
 
 Expected: PASS.
 
 Run: `npx tsc --noEmit`
 
-Expected: only existing `Profile` literals without `evaluation` fail; Task 2 fixes them without weakening the type.
+Expected: PASS.
 
 ```bash
-git add scripts/lib/profiles.ts scripts/lib/profiles.test.ts profiles/example-investment/profile.json profiles/example-owner-occupied/profile.json profiles/README.md
+git add scripts/lib/profiles.ts scripts/lib/profiles.test.ts scripts/lib/steps.test.ts profiles/example-investment/profile.json profiles/example-owner-occupied/profile.json profiles/README.md
 git commit -m "feat: add profile listing age policy"
 ```
 
@@ -143,7 +148,6 @@ git commit -m "feat: add profile listing age policy"
 - Modify: `scripts/lib/walk.test.ts`
 - Modify: `scripts/lib/steps.ts`
 - Modify: `scripts/lib/steps.test.ts`
-- Modify other test-only `Profile` literals identified by type checking
 
 **Interfaces:**
 - Produces `TenureGate = 'eligible' | 'expired' | 'review'`
@@ -219,9 +223,11 @@ tenureGate: classifyTenureGate(tenure.daysOnMarket, options.maxDaysOnMarket),
 
 Add `tenureGate` and the three root counts to `types.ts`. In `steps.ts`, pass `range.to` and `profile.evaluation.maxDaysOnMarket`, compute all three counts, and include them in the artifact, step summary, and journal.
 
-- [ ] **Step 5: Repair required Profile fixtures**
+- [ ] **Step 5: Update the enrichment summary fixture**
 
-Add `evaluation: { maxDaysOnMarket: 365 }` to `steps.test.ts` and any other test-only `Profile` literals. Extend the empty-run expected summary with three zero tenure counts.
+Extend the empty-run expected summary in `steps.test.ts` with the three zero
+tenure counts. The required profile evaluation field was already added in Task
+1.
 
 - [ ] **Step 6: Verify and commit**
 
