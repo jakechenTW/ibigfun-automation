@@ -7,6 +7,32 @@ function record(value: unknown): Record<string, unknown> | null {
     ? value as Record<string, unknown> : null;
 }
 
+/** Rejects legacy enrichment so every completed report has tenure evidence. */
+export function assertValidTenureGates(enriched: unknown): void {
+  const result = record(enriched);
+  if (!result || !Array.isArray(result.listings)) {
+    throw new Error('rerun enrich: a listings array and tenure summary counts are required');
+  }
+
+  const summaryKeys = ['tenureEligible', 'tenureExpired', 'tenureReview'] as const;
+  if (summaryKeys.some((key) => typeof result[key] !== 'number' ||
+    !Number.isSafeInteger(result[key]) || (result[key] as number) < 0)) {
+    throw new Error('rerun enrich: non-negative integer tenure summary counts are required');
+  }
+
+  const actual = { tenureEligible: 0, tenureExpired: 0, tenureReview: 0 };
+  for (const listing of result.listings) {
+    const gate = record(listing)?.tenureGate;
+    if (gate !== 'eligible' && gate !== 'expired' && gate !== 'review') {
+      throw new Error('rerun enrich: every listing requires a valid tenureGate');
+    }
+    actual[gate === 'eligible' ? 'tenureEligible' : gate === 'expired' ? 'tenureExpired' : 'tenureReview'] += 1;
+  }
+  if (summaryKeys.some((key) => result[key] !== actual[key])) {
+    throw new Error('tenure summary counts must match listings');
+  }
+}
+
 /** Reads both the persisted summary and per-listing source flags defensively. */
 export function hasStaleOfficialMarketData(enriched: unknown): boolean {
   const result = record(enriched);
@@ -63,6 +89,7 @@ export function validateReportEvidence(
   enriched: unknown,
   valuationReview?: unknown,
 ): void {
+  assertValidTenureGates(enriched);
   if (valuationReview !== undefined) {
     const reviewFile = validateValuationReview(valuationReview);
     validateValuationReviewAgainstEnriched(reviewFile, enriched);

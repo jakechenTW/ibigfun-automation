@@ -3,19 +3,45 @@ import { test } from 'node:test';
 import { assertNotificationStatusAllowsMarketData, validateReportEvidence } from './report-notify.ts';
 
 const freshEnrichment = {
+  tenureEligible: 1,
+  tenureExpired: 0,
+  tenureReview: 0,
   marketReliable: 1,
   marketReview: 0,
   marketUnavailable: 0,
   marketDataStale: 0,
-  listings: [{ marketEstimate: { status: 'reliable', sourceFreshness: { transactionStale: false, doorplateStale: false } } }],
+  listings: [{
+    tenureGate: 'eligible',
+    marketEstimate: { status: 'reliable', sourceFreshness: { transactionStale: false, doorplateStale: false } },
+  }],
 };
+
+test('all report statuses reject legacy enrichment without tenureGate', () => {
+  const legacy = {
+    ...freshEnrichment,
+    listings: [{ marketEstimate: freshEnrichment.listings[0].marketEstimate }],
+  };
+  for (const status of ['ok', 'warn', 'fail'] as const) {
+    assert.throws(() => validateReportEvidence(status, legacy), /rerun enrich.*tenureGate/);
+  }
+});
+
+test('tenure summary counts must match listing gates', () => {
+  assert.throws(
+    () => validateReportEvidence('warn', { ...freshEnrichment, tenureExpired: 1 }),
+    /tenure summary counts must match listings/,
+  );
+});
 
 test('rejects ok notification status when enrichment summary reports stale official data', () => {
   assert.throws(
     () => assertNotificationStatusAllowsMarketData('ok', {
       ...freshEnrichment,
       marketDataStale: 1,
-      listings: [{ marketEstimate: { status: 'reliable', sourceFreshness: { transactionStale: true, doorplateStale: false } } }],
+      listings: [{
+        tenureGate: 'eligible',
+        marketEstimate: { status: 'reliable', sourceFreshness: { transactionStale: true, doorplateStale: false } },
+      }],
     }),
     /--status-notify warn/,
   );
@@ -25,7 +51,10 @@ test('rejects ok notification status when a listing has a stale official source'
   assert.throws(
     () => assertNotificationStatusAllowsMarketData('ok', {
       ...freshEnrichment,
-      listings: [{ marketEstimate: { status: 'reliable', sourceFreshness: { transactionStale: true, doorplateStale: false } } }],
+      listings: [{
+        tenureGate: 'eligible',
+        marketEstimate: { status: 'reliable', sourceFreshness: { transactionStale: true, doorplateStale: false } },
+      }],
     }),
     /market summary counts must match listings/,
   );
@@ -49,7 +78,10 @@ test('rejects ok notification status when any listing needs market review', () =
     ...freshEnrichment,
     marketReliable: 0,
     marketReview: 1,
-    listings: [{ marketEstimate: { status: 'review', sourceFreshness: { transactionStale: false, doorplateStale: false } } }],
+    listings: [{
+      tenureGate: 'eligible',
+      marketEstimate: { status: 'review', sourceFreshness: { transactionStale: false, doorplateStale: false } },
+    }],
   }), /review or unavailable.*--status-notify warn/);
 });
 
@@ -58,7 +90,10 @@ test('rejects ok notification status when the market bundle was unavailable', ()
     ...freshEnrichment,
     marketReliable: 0,
     marketUnavailable: 1,
-    listings: [{ marketEstimate: { status: 'unavailable', sourceFreshness: { transactionStale: false, doorplateStale: false } } }],
+    listings: [{
+      tenureGate: 'eligible',
+      marketEstimate: { status: 'unavailable', sourceFreshness: { transactionStale: false, doorplateStale: false } },
+    }],
   }), /review or unavailable.*--status-notify warn/);
 });
 
@@ -76,12 +111,16 @@ test('warn and fail statuses do not validate incomplete market evidence', () => 
 
 test('warn status cannot bypass valuation review binding', () => {
   const enriched = {
+    tenureEligible: 1,
+    tenureExpired: 0,
+    tenureReview: 0,
     marketReliable: 0,
     marketReview: 1,
     marketUnavailable: 0,
     marketDataStale: 0,
     listings: [{
       id: 53199422,
+      tenureGate: 'eligible',
       marketEstimate: {
         status: 'review',
         unavailableReasons: ['insufficient-comparables'],

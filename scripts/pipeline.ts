@@ -177,15 +177,13 @@ function cmdMark(argv: string[]): void {
     const reviewPath = valuationReviewPath(profile.id, range.label);
     const hasValuationReview = fs.existsSync(reviewPath);
     let enriched: unknown;
-    if (sNotify === 'ok' || hasValuationReview) {
-      if (!fs.existsSync(enrichedFile)) {
-        fail(`cannot mark report ok: required enriched artifact ${enrichedFile} is missing.`);
-      }
-      try {
-        enriched = JSON.parse(fs.readFileSync(enrichedFile, 'utf8'));
-      } catch (error) {
-        fail(`cannot mark report ok: malformed enriched artifact ${enrichedFile}: ${(error as Error).message}`);
-      }
+    if (!fs.existsSync(enrichedFile)) {
+      fail(`cannot mark report ok: required enriched artifact ${enrichedFile} is missing.`);
+    }
+    try {
+      enriched = JSON.parse(fs.readFileSync(enrichedFile, 'utf8'));
+    } catch (error) {
+      fail(`cannot mark report ok: malformed enriched artifact ${enrichedFile}: ${(error as Error).message}`);
     }
     let valuationReview: unknown;
     if (hasValuationReview) {
