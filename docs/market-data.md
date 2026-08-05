@@ -9,10 +9,12 @@ in review rather than becoming an automatic recommendation.
 ## Current production contract
 
 The activated contract is build schema 5, estimator policy 7, and acceptance
-schema 3. `marketEstimate` remains the conservative report authority;
-`marketScenarios` supplies approved exact-use and parking-family evidence only
-when the matching acceptance authorizes those cohorts. The earlier safe-stop
-design remains as historical rationale for the fail-closed boundary.
+schema 3. `marketEstimate` supplies official transaction context and the
+reliability gates used by reports; `marketScenarios` supplies approved exact-use
+and parking-family evidence only when the matching acceptance authorizes those
+cohorts. Neither is compared with a listing's asking price to determine whether
+it is a deal. The earlier safe-stop design remains as historical rationale for
+the fail-closed boundary.
 
 ## Sources, scope, and credentials
 
@@ -201,14 +203,17 @@ modifying the run artifact:
 node --input-type=module -e 'import { readFileSync } from "node:fs"; const [file, id] = process.argv.slice(1); const { listings } = JSON.parse(readFileSync(file, "utf8")); const listing = listings.find((item) => String(item.id) === id); if (!listing) throw new Error(`listing ${id} not found`); console.log(JSON.stringify({ id: listing.id, title: listing.title, buildingType: listing.buildingType, marketEstimate: listing.marketEstimate }, null, 2));' state/runs/example-investment/2026-07-26/enriched.json 123
 ```
 
-Use `askingPremiumConservative` (the P25-based premium) for the investment
-gate. A transaction index without a matching passing backtest acceptance is
-forced to `review` even when its comparable evidence would otherwise be
-`reliable`. `review`, `unavailable`, low confidence, stale sources, unreliable
-coordinates, missing type provenance, and inseparable listing parking do not
-qualify for automatic recommendation. Limited external review is permitted
-only under the reporting rules; it must not overwrite `marketEstimate` and must
-write the required `valuation-review.json` when it changes a report bucket.
+Apply the profile's enriched `tenureGate` before its remaining criteria:
+`expired` is exclusion-only, and `review` is candidate/risk-only. Keep the
+official median and P25–P75 as transaction evidence, not as a measure of whether
+the asking price is a deal. A transaction index without a matching passing
+backtest acceptance is forced to `review` even when its comparable evidence
+would otherwise be `reliable`. `review`, `unavailable`, low confidence, stale
+sources, unreliable coordinates, missing type provenance, and inseparable
+listing parking do not qualify for automatic recommendation. Limited external
+review is permitted only under the reporting rules; it must not overwrite
+`marketEstimate` and must write the required `valuation-review.json` when it
+changes a report bucket.
 
 ## Backtesting
 

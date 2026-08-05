@@ -146,7 +146,9 @@ with retry + exponential backoff (`HISTORY_RETRIES`, `HISTORY_RETRY_BASE_MS`).
 A listing whose history can't be fetched after retries — or whose on-market
 history comes back empty for a still-live listing (a sign of throttling) — is
 kept with empty history, logged as a `WARN` with its id, and counted in the
-end-of-run summary. Never dropped silently.
+end-of-run summary. Empty or failed history produces `tenureGate: review` during
+enrichment, so the listing can appear only as a candidate/risk and is never
+automatically recommended. Never drop it silently.
 
 **Accepted limitation:** under heavy throttle the API can return `200 ok` with
 an empty `data` array, which is indistinguishable from a genuinely-empty result
@@ -264,4 +266,6 @@ doorplate checks older than 60 days are stale. Enrich still emits the estimate
 and flags freshness, but reports with stale official data must use `warn` and
 cannot automatically recommend affected listings. Policy-7 `marketScenarios`
 is authoritative only for acceptance-approved use cohorts and parking families;
-the conservative P25 `marketEstimate` gate remains the report authority.
+`marketEstimate` remains the official transaction context and reliability gate.
+Neither is compared with the listing's asking price to decide whether it is a
+deal.

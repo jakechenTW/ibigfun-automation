@@ -12,10 +12,11 @@ rakuya, etc.). A listing's canonical URL therefore often points to the
 originating source rather than `ibigfun.com` — that is expected, not a bug. The
 daily job reads iBigFun's latest-sale view for the selected profile and target
 date using the profile's `fetch` filter map (`profiles/<id>/profile.json`,
-walked generically by `buildSearchBody`). The job evaluates each fetched listing
-against `docs/reporting-rules.md` plus the profile's `evaluation.md`, writes a
-report, and notifies. A profile is a self-contained folder; see
-`profiles/README.md` to add or change one.
+walked generically by `buildSearchBody`). That same file carries the profile's
+`displayName` and structured `evaluation` policy. The job evaluates each
+fetched listing against `docs/reporting-rules.md` plus the profile's
+`evaluation.md`, writes a report, and notifies. A profile is a self-contained
+folder; see `profiles/README.md` to add or change one.
 
 ## First Run — Prerequisites
 
@@ -67,13 +68,18 @@ recovery action.
    deterministic walk, and give a labelled verdict (likely-within / likely-far /
    unknown→human) → `docs/reporting-rules.md` (Walking-Distance Triage).
 6. Deduplicate by stable listing ID → `docs/automation-state.md`.
-7. Read each listing's deterministic `marketEstimate`: use the official median,
-   P25–P75, confidence, comparable count, selected stage, and source freshness.
-   P25 is the conservative investment gate; `review`, `unavailable`, low
-   confidence, stale sources, and inseparable parking are never auto-recommended.
-   A bounded external valuation may review a boundary case but never silently
-   overwrites official values; write `valuation-review.json` when it affects a
-   bucket → `docs/reporting-rules.md` and `profiles/<profile>/evaluation.md`.
+7. Apply the profile's `evaluation.maxDaysOnMarket` through each listing's
+   enriched `tenureGate` before considering a recommendation: `expired` is
+   exclusion-only, while `review` is candidate/risk-only and never an automatic
+   recommendation. Then read the deterministic `marketEstimate`: retain the
+   official median, P25–P75, confidence, comparable count, selected stage, and
+   source freshness as transaction context and reliability gates. Do not compare
+   the asking price with official values to decide whether a listing is a deal.
+   `review`, `unavailable`, low confidence, stale sources, and inseparable
+   parking are never auto-recommended. A bounded external valuation may review
+   a boundary case but never silently overwrites official values; write
+   `valuation-review.json` when it affects a bucket →
+   `docs/reporting-rules.md` and `profiles/<profile>/evaluation.md`.
 8. Estimate the remaining profile-specific fields (for investment: rent; for
    self-use: fit, risks, and missing confirmations) →
    `docs/reporting-rules.md` and `profiles/<profile>/evaluation.md`.
@@ -227,7 +233,8 @@ ai-notify --tool <codex|claude> --status <ok|warn|fail> \
 - `docs/reporting-rules.md`: shared calculations, data quality, sorting, and
   notification conventions.
 - `profiles/<id>/`: one self-contained folder per runnable profile —
-  `profile.json` (`displayName` + `fetch` filter map), `evaluation.md`
+  `profile.json` (`displayName` + structured `evaluation` policy + `fetch`
+  filter map), `evaluation.md`
   (profile-specific criteria, thresholds, report buckets), and
   `notify-template.md` (report/notification structure). Runnable ids are the
   folder names: `example-investment`, `example-owner-occupied`.
@@ -236,8 +243,7 @@ ai-notify --tool <codex|claude> --status <ok|warn|fail> \
   overrides).
 - `docs/automation-state.md`: durable state and deduplication conventions.
 - `data/`: static reference data — `data/README.md` indexes the datasets
-  (Taipei MRT exits, filter id→name mappings, per-city 議價率, investment region
-  allowlist).
+  (Taipei MRT exits, filter id→name mappings, investment region allowlist).
 - `state/market-data/taipei/`: git-ignored, versioned local official doorplate
   and transaction build used for deterministic market estimates; contains raw
   source files, indexes, manifest/checksums, and no credentials. It is

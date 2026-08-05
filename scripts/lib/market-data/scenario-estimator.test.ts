@@ -634,7 +634,7 @@ test('high joint parking uncertainty downgrades accepted grade-B evidence to low
   assert.ok(scenario.reasons.includes('parking-imputation-uncertainty-high'));
 });
 
-test('invalid asking totals keep the scenario reviewable without premium output', () => {
+test('invalid asking totals keep the scenario reviewable', () => {
   const result = estimateMarketScenarios(
     {
       ...unknownUseSubject,
@@ -650,7 +650,6 @@ test('invalid asking totals keep the scenario reviewable without premium output'
   );
 
   assert.equal(result.scenarios[0]?.status, 'review');
-  assert.equal(Object.hasOwn(result.scenarios[0]!, 'askingPremiumConservative'), false);
 });
 
 test('a required but unavailable parking model prevents a reliable scenario', () => {

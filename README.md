@@ -55,7 +55,7 @@ Remove `--dry-run` (and fill `.env`) for a real run.
 - `docs/notifications.md` — `NOTIFY_CMD` contract and no-notifier fallback.
 - `docs/market-data.md` — Taipei official market-data build, valuation evidence,
   freshness, rollback, and offline backtesting operations.
-- `data/` — static reference data (MRT exits, filter mappings, 議價率, region
+- `data/` — static reference data (MRT exits, filter mappings, region
   allowlist); indexed by `data/README.md`.
 - `prompts/` — committed prompts for headless / scheduled runs.
 - `state/` — local generated output and per-run artifacts under

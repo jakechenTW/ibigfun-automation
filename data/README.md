@@ -56,12 +56,6 @@ Distance rules:
 - This file currently represents active MRT exits. Construction/planned stations should be tracked separately if used as future-upside notes.
 - Retired and canceled stations should not be used in MRT-distance checks.
 
-## `negotiation-rate.md`
-
-各縣市成交議價率（中古屋）參考表，investment profile 用來把開價校準到成交行情、
-計算開價溢價門檻。每市一列，附 `p* = r/(1−r)` 換算與來源季別。資料來自永慶房屋
-每季公布的七都成交議價率，每季手動更新。詳見該檔檔頭與 `docs/reporting-rules.md`。
-
 ## `region-allowlist.md`
 
 投資 profile 的目標捷運站白名單與 `regionGate` 規則（站外 / 站內走路過遠 /
