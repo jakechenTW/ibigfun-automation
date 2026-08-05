@@ -19,9 +19,19 @@ const completeReview = {
     differencePercent: 4.55,
     accepted: true,
     rationale: '門牌與型態一致，作為邊界覆核',
-    resultingBucket: 'near-threshold',
+    resultingBucket: 'candidate',
   }],
 };
+
+test('uses candidate vocabulary and rejects the retired near-threshold bucket', () => {
+  const retiredBucketReview = {
+    ...completeReview,
+    reviews: [{ ...completeReview.reviews[0], resultingBucket: 'near-threshold' }],
+  };
+
+  assert.doesNotThrow(() => validateValuationReview(completeReview));
+  assert.throws(() => validateValuationReview(retiredBucketReview), /resultingBucket/);
+});
 
 test('accepts complete external valuation evidence', () => {
   assert.doesNotThrow(() => validateValuationReview(completeReview));
@@ -81,7 +91,7 @@ test('accepts an external unit value when official valuation is unavailable', ()
       differencePercent: null,
       accepted: true,
       rationale: '官方行情不可用；外部單價僅供人工候選覆核，不升為推薦',
-      resultingBucket: 'near-threshold',
+      resultingBucket: 'candidate',
     }],
   };
   const validated = validateValuationReview(unavailableReview);
@@ -250,7 +260,7 @@ test('rejects fabricated official interval values including null mismatches', ()
         officialUnavailableReasons: ['insufficient-comparables'],
         [field]: null,
         differencePercent: field === 'officialMedianWan' ? null : 4.55,
-        resultingBucket: 'near-threshold',
+        resultingBucket: 'candidate',
       }],
     });
     assert.throws(

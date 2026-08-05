@@ -148,7 +148,7 @@ test('warn status cannot bypass valuation review binding', () => {
       differencePercent: 4.55,
       accepted: true,
       rationale: '測試 warn 不可繞過官方證據綁定',
-      resultingBucket: 'near-threshold',
+      resultingBucket: 'candidate',
     }],
   };
   assert.throws(() => validateReportEvidence('warn', enriched, fabricatedReview), /officialUnavailableReasons/);

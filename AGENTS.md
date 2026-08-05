@@ -201,7 +201,7 @@ ai-notify --tool <codex|claude> --status <ok|warn|fail> \
 - `--tool`: the agent actually running (`codex` or `claude`).
 - `--task`: use the selected profile's `displayName` from
   `profiles/<profile>/profile.json`.
-- `--status warn`: recommendations/matches, near-threshold candidates, stale or
+- `--status warn`: recommendations/matches, candidates, stale or
   weak data (including stale official market data), login fallback, or anything needing review.
 - `--status ok`: a clean no-recommendation/no-match run with fresh data.
 - `--status fail`: only when the monitor cannot complete.
