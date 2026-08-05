@@ -22,7 +22,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   loadOrCreateManifest, readManifest, writeManifest, setStep, planNextSteps,
-  STEP_ORDER, type StepName, type NotifyParams,
+  clearFailure, STEP_ORDER, type StepName, type NotifyParams,
 } from './lib/manifest.ts';
 import { readJournal, journalLogger } from './lib/journal.ts';
 import { runStep } from './lib/run.ts';
@@ -128,6 +128,8 @@ async function cmdRun(argv: string[]): Promise<void> {
     }
     console.error(`✓ ${item.step} ok`);
   }
+  clearFailure(m);
+  writeManifest(m, now());
   console.error(`\nRun ${profile.id}/${range.label} reached the end of the plan.`);
 }
 

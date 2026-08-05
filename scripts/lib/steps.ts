@@ -459,6 +459,7 @@ export async function enrichStep(ctx: RunContext, logger: Logger): Promise<StepO
             }
           }
           cache[key] = routed;
+          saveCache(cache);
           apiCalls++;
           await delay(ORS_DELAY_MS);
         } catch (err) {
@@ -471,6 +472,9 @@ export async function enrichStep(ctx: RunContext, logger: Logger): Promise<StepO
       }
     }
     enriched.push(finalizeWalk(o, routed, range.to));
+    logger.event('info', 'route.progress',
+      `route progress ${enriched.length}/${offline.length} (${cacheHits} cache, ${apiCalls} ORS, ${routeErrors} errors)`,
+      { completed: enriched.length, total: offline.length, cacheHits, apiCalls, routeErrors });
   }
 
   const valued = attachMarketEstimates(enriched, marketBundle, range.to);

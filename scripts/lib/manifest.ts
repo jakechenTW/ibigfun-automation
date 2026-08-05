@@ -81,6 +81,11 @@ export function setStep(m: Manifest, name: StepName, patch: Partial<StepState>):
   m.steps[name] = { ...m.steps[name], ...patch };
 }
 
+/** Clear a prior headless failure once a later resumed run completes. */
+export function clearFailure(m: Manifest): void {
+  m.failure = null;
+}
+
 export interface PlanOpts {
   only?: StepName;
   from?: StepName;
