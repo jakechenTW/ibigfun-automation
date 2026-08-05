@@ -3,7 +3,7 @@
  * affect a report bucket. Official marketEstimate values remain in enriched
  * output; this file records the independent review rather than overwriting it.
  */
-export type ValuationReviewBucket = 'recommended' | 'candidate' | 'suspicious' | 'excluded';
+export type ValuationReviewBucket = 'recommended' | 'candidate' | 'risk' | 'excluded';
 export type OfficialValuationStatus = 'reliable' | 'review' | 'unavailable';
 
 export interface ValuationReview {
@@ -29,7 +29,7 @@ export interface ValuationReviewFile {
   reviews: ValuationReview[];
 }
 
-const BUCKETS = new Set<ValuationReviewBucket>(['recommended', 'candidate', 'suspicious', 'excluded']);
+const BUCKETS = new Set<ValuationReviewBucket>(['recommended', 'candidate', 'risk', 'excluded']);
 const OFFICIAL_STATUSES = new Set<OfficialValuationStatus>(['reliable', 'review', 'unavailable']);
 const ISO_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{3})?Z$/u;
 const DIFFERENCE_TOLERANCE_PERCENTAGE_POINTS = 0.01;

@@ -23,14 +23,24 @@ const completeReview = {
   }],
 };
 
-test('uses candidate vocabulary and rejects the retired near-threshold bucket', () => {
-  const retiredBucketReview = {
-    ...completeReview,
-    reviews: [{ ...completeReview.reviews[0], resultingBucket: 'near-threshold' }],
-  };
+test('accepts every current valuation-review bucket', () => {
+  for (const resultingBucket of ['recommended', 'candidate', 'risk', 'excluded']) {
+    const currentBucketReview = {
+      ...completeReview,
+      reviews: [{ ...completeReview.reviews[0], resultingBucket }],
+    };
+    assert.doesNotThrow(() => validateValuationReview(currentBucketReview), resultingBucket);
+  }
+});
 
-  assert.doesNotThrow(() => validateValuationReview(completeReview));
-  assert.throws(() => validateValuationReview(retiredBucketReview), /resultingBucket/);
+test('rejects retired valuation-review buckets', () => {
+  for (const resultingBucket of ['near-threshold', 'suspicious']) {
+    const retiredBucketReview = {
+      ...completeReview,
+      reviews: [{ ...completeReview.reviews[0], resultingBucket }],
+    };
+    assert.throws(() => validateValuationReview(retiredBucketReview), /resultingBucket/, resultingBucket);
+  }
 });
 
 test('accepts complete external valuation evidence', () => {
