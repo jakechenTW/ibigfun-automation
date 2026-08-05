@@ -8,8 +8,10 @@ Use this profile for rental-yield-oriented investment screening.
 - 刊登年限：`tenureGate === 'expired'` 一律排除；`review` 不得自動推薦，乾淨物件放入
   `候選／資料待確認`；`eligible` 才繼續其餘條件。非 expired 物件若有已驗證風險，
   `風險物件／待查` 優先於候選或推薦。
-- 推薦：`tenureGate === 'eligible'`，區域與步行規則通過（`regionGate === 'in'` 或等效的
-  triage `likely-within`），agent verdict 為 `clean`，官方行情 `reliable`、信心非 `low`、
+- 推薦：`tenureGate === 'eligible'`，區域與步行規則通過：`regionGate === 'in'`；若原為
+  `regionGate === 'review'`，只有重新定位同時確認「最近站在投資白名單內」且 triage 步行 verdict 為
+  `likely-within` 才可視為通過，`likely-within` 單獨不等同 `regionGate === 'in'`。agent verdict 為
+  `clean`，官方行情 `reliable`、信心非 `low`、
   兩個官方來源均未過期，且車位、產權、用途與其他資料品質規則全部通過。
 - 候選：只收錄外觀正常、未命中硬性排除，且因刊登年限、走路、行情或其他可解決的資料不確定
   而無法自動推薦的物件。
