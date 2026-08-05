@@ -53,23 +53,16 @@ exclusion.
 
 ## Calculations
 
-- 開價溢價（asking premium）須用：`(物件開價單價 − 成交行情單價) / 成交行情單價 * 100`。
-  正值＝開價高於成交行情（常態）；負值＝開價低於成交行情（罕見、強訊號）。
-- 典型開價溢價 `p*` 由各市成交議價率 `r` 換算：`p* = r / (1 − r)`，`r` 取自
-  `data/negotiation-rate.md`。
-- 投資 profile 的分桶門檻（推薦 `溢價 ≤ p*/2`、接近 `p*/2 < 溢價 ≤ p*`、排除 `溢價 > p*`、
-  可疑含 `溢價 ≤ −10%`）見 `profiles/example-investment/evaluation.md`。
 - Monthly mortgage payment must use total price, 80% loan-to-value, 2.6% annual interest, and 30-year principal and interest repayment.
 - 租金覆蓋率 `估計月租 / 月房貸` 與現金流 `月租 − 房貸` 僅供參考顯示，不參與分桶或排序
   （見下方 Rent 段）。
 
-## Market Price (成交行情) & Premium
+## Market Price (成交行情) Evidence
 
-成交行情單價是開價溢價計算的基準。開價（iBigFun 上的委託價）系統性高於成交行情，
-因此幾乎每筆物件的溢價為正；以成交行情為錨點、用各市議價率換算的 `p*` 畫門檻，
-正是為了吸收這個結構性落差。
+成交行情用來提供官方市場脈絡，並驗證物件的用途、車位與可比資料品質。
+報告保留官方中位數、P25–P75 與可靠性證據，但不把待售開價與官方估值的差異當作分桶、可疑訊號或排序依據。
 
-### 預設來源與保守分桶
+### 預設來源與可靠性閘門
 
 `enriched.json` 的 `marketEstimate` 是成交行情的預設且權威的工作來源：它以本地、版本化的
 內政部實價登錄與台北市門牌資料選出可比成交。報告必須顯示 `reliable`、`review` 或
@@ -87,7 +80,6 @@ exclusion.
   者保留為 `review-only`，可供 acceptance 核准的同用途／車位情境使用，但不會冒充住宅
   reliable 可比。空白／未知用途、政府標讓售、特殊交易、無法定位、Grade C 車位或其他
   硬性衝突才是 `excluded`。只剩 review-only 且沒有已核准情境時，估值必須為 `review`。
-- 投資分桶的開價溢價以 **P25 保守行情** 計算/覆核；中位數溢價只能用於說明，不能單獨使物件進入推薦。
 - 只有當本機 backtest acceptance 的 `transactions-index.json` checksum、`ESTIMATOR_POLICY_VERSION`、
   active policy id、schema-5 manifest 的 index-policy provenance、schema-3 acceptance，以及完整有效
   交易索引的最新日期覆蓋均與目前執行環境完全相符時，估值才可為 `reliable`。Acceptance 必須同時
@@ -102,14 +94,15 @@ exclusion.
 - 2026-08-03 修正兩車位遮罩總額與住宅專屬 Grade-B 比較後，policy-7 baseline candidate 已通過
   全部固定 gate，並啟用 schema-5／policy-7／acceptance-schema-3 正式契約。
   `update` 只有在完整 gate 通過後才可原子發布，否則保留 last-known-good。
-  `marketEstimate` 仍是保守 P25 與資料品質的基準；`marketScenarios` 只依 acceptance 已核准的用途與
+  `marketEstimate` 仍是官方市場脈絡與資料品質的基準；`marketScenarios` 只依 acceptance 已核准的用途與
   車位家族補充情境證據，不得繞過用途、車位數、地址、freshness 或信心檢查。
   詳見 [safe-stop design](superpowers/specs/2026-08-03-multi-use-parking-safe-stop-design.md)。
 - Candidate coverage 不足只能依序評估 baseline → 48-month → 1000-meter；只有前一政策「單純 coverage
   <70%」時才可擴張，任何 accuracy／confidence calibration failure 都必須停止。Fallback 必須全面
   通過相同門檻，且仍須另行明確啟用與 provenance review；目前 `update` 不會因未來 data-only pass
   自動發佈。不得降低門檻或混用建物型態。
-- `status: reliable` 且兩個官方來源均未過期，才可能進入推薦；`low` 信心、`review`、`unavailable`，或只靠中位數才符合門檻者，最多是待人工覆核的候選。
+- `status: reliable` 且兩個官方來源均未過期，才可能進入自動推薦；`low` 信心、
+  `review` 或 `unavailable` 只能進入待人工覆核的候選或依其他硬性規則排除。
 - 待售物件含車位時，保守 `marketEstimate` 會標為 `listing-parking-not-separable`／review；只有
   車位家族與數量已確認、該家族 acceptance 已通過且 `marketScenarios` 其餘證據也完整時，車位估值
   才能作補充情境，不能單獨把物件升為自動推薦。
@@ -117,7 +110,7 @@ exclusion.
 
 ### 有界外部覆核（非靜默覆寫）
 
-僅對低信心、`review`/`unavailable`，或以中位數才看似跨過門檻的少數邊界物件，可人工查閱外部估值
+僅對低信心、`review`/`unavailable` 或其他有明確可解決行情疑點的少數物件，可人工查閱外部估值
 （例如好時價 AVM）。不得全量查詢、逆向 endpoint 或把外部值寫回 `marketEstimate`。外部結果不會取代
 官方值；若它改變物件分桶，必須在同一 run 寫入 `valuation-review.json`，並保留 listing ID、來源及 HTTPS
 URL、查核時間、外部單價/總價（來源有回傳時）、官方狀態與 unavailable reasons、可用的官方
@@ -136,15 +129,12 @@ P25/中位/P75、兩邊單價皆有時的差異、是否採納、理由與結果
 通知的逐筆「覆核」欄只能是一行精簡結論（是否查核、來源、結果和待確認事項），不得包含完整可比清單、
 原始地址、交易列或外部頁面抓取內容。
 
-### 非自由持分（地上權／使用權）校正
-
-開價溢價假設物件與成交行情同為自由持分（所有權）。地上權、區分地上權、使用權住宅等
-非自由持分物件的開價結構性低於自由持分行情，直接拿來算溢價會失真——開價偏低時得到失真的
-大負值，開價偏高時得到失真的小溢價。
+### 產權相容性（地上權／使用權）
 
 - 從標題／詳情辨識非自由持分（如「地上權」「使用權」字樣）。
-- 不可用自由持分成交行情當其溢價基準；不得僅憑這種失真溢價標為推薦。
-- 路由到「可疑/待查」並註記持分型態；無可比同型成交時排除並說明。
+- 自由持分的官方可比成交不能證明非自由持分物件的行情可靠；不得自動推薦。
+- 產權類型與 profile 或官方證據不相容是重要資料品質／風險訊號，放入
+  `風險物件／待查`；若已確認違反 profile 硬性產權條件，則排除並說明。
 
 ## Rent (預估月租金，僅供參考)
 
@@ -165,7 +155,7 @@ P25/中位/P75、兩邊單價皆有時的差異、是否採納、理由與結果
 
 - Prefer fresh iBigFun listing and official market data for the target report date.
 - If market data is stale, cached, timed out, or externally reviewed, say so in the quick summary and the affected listing's compact evidence line.
-- Do not label a listing as recommended when its market comparison is stale, low-confidence, `review`, `unavailable`, or weak. Put it in near-threshold or excluded status and mark it for manual confirmation.
+- Do not label a listing as recommended when its market evidence is stale, low-confidence, `review`, `unavailable`, or weak. Put a clean listing with resolvable uncertainty in `候選／資料待確認`; otherwise follow the profile's risk or exclusion rules.
 - Keep the official source date/freshness and compact evidence summary visible in the listing notes; preserve the full local evidence in `enriched.json` and (when used) `valuation-review.json`.
 - Track seen listing IDs using `docs/automation-state.md` so reposts, edited listings, and cross-day duplicates can be handled consistently.
 
@@ -223,7 +213,7 @@ each enriched listing; the agent makes the final call as part of a broader
 Open the listing `url` to inspect photo count and information density when:
 
 - any suspicious signal above is hit, OR
-- the listing is otherwise strong enough to reach recommended / near-threshold
+- the listing is otherwise strong enough to reach a positive or candidate bucket
   and is worth verifying.
 
 Detail URLs usually point to the originating source (591 / 樂居 / rakuya),
@@ -243,7 +233,7 @@ reason, your confidence, and whether you actually opened the detail page.
   (sparse description, missing interior photos, but no auction markers).
 - `clean`: no concern, or a keyword hit verified as non-auction.
 
-Both `suspicious` and `likely-auction` are down-ranked the same way (below); the
+Both `suspicious` and `likely-auction` are routed to `風險物件／待查`; the
 distinction is only for the reason you record.
 
 Rules:
@@ -256,12 +246,12 @@ Rules:
 - A keyword hit the agent verifies as non-auction (e.g. title says "非法拍" or
   "法拍屋旁") may be downgraded to `clean` with a recorded reason.
 
-### Effect on ranking
+### Effect on bucketing
 
-`suspicious` / `likely-auction` listings are down-ranked, not removed: even if
-the numbers qualify, do not place them in 推薦 — route them to 接近門檻 or the
-可疑/待查 section with the reason noted. This mirrors the existing rule that a
-listing lacking solid data cannot be labeled recommended.
+`suspicious` / `likely-auction` listings are flagged, not silently removed. Even
+when other criteria pass or data also needs review, route them to
+`風險物件／待查` with the reason noted; the verified risk verdict takes
+precedence over a positive or clean-data candidate bucket.
 
 ## Notification Format
 
@@ -286,7 +276,14 @@ listing lacking solid data cannot be labeled recommended.
     - `priceTrend === 'dropped'` → `曾降價 {firstPrice}→{latestPrice}萬`
     - `priceTrend === 'raised'` → `曾調漲 {firstPrice}→{latestPrice}萬`
     - `priceTrend === 'unknown'` → drop the `・{price_part}` segment entirely: `🕒 已刊登 {daysOnMarket} 天（最早 {firstListedDate}・{sourceCount} 來源）`
-  - This line is information-only: it never changes the recommend / exclusion / suspicious decision.
+  Apply the enriched `tenureGate` before each profile's remaining criteria:
+  - `eligible`: continue through the selected profile's remaining criteria.
+  - `expired`: exclude; never recommend or place in a candidate bucket.
+  - `review`: never auto-recommend; place a clean listing in `候選／資料待確認`.
+  - A suspicious/likely-auction or other verified risk verdict takes precedence and goes to `風險物件／待查`.
+  An `expired` gate remains a hard exclusion; for non-expired listings, the risk verdict takes
+  precedence over the positive or candidate route. Every profile quick summary must separately
+  show the `tenureExpired` and `tenureReview` counts.
 - When any field (月租, 現金流, 行情, 屋齡, 地址 等) is null, render it as `—` rather than dropping the line.
 - For every evaluated listing, render one compact market-evidence line: status (`reliable` / `review` / `unavailable`), official median and P25–P75 when available, confidence, comparable count, selected stage, official source date, and freshness. A `review` or `unavailable` result must say `需人工確認`; do not imply it is a reliable valuation.
 - In the profile templates, set `market_requires_review` for `review` or `unavailable` and render `需人工確認：{{market_manual_review_reason}}`; the reason is a compact summary of `unavailableReasons`/freshness, never raw comparables. Apply this to every individually rendered bucket.

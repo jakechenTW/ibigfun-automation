@@ -6,8 +6,10 @@
 
 - Profile：owner-occupied
 - 新刊登物件：{{new_listing_count}} 筆
+- 刊登年限｜超過上限：{{tenure_expired_count}} 筆・待確認：{{tenure_review_count}} 筆
 - 符合條件：{{matched_count}} 筆
-- 候選/需確認：{{candidate_count}} 筆
+- 候選／資料待確認：{{candidate_count}} 筆
+- 風險物件／待查：{{risk_count}} 筆
 - 排除：{{excluded_count}} 筆
 - 官方行情｜可靠：{{market_reliable_count}} 筆・待覆核：{{market_review_count}} 筆・不可用：{{market_unavailable_count}} 筆・資料偏舊：{{market_stale_count}} 筆
 - 主要排除原因：{{main_exclusion_reasons}}
@@ -44,7 +46,7 @@
 
 {{/if}}
 
-### 候選/需確認
+### 候選／資料待確認
 
 {{#if candidates}}
 
@@ -73,9 +75,37 @@
 
 {{/if}}
 
+### ⚠️ 風險物件／待查
+
+{{#if risks}}
+
+{{#each risks}}
+
+#### {{rank}}. [{{title}}]({{url}}) ｜ `{{risk_label}}`
+
+- {{tenure_line}}
+- 命中訊號：{{risk_signals}}
+- 行情狀態 {{market_status}}｜官方中位 {{market_median_wan}} 萬/坪（P25–P75 {{market_p25_wan}}–{{market_p75_wan}}）・信心 {{market_confidence}}・可比 {{comparable_count}} 筆・階段 {{selected_stage}}・官方資料 {{official_source_date}}（{{market_freshness}}）
+{{#if market_requires_review}}
+
+- 需人工確認：{{market_manual_review_reason}}
+
+{{/if}}
+- 覆核：{{valuation_review_line}}
+- 理由：{{risk_reason}}（信心：{{risk_confidence}}・{{detail_page_checked}}）
+
+{{/each}}
+
+{{else}}
+
+- 無 agent 標記為風險／待查的物件。
+
+{{/if}}
+
 ### 排除摘要
 
 - 排除筆數：{{excluded_count}} 筆
+- 其中刊登超過 profile 年限：{{tenure_expired_count}} 筆
 - 主要原因：{{main_exclusion_reasons}}
 
 ### 規則來源

@@ -31,16 +31,26 @@ Room, living-room, and bathroom counts are displayed but are not hard criteria i
 
 ## Agent Judgment
 
-- Put strong matches in `符合條件`.
-- Put close matches or listings with missing fields in `候選/需確認`.
-- Summarize exclusions by count and main reason instead of listing every excluded property.
-- Treat suspicious, likely-auction, low-information, or blocked-detail listings as risk notes or exclusion reasons.
+- Apply tenure first: `tenureGate === 'expired'` is always excluded;
+  `review` can never be an automatic match and a clean listing goes to
+  `候選／資料待確認`; `eligible` continues through the remaining criteria.
+- After the expired hard exclusion, a suspicious/likely-auction verdict or other
+  verified material ownership, use, or information-quality risk takes
+  precedence and goes to `風險物件／待查`.
+- Put clean `eligible` listings that pass the hard criteria and market-data
+  quality gates in `符合條件`.
+- Put only clean listings with resolvable missing or weak evidence in
+  `候選／資料待確認`.
+- Summarize exclusions by count and main reason instead of listing every excluded property;
+  the summary must include `tenureGate === 'expired'` listings and name the profile age limit.
+- Keep suspicious, likely-auction, material ownership/use risk, low-information,
+  or blocked-detail listings in the explicit `風險物件／待查` bucket rather than hiding them in exclusions.
 - Walking distance is a preference and sorting signal, not a disqualifier, unless this profile later adds an explicit walking threshold.
-- A `marketEstimate` with `review`/`unavailable`, stale source data, low confidence, or inseparable parking cannot support an automatic `符合條件` judgment; keep it in `候選/需確認` with the compact evidence reason.
+- A `marketEstimate` with `review`/`unavailable`, stale source data, low confidence, or inseparable parking cannot support an automatic `符合條件` judgment; keep a clean, otherwise qualifying listing in `候選／資料待確認` with the compact evidence reason.
 
 ## Notification Status
 
-- Use `warn` when there is any match, candidate, manual review, stale data,
+- Use `warn` when there is any match, candidate, risk listing, manual review, stale data,
   or unverified coded filter mapping (including any remaining `待驗證` entry).
-- Use `ok` only when there are no matches or candidates and coded filter mappings are verified.
+- Use `ok` only when there are no matches, candidates, or risk listings and coded filter mappings are verified.
 - Use `fail` only when the monitor cannot complete.
