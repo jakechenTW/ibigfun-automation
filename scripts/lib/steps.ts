@@ -471,7 +471,10 @@ export async function enrichStep(ctx: RunContext, logger: Logger): Promise<StepO
         }
       }
     }
-    enriched.push(finalizeWalk(o, routed, range.to));
+    enriched.push(finalizeWalk(o, routed, {
+      targetDate: range.to,
+      maxDaysOnMarket: profile.evaluation.maxDaysOnMarket,
+    }));
     logger.event('info', 'route.progress',
       `route progress ${enriched.length}/${offline.length} (${cacheHits} cache, ${apiCalls} ORS, ${routeErrors} errors)`,
       { completed: enriched.length, total: offline.length, cacheHits, apiCalls, routeErrors });
@@ -481,6 +484,9 @@ export async function enrichStep(ctx: RunContext, logger: Logger): Promise<StepO
   const withinWalkCount = valued.filter((l) => l.withinWalk === true).length;
   const manualReviewCount = valued.filter((l) => l.withinWalk === null).length;
   const hardExcludedCount = valued.filter((l) => l.hardExclusion.excluded).length;
+  const tenureEligible = valued.filter((l) => l.tenureGate === 'eligible').length;
+  const tenureExpired = valued.filter((l) => l.tenureGate === 'expired').length;
+  const tenureReview = valued.filter((l) => l.tenureGate === 'review').length;
   const outOfRegionCount = valued.filter((l) => l.regionGate === 'out-of-region').length;
   const inRegionTooFarCount = valued.filter((l) => l.regionGate === 'in-region-too-far').length;
   const marketReliable = valued.filter((l) => l.marketEstimate.status === 'reliable').length;
@@ -491,7 +497,7 @@ export async function enrichStep(ctx: RunContext, logger: Logger): Promise<StepO
   ).length;
   const result: EnrichResult = {
     from: range.from, to: range.to, enrichedAt: new Date().toISOString(), count: enriched.length,
-    withinWalkCount, manualReviewCount, hardExcludedCount,
+    withinWalkCount, manualReviewCount, hardExcludedCount, tenureEligible, tenureExpired, tenureReview,
     outOfRegionCount, inRegionTooFarCount,
     marketReliable, marketReview, marketUnavailable, marketDataStale,
     listings: valued,
@@ -503,16 +509,19 @@ export async function enrichStep(ctx: RunContext, logger: Logger): Promise<StepO
   fs.writeFileSync(outPath, JSON.stringify(result, null, 2));
   logger.event('info', 'enrich.summary',
     `enriched ${enriched.length}: ${withinWalkCount} within-walk, ${manualReviewCount} manual-review, ` +
-      `${hardExcludedCount} hard-excluded, ${outOfRegionCount} out-of-region, ${inRegionTooFarCount} too-far ` +
+      `${hardExcludedCount} hard-excluded, ${tenureEligible} tenure-eligible, ${tenureExpired} tenure-expired, ` +
+      `${tenureReview} tenure-review, ${outOfRegionCount} out-of-region, ${inRegionTooFarCount} too-far ` +
       `(${marketReliable} market-reliable, ${marketReview} market-review, ${marketUnavailable} market-unavailable, ` +
       `${marketDataStale} market-stale; ORS ${apiCalls}, cache ${cacheHits}, errors ${routeErrors})`,
     { count: enriched.length, withinWalk: withinWalkCount, manualReview: manualReviewCount,
-      hardExcluded: hardExcludedCount, outOfRegion: outOfRegionCount, inRegionTooFar: inRegionTooFarCount,
+      hardExcluded: hardExcludedCount, tenureEligible, tenureExpired, tenureReview,
+      outOfRegion: outOfRegionCount, inRegionTooFar: inRegionTooFarCount,
       marketReliable, marketReview, marketUnavailable, marketDataStale,
       orsCalls: apiCalls, cacheHits, routeErrors });
   return {
     summary: { withinWalk: withinWalkCount, manualReview: manualReviewCount,
-      hardExcluded: hardExcludedCount, marketReliable, marketReview, marketUnavailable, marketDataStale,
+      hardExcluded: hardExcludedCount, tenureEligible, tenureExpired, tenureReview,
+      marketReliable, marketReview, marketUnavailable, marketDataStale,
       orsCalls: apiCalls, cacheHits, routeErrors },
     artifacts: [outPath],
   };

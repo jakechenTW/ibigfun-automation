@@ -1,5 +1,6 @@
 import type { Coordinate } from './coords.ts';
 import type { RegionGate } from './region.ts';
+import type { TenureGate } from './tenure-gate.ts';
 import type { LocalMarketScenarioEstimate } from './market-data/evidence.ts';
 import type { BuildingType, MarketEstimate } from './market-data/types.ts';
 
@@ -113,6 +114,7 @@ export interface EnrichedListing extends Listing {
   signals: { auctionKeyword: boolean };
   hardExclusion: { excluded: boolean; reasons: string[] };
   tenure: ListingTenure;
+  tenureGate: TenureGate;
   marketEstimate: MarketEstimate;
   /** Authoritative exact-use scenarios; `marketEstimate` is retained as labeled compatibility evidence. */
   marketScenarios: LocalMarketScenarioEstimate;
@@ -130,6 +132,9 @@ export interface EnrichResult {
   withinWalkCount: number;
   manualReviewCount: number; // withinWalk === null
   hardExcludedCount: number;
+  tenureEligible: number; // tenureGate === 'eligible'
+  tenureExpired: number; // tenureGate === 'expired'
+  tenureReview: number; // tenureGate === 'review'
   outOfRegionCount: number; // regionGate === 'out-of-region'
   inRegionTooFarCount: number; // regionGate === 'in-region-too-far'
   marketReliable: number;

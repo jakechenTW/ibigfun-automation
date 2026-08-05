@@ -11,6 +11,7 @@ const exit = (nameZh: string, exitId: string): MrtExit => ({
 const cand = (nameZh: string, exitId: string, straightM: number): NearestExit => ({
   exit: exit(nameZh, exitId), distanceM: straightM,
 });
+const policy = { targetDate: '2026-06-26', maxDaysOnMarket: 365 };
 
 function offline(over: Partial<OfflineEnriched>): OfflineEnriched {
   return {
@@ -26,7 +27,7 @@ function offline(over: Partial<OfflineEnriched>): OfflineEnriched {
 }
 
 test('within 800m walk -> withinWalk true, not excluded', () => {
-  const e = finalizeWalk(offline({}), [700]);
+  const e = finalizeWalk(offline({}), [700], policy);
   assert.equal(e.withinWalk, true);
   assert.equal(e.walk?.stationZh, '東門');
   assert.equal(e.walk?.minutes, Math.round(700 / 80));
@@ -34,7 +35,7 @@ test('within 800m walk -> withinWalk true, not excluded', () => {
 });
 
 test('over 800m walk -> withinWalk false and hard-excluded with reason', () => {
-  const e = finalizeWalk(offline({ candidates: [cand('東門', '4', 800)] }), [1000]);
+  const e = finalizeWalk(offline({ candidates: [cand('東門', '4', 800)] }), [1000], policy);
   assert.equal(e.withinWalk, false);
   assert.equal(e.hardExclusion.excluded, true);
   assert.match(e.hardExclusion.reasons.join(), /10-min walk/);
@@ -42,33 +43,33 @@ test('over 800m walk -> withinWalk false and hard-excluded with reason', () => {
 
 test('picks the shortest-walk candidate, not the straight-line nearest', () => {
   const o = offline({ candidates: [cand('A', '1', 500), cand('B', '2', 550)] });
-  const e = finalizeWalk(o, [900, 650]); // straight-nearest A walks 900; B walks 650
+  const e = finalizeWalk(o, [900, 650], policy); // straight-nearest A walks 900; B walks 650
   assert.equal(e.walk?.stationZh, 'B');
   assert.equal(e.withinWalk, true);
 });
 
 test('inconsistent coordinate -> withinWalk null (manual), no auto-exclude', () => {
-  const e = finalizeWalk(offline({ coordConsistent: false }), [700]);
+  const e = finalizeWalk(offline({ coordConsistent: false }), [700], policy);
   assert.equal(e.withinWalk, null);
   assert.equal(e.reliability.reason, 'coordinate inconsistent with district');
   assert.equal(e.hardExclusion.excluded, false);
 });
 
 test('no coordinate -> withinWalk null, reason no coordinate', () => {
-  const e = finalizeWalk(offline({ candidates: [], coordinate: null }), null);
+  const e = finalizeWalk(offline({ candidates: [], coordinate: null }), null, policy);
   assert.equal(e.withinWalk, null);
   assert.equal(e.reliability.reason, 'no coordinate');
 });
 
 test('routing unavailable -> withinWalk null, routeOk false', () => {
-  const e = finalizeWalk(offline({}), null);
+  const e = finalizeWalk(offline({}), null, policy);
   assert.equal(e.withinWalk, null);
   assert.equal(e.reliability.routeOk, false);
   assert.equal(e.reliability.reason, 'routing unavailable');
 });
 
 test('implausible routed/straight ratio -> not trusted (manual)', () => {
-  const e = finalizeWalk(offline({ candidates: [cand('東門', '4', 100)] }), [500]); // ratio 5
+  const e = finalizeWalk(offline({ candidates: [cand('東門', '4', 100)] }), [500], policy); // ratio 5
   assert.equal(e.withinWalk, null);
   assert.equal(e.reliability.routeOk, false);
   assert.equal(e.reliability.reason, 'route ratio implausible');
@@ -88,7 +89,7 @@ test('pickWalk: null routed -> routing unavailable', () => {
 });
 
 test('auction keyword -> advisory signal, not hard-excluded', () => {
-  const e = finalizeWalk(offline({ hasAuction: true }), [600]);
+  const e = finalizeWalk(offline({ hasAuction: true }), [600], policy);
   assert.equal(e.withinWalk, true);
   assert.equal(e.signals.auctionKeyword, true);
   assert.equal(e.hardExclusion.excluded, false);
@@ -96,51 +97,61 @@ test('auction keyword -> advisory signal, not hard-excluded', () => {
 });
 
 test('no auction keyword -> signal false', () => {
-  const e = finalizeWalk(offline({ hasAuction: false }), [600]);
+  const e = finalizeWalk(offline({ hasAuction: false }), [600], policy);
   assert.equal(e.signals.auctionKeyword, false);
   assert.equal(e.hardExclusion.excluded, false);
 });
 
-test('finalizeWalk computes tenure from listingHistory + targetDate', () => {
+test('finalizeWalk marks a listing at the maximum tenure as eligible', () => {
   const o = offline({
     listingHistory: [
       { date: '2026-06-26', source: '樂屋網', price: '1588', active: true },
-      { date: '2025-09-07', source: '591', price: '1588', active: false },
+      { date: '2025-06-26', source: '591', price: '1588', active: false },
     ],
   });
-  const e = finalizeWalk(o, [700], '2026-06-26');
-  assert.equal(e.tenure.firstListedDate, '2025-09-07');
-  assert.equal(e.tenure.daysOnMarket, 292);
+  const e = finalizeWalk(o, [700], policy);
+  assert.equal(e.tenure.firstListedDate, '2025-06-26');
+  assert.equal(e.tenure.daysOnMarket, 365);
   assert.equal(e.tenure.priceTrend, 'flat');
+  assert.equal(e.tenureGate, 'eligible');
 });
 
-test('finalizeWalk tenure is empty when there is no history', () => {
-  const e = finalizeWalk(offline({}), [700], '2026-06-26');
+test('finalizeWalk marks a listing beyond the maximum tenure as expired', () => {
+  const e = finalizeWalk(offline({
+    listingHistory: [{ date: '2025-06-25', source: '591', price: '1588', active: true }],
+  }), [700], policy);
+  assert.equal(e.tenure.daysOnMarket, 366);
+  assert.equal(e.tenureGate, 'expired');
+});
+
+test('finalizeWalk marks missing listing history for review', () => {
+  const e = finalizeWalk(offline({}), [700], policy);
   assert.equal(e.tenure.recordCount, 0);
   assert.equal(e.tenure.daysOnMarket, null);
+  assert.equal(e.tenureGate, 'review');
 });
 
 test('regionGate in: allowlist station within walk', () => {
-  const e = finalizeWalk(offline({ candidates: [cand('東門', '4', 600)] }), [700]);
+  const e = finalizeWalk(offline({ candidates: [cand('東門', '4', 600)] }), [700], policy);
   assert.equal(e.regionGate, 'in');
 });
 
 test('regionGate out-of-region: nearest station not in allowlist', () => {
-  const e = finalizeWalk(offline({ candidates: [cand('後山埤', '1', 600)] }), [700]);
+  const e = finalizeWalk(offline({ candidates: [cand('後山埤', '1', 600)] }), [700], policy);
   assert.equal(e.regionGate, 'out-of-region');
 });
 
 test('regionGate in-region-too-far: allowlist station but >10-min walk', () => {
-  const e = finalizeWalk(offline({ candidates: [cand('東門', '4', 800)] }), [1000]);
+  const e = finalizeWalk(offline({ candidates: [cand('東門', '4', 800)] }), [1000], policy);
   assert.equal(e.regionGate, 'in-region-too-far');
 });
 
 test('regionGate review: unreliable coordinate', () => {
-  const e = finalizeWalk(offline({ coordConsistent: false }), [700]);
+  const e = finalizeWalk(offline({ coordConsistent: false }), [700], policy);
   assert.equal(e.regionGate, 'review');
 });
 
 test('regionGate matches classifyRegion of walk.stationZh + withinWalk', () => {
-  const e = finalizeWalk(offline({ candidates: [cand('大安', '2', 600)] }), [650]);
+  const e = finalizeWalk(offline({ candidates: [cand('大安', '2', 600)] }), [650], policy);
   assert.equal(e.regionGate, classifyRegion(e.walk?.stationZh ?? null, e.withinWalk));
 });

@@ -176,6 +176,7 @@ function listing(overrides: Partial<PreMarketEnrichedListing> = {}): PreMarketEn
     signals: { auctionKeyword: false },
     hardExclusion: { excluded: false, reasons: [] },
     tenure: { firstListedDate: null, daysOnMarket: null, recordCount: 0, sourceCount: 0, priceTrend: 'unknown', firstPrice: null, latestPrice: null },
+    tenureGate: 'review',
     ...overrides,
   };
 }
