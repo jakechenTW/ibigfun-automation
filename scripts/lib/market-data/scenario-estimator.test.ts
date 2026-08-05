@@ -652,6 +652,40 @@ test('invalid asking totals keep the scenario reviewable', () => {
   assert.equal(result.scenarios[0]?.status, 'review');
 });
 
+test('use scenarios expose only the allowed evidence fields', () => {
+  const result = estimateMarketScenarios(
+    {
+      ...unknownUseSubject,
+      registeredUse: { value: 'residential', source: 'official', detail: '使用執照' },
+    },
+    indexWithTransactions([99, 100, 101].map((price, index) =>
+      transaction(`residential-${index}`, 'residential', price),
+    )),
+    fresh,
+    AS_OF,
+    scenarioAcceptance,
+  );
+  const scenario = result.scenarios[0];
+  assert.ok(scenario);
+
+  assert.deepEqual(Object.keys(scenario).sort(), [
+    'bundleComparables',
+    'bundleValue',
+    'comparables',
+    'confidence',
+    'gradeCounts',
+    'marketUnitPriceMedian',
+    'marketUnitPriceP25',
+    'marketUnitPriceP75',
+    'parkingEstimate',
+    'primaryUse',
+    'reasons',
+    'role',
+    'selectedStage',
+    'status',
+  ]);
+});
+
 test('a required but unavailable parking model prevents a reliable scenario', () => {
   const result = estimateMarketScenarios(
     {

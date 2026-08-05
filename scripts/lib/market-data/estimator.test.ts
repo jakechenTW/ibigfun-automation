@@ -106,6 +106,25 @@ test('reliable estimates expose quantile valuation evidence', () => {
   assert.equal(estimate.status, 'reliable');
 });
 
+test('market estimates expose only the allowed evidence fields', () => {
+  const estimate = estimateMarket(subject, indexWithPrices([90, 100, 100, 110, 120]), fresh, AS_OF);
+
+  assert.deepEqual(Object.keys(estimate).sort(), [
+    'comparables',
+    'confidence',
+    'excludedCandidates',
+    'marketUnitPriceMedian',
+    'marketUnitPriceP25',
+    'marketUnitPriceP75',
+    'selectedStage',
+    'sourceFreshness',
+    'status',
+    'subjectLocationEvidence',
+    'subjectOwnershipEvidence',
+    'unavailableReasons',
+  ]);
+});
+
 test('wide IQR cannot be reliable', () => {
   const estimate = estimateMarket(subject, indexWithPrices([60, 80, 100, 130, 160]), fresh, AS_OF);
   assert.equal(estimate.status, 'review');
