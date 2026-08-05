@@ -187,7 +187,6 @@ export interface UseScenarioEstimate {
   marketUnitPriceP25: number | null;
   marketUnitPriceMedian: number | null;
   marketUnitPriceP75: number | null;
-  askingPremiumConservative: number | null;
   bundleValue: BundleValueQuantiles | null;
   parkingEstimate: ParkingImputationEvidence | null;
   gradeCounts: Record<ParkingGrade, number>;
@@ -254,8 +253,6 @@ export interface MarketEstimate {
   marketUnitPriceMedian: number | null;
   marketUnitPriceP25: number | null;
   marketUnitPriceP75: number | null;
-  askingPremiumMedian: number | null;
-  askingPremiumConservative: number | null;
   selectedStage: number | null;
   sourceFreshness: SourceFreshness;
   unavailableReasons: string[];

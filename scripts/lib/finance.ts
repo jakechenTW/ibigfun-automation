@@ -32,26 +32,6 @@ export function mortgageForPrice(totalPriceNtd: number): number {
 }
 
 /**
- * Discount vs market, in percent: positive means below market.
- * NOTE: the investment screen now frames the metric as 開價溢價 (asking premium)
- * = −discountPercent. Kept as a utility; see docs/reporting-rules.md (Calculations).
- */
-export function discountPercent(
-  marketUnitPrice: number,
-  listingUnitPrice: number,
-): number {
-  return ((marketUnitPrice - listingUnitPrice) / marketUnitPrice) * 100;
-}
-
-/** Asking premium vs market, in percent: positive means the listing is above market. */
-export function askingPremiumPercent(
-  listingUnitPrice: number,
-  marketUnitPrice: number,
-): number {
-  return ((listingUnitPrice - marketUnitPrice) / marketUnitPrice) * 100;
-}
-
-/**
  * Rent coverage ratio: monthly rent / monthly mortgage payment.
  * Advisory display only — the investment screen no longer gates buckets on this
  * (rent is too unreliable to gate). See docs/reporting-rules.md (Rent).

@@ -634,7 +634,7 @@ test('high joint parking uncertainty downgrades accepted grade-B evidence to low
   assert.ok(scenario.reasons.includes('parking-imputation-uncertainty-high'));
 });
 
-test('invalid asking totals cannot leak NaN into a scenario premium', () => {
+test('invalid asking totals keep the scenario reviewable without premium output', () => {
   const result = estimateMarketScenarios(
     {
       ...unknownUseSubject,
@@ -649,8 +649,8 @@ test('invalid asking totals cannot leak NaN into a scenario premium', () => {
     scenarioAcceptance,
   );
 
-  assert.equal(result.scenarios[0]?.askingPremiumConservative, null);
   assert.equal(result.scenarios[0]?.status, 'review');
+  assert.equal(Object.hasOwn(result.scenarios[0]!, 'askingPremiumConservative'), false);
 });
 
 test('a required but unavailable parking model prevents a reliable scenario', () => {

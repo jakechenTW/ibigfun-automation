@@ -98,11 +98,14 @@ function indexWithTransactions(transactions: MarketTransaction[]): TransactionIn
   };
 }
 
-test('median qualifies but P25 crossing threshold stays reviewable', () => {
+test('reliable estimates expose quantiles without asking-premium outputs', () => {
   const estimate = estimateMarket({ ...subject, askingUnitPriceWan: 105 }, indexWithPrices([90, 100, 100, 110, 120]), fresh, AS_OF);
-  assert.equal(estimate.askingPremiumMedian, 5);
-  assert.ok((estimate.askingPremiumConservative ?? 0) > estimate.askingPremiumMedian!);
+  assert.equal(estimate.marketUnitPriceP25, 97.5);
+  assert.equal(estimate.marketUnitPriceMedian, 100);
+  assert.equal(estimate.marketUnitPriceP75, 112.5);
   assert.equal(estimate.status, 'reliable');
+  assert.equal(Object.hasOwn(estimate, 'askingPremiumMedian'), false);
+  assert.equal(Object.hasOwn(estimate, 'askingPremiumConservative'), false);
 });
 
 test('wide IQR cannot be reliable', () => {
@@ -135,7 +138,6 @@ test('evaluation mode allows a missing asking price but not an invalid supplied 
   );
 
   assert.equal(hiddenOutcome.status, 'reliable');
-  assert.equal(hiddenOutcome.askingPremiumMedian, null);
   assert.equal(invalidAskingPrice.status, 'unavailable');
   assert.ok(invalidAskingPrice.unavailableReasons.includes('invalid-asking-unit-price'));
 });

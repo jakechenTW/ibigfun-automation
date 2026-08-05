@@ -1,4 +1,3 @@
-import { askingPremiumPercent } from '../finance.ts';
 import { neighborGridKeys } from './grid.ts';
 import {
   ACTIVE_ESTIMATOR_POLICY,
@@ -30,7 +29,7 @@ function hasBuildingUnitPrice(candidate: ComparableEvidence): candidate is Price
 }
 
 export interface EstimateMarketOptions {
-  /** Backtests intentionally hide the held-out actual price, so premiums are unavailable. */
+  /** Backtests intentionally hide the held-out actual asking price. */
   allowMissingAskingUnitPrice?: boolean;
   policy?: EstimatorPolicy;
 }
@@ -154,8 +153,6 @@ export function estimateMarket(
       marketUnitPriceMedian: null,
       marketUnitPriceP25: null,
       marketUnitPriceP75: null,
-      askingPremiumMedian: null,
-      askingPremiumConservative: null,
       selectedStage: null,
       sourceFreshness: freshness,
       unavailableReasons: hardReasons,
@@ -181,8 +178,6 @@ export function estimateMarket(
       marketUnitPriceMedian: null,
       marketUnitPriceP25: null,
       marketUnitPriceP75: null,
-      askingPremiumMedian: null,
-      askingPremiumConservative: null,
       selectedStage: selection.selectedStage,
       sourceFreshness: freshness,
       unavailableReasons: ['review-only-comparables'],
@@ -201,8 +196,6 @@ export function estimateMarket(
       marketUnitPriceMedian: null,
       marketUnitPriceP25: null,
       marketUnitPriceP75: null,
-      askingPremiumMedian: null,
-      askingPremiumConservative: null,
       selectedStage: selection.selectedStage,
       sourceFreshness: freshness,
       unavailableReasons,
@@ -235,8 +228,6 @@ export function estimateMarket(
     marketUnitPriceMedian: median,
     marketUnitPriceP25: p25,
     marketUnitPriceP75: p75,
-    askingPremiumMedian: subject.askingUnitPriceWan === null ? null : askingPremiumPercent(subject.askingUnitPriceWan, median),
-    askingPremiumConservative: subject.askingUnitPriceWan === null ? null : askingPremiumPercent(subject.askingUnitPriceWan, p25),
     selectedStage: selection.selectedStage,
     sourceFreshness: freshness,
     unavailableReasons,

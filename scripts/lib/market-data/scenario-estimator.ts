@@ -1,4 +1,3 @@
-import { askingPremiumPercent } from '../finance.ts';
 import {
   ACTIVE_ESTIMATOR_POLICY,
   HIGH_CONFIDENCE_MIN_COMPARABLES,
@@ -272,7 +271,6 @@ function insufficientScenario(
     marketUnitPriceP25: null,
     marketUnitPriceMedian: null,
     marketUnitPriceP75: null,
-    askingPremiumConservative: null,
     bundleValue: null,
     parkingEstimate: null,
     gradeCounts: gradeCounts(comparables, bundleComparables),
@@ -296,7 +294,6 @@ function unavailableScenario(
     marketUnitPriceP25: null,
     marketUnitPriceMedian: null,
     marketUnitPriceP75: null,
-    askingPremiumConservative: null,
     bundleValue: null,
     parkingEstimate: null,
     gradeCounts: { A: 0, B: 0, C: 0 },
@@ -417,9 +414,6 @@ function estimateScenario(
     marketUnitPriceP25: p25,
     marketUnitPriceMedian: median,
     marketUnitPriceP75: p75,
-    askingPremiumConservative: bundleValue && finitePositive(subject.askingTotalPriceNtd)
-      ? askingPremiumPercent(subject.askingTotalPriceNtd, bundleValue.p25Ntd)
-      : null,
     bundleValue,
     parkingEstimate: publicParkingEvidence(parking),
     gradeCounts: gradeCounts(weighted.comparables, bundleComparables),
