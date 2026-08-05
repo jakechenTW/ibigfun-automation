@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { availableProfileIds, loadProfile, resolveProfileFromArgs, profileFlags, type Profile } from './profiles.ts';
+import { availableProfileIds, loadProfile, parseProfile, resolveProfileFromArgs, profileFlags, type Profile } from './profiles.ts';
 
 test('availableProfileIds discovers on-disk profile folders, sorted', () => {
   const ids = availableProfileIds();
@@ -23,6 +23,26 @@ test('loadProfile reads owner-occupied fetch arrays + ranges', () => {
   assert.deepEqual(p.fetch.house_type, ['17']);
   assert.deepEqual(p.fetch.house_age_segment, { max: 25 });
   assert.equal(p.fetch.parking, '平面');
+});
+
+test('loadProfile reads required listing-age policy', () => {
+  assert.equal(loadProfile('example-investment').evaluation.maxDaysOnMarket, 365);
+  assert.equal(loadProfile('example-owner-occupied').evaluation.maxDaysOnMarket, 365);
+});
+
+test('parseProfile rejects invalid maxDaysOnMarket', () => {
+  const base = { displayName: 'x', fetch: {}, evaluation: { maxDaysOnMarket: 365 } };
+  assert.throws(() => parseProfile('x', { ...base, evaluation: undefined }), /evaluation must be an object/);
+  assert.throws(() => parseProfile('x', { ...base, evaluation: {} }), /non-negative integer/);
+  assert.throws(() => parseProfile('x', { ...base, evaluation: { maxDaysOnMarket: -1 } }), /non-negative integer/);
+  assert.throws(() => parseProfile('x', { ...base, evaluation: { maxDaysOnMarket: 1.5 } }), /non-negative integer/);
+  assert.throws(() => parseProfile('x', { ...base, evaluation: { maxDaysOnMarket: '365' } }), /non-negative integer/);
+});
+
+test('fetch overrides preserve evaluation policy', () => {
+  const p = resolveProfileFromArgs(['--profile', 'example-investment', '--set', 'fetch.city=2']);
+  assert.equal(p.fetch.city, '2');
+  assert.equal(p.evaluation.maxDaysOnMarket, 365);
 });
 
 test('loadProfile rejects an unknown id with available ids', () => {

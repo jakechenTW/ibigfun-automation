@@ -1,5 +1,6 @@
 {
   "displayName": "iBigFun 台北投資房源監測（範例）",
+  "evaluation": { "maxDaysOnMarket": 365 },
   "fetch": {
     "city": "1",
     "house_type": ["16", "17"],

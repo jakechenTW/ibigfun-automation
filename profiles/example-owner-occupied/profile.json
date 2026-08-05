@@ -1,5 +1,6 @@
 {
   "displayName": "iBigFun 台北自住房源監測（範例）",
+  "evaluation": { "maxDaysOnMarket": 365 },
   "fetch": {
     "city": "1",
     "town": ["1", "4"],

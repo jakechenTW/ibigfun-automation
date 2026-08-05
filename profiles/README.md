@@ -14,7 +14,7 @@ field anywhere — rename the folder to rename the profile.
 ```
 profiles/
   example-investment/        # id = folder name
-    profile.json             # data: displayName + fetch filter map
+    profile.json             # data: displayName + evaluation policy + fetch filter map
     evaluation.md            # agent-facing evaluation rules (criteria, buckets, judgment)
     notify-template.md       # report / notification structure
   example-owner-occupied/
@@ -36,8 +36,8 @@ any of them. Folders are named `<family>-<city>` so future regional variants
 
 The three files:
 
-- **`profile.json`** — pure data: the human label and the `fetch` filter map
-  (the only structured condition block; it decides what the API returns).
+- **`profile.json`** — pure data: the human label, required listing-age policy,
+  and the `fetch` filter map (which decides what the API returns).
 - **`evaluation.md`** — all agent-side judgment the `fetch` can't express:
   region gates, bucketing, data-quality, suspicious/auction risk, market-price
   estimation, hard criteria as prose. It references the shared
@@ -50,6 +50,7 @@ The three files:
 ```json
 {
   "displayName": "iBigFun 台北投資房源監測（範例）",
+  "evaluation": { "maxDaysOnMarket": 365 },
   "fetch": {
     "city": "1",
     "price_segment": { "max": 3000 },
@@ -62,12 +63,15 @@ The three files:
 | Field         | Type   | Required | Meaning |
 |---------------|--------|----------|---------|
 | `displayName` | string | yes      | The single human-readable label. Used for the console run hint **and** as the notification `ai-notify --task` label. |
+| `evaluation` | object | yes | Structured evaluation policy. |
+| `evaluation.maxDaysOnMarket` | non-negative integer | yes | Inclusive maximum listing age in days: a listing is within policy when its age is ≤ this value. |
 | `fetch`       | object | yes      | Generic filter map → `/api/search/list` body params (see below). |
 
 There is **no `id` field** — the id is the folder name. There is no
 `notifyTask`, `ruleDocPath`, `templatePath`, `fetchFilters`, `hardCriteria`, or
-`requiresFilterVerification`; those were removed. Conditions have exactly two
-homes: `fetch` (objective filter) and `evaluation.md` (agent judgment).
+`requiresFilterVerification`; those were removed. Conditions have three homes:
+`fetch` (objective API filter), `evaluation.maxDaysOnMarket` (structured
+listing-age policy), and `evaluation.md` (agent judgment).
 
 ## The `fetch` encoding
 
@@ -105,6 +109,7 @@ A worked example using each value shape. Say you want **台中市 北屯/西屯�
 ```json
 {
   "displayName": "台中北屯西屯電梯華廈自住監測",
+  "evaluation": { "maxDaysOnMarket": 365 },
   "fetch": {
     "city": "9",
     "town": ["100", "101"],
@@ -155,7 +160,8 @@ Notes:
 ## Ad-hoc overrides (`--set` / `--unset`)
 
 One-off conditions that should **not** be committed to the profile are layered
-on at the command line. They target the `fetch` block only:
+on at the command line. They target the `fetch` block only; the required
+`evaluation.maxDaysOnMarket` policy is unavailable to `--set` and `--unset`:
 
 - `--set fetch.<key>=<val>` — e.g. `--set fetch.price_segment.max=3000`
 - `--unset fetch.<path>` — e.g. `--unset fetch.total_floor`
@@ -187,6 +193,8 @@ language and the agent reasons via `evaluation.md`.
 - **Missing file** — the folder lacks `evaluation.md` or `notify-template.md`.
 - **Missing/empty `displayName`** — must be a non-empty string.
 - **Missing/invalid `fetch`** — must be an object.
+- **Missing/invalid `evaluation`** — must be an object with a non-negative
+  integer `maxDaysOnMarket`.
 - **Bad override path** — `--set`/`--unset` paths must start with `fetch.`
   (e.g. `--set fetch.price_segment.max=3000`); `--set` needs `key=value`.
 

@@ -28,7 +28,7 @@ test('enrich performs no market refresh or ORS work for an empty listing run', a
     fs.rmSync(isolatedCwd, { recursive: true, force: true });
   });
 
-  const profile = { id: 'test-read-only-enrich', displayName: 'test', fetch: {} };
+  const profile = { id: 'test-read-only-enrich', displayName: 'test', fetch: {}, evaluation: { maxDaysOnMarket: 365 } };
   const range = { from: '0003-03-05', to: '0003-03-05', label: '0003-03-05' };
   const dir = runDir(profile.id, range.label);
   fs.mkdirSync(dir, { recursive: true });

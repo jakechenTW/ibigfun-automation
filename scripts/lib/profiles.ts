@@ -7,6 +7,11 @@ export interface Profile {
   id: string;
   displayName: string;
   fetch: FetchMap;
+  evaluation: ProfileEvaluation;
+}
+
+export interface ProfileEvaluation {
+  maxDaysOnMarket: number;
 }
 
 export interface RunContext {
@@ -98,6 +103,27 @@ function assertFetch(value: unknown): FetchMap {
   return value as FetchMap;
 }
 
+function assertEvaluation(value: unknown): ProfileEvaluation {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('invalid profile: evaluation must be an object');
+  }
+  const maxDaysOnMarket = (value as Record<string, unknown>).maxDaysOnMarket;
+  if (typeof maxDaysOnMarket !== 'number' || !Number.isSafeInteger(maxDaysOnMarket) || maxDaysOnMarket < 0) {
+    throw new Error('invalid profile: evaluation.maxDaysOnMarket must be a non-negative integer');
+  }
+  return { maxDaysOnMarket };
+}
+
+export function parseProfile(id: string, parsed: unknown): Profile {
+  const o = parsed as Record<string, unknown>;
+  return {
+    id,
+    displayName: assertString(o.displayName, 'displayName'),
+    fetch: assertFetch(o.fetch),
+    evaluation: assertEvaluation(o.evaluation),
+  };
+}
+
 export function loadProfile(id: string): Profile {
   const dir = path.join(PROFILE_DIR, id);
   const file = path.join(dir, 'profile.json');
@@ -110,12 +136,7 @@ export function loadProfile(id: string): Profile {
   } catch (e) {
     throw new Error(`failed to read profile "${id}": ${(e as Error).message}`);
   }
-  const o = parsed as Record<string, unknown>;
-  const profile: Profile = {
-    id,
-    displayName: assertString(o.displayName, 'displayName'),
-    fetch: assertFetch(o.fetch),
-  };
+  const profile = parseProfile(id, parsed);
   for (const f of ['evaluation.md', 'notify-template.md']) {
     if (!fs.existsSync(path.join(dir, f))) {
       throw new Error(`invalid profile "${id}": missing ${f}`);
