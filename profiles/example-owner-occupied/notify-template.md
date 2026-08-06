@@ -1,20 +1,14 @@
-## iBigFun 每日自住房源監測（範例） - {{date}}
+## {{status_icon}} {{date}} 自住房源｜{{headline}}
 
-**結論：{{conclusion}}**
+{{conclusion}}
 
-### 快速摘要
+**新案 {{new_listing_count}}｜符合 {{matched_count}}｜候選 {{candidate_count}}｜風險 {{risk_count}}｜排除 {{excluded_count}}**
 
-- Profile：owner-occupied
-- 新刊登物件：{{new_listing_count}} 筆
-- 刊登年限｜超過上限：{{tenure_expired_count}} 筆・待確認：{{tenure_review_count}} 筆
-- 符合條件：{{matched_count}} 筆
-- 候選／資料待確認：{{candidate_count}} 筆
-- 風險物件／待查：{{risk_count}} 筆
-- 排除摘要：{{excluded_count}} 筆
-- 官方行情｜可靠：{{market_reliable_count}} 筆・待覆核：{{market_review_count}} 筆・不可用：{{market_unavailable_count}} 筆・資料偏舊：{{market_stale_count}} 筆
-- 主要排除原因：{{main_exclusion_reasons}}
-- Filter 對照狀態：{{filter_verification_status}}
-- 自住條件：總價 <= 8000 萬、類型 電梯大樓（house_type=17）、7 樓以上、主建物 >= 30 坪、屋齡 <= 25 年、平面車位
+{{#if data_warning}}
+
+> ⚠️ {{data_warning}}
+
+{{/if}}
 
 ### 符合條件
 
@@ -22,27 +16,24 @@
 
 {{#each matched}}
 
-#### {{rank}}. [{{title}}]({{url}}) ｜ {{match_summary}}
+#### {{rank}}. [{{title}}]({{url}})
 
+- {{price}} 萬・{{ping}} 坪・{{unit_price}} 萬/坪・{{floor}}/{{total_floor}} 樓・屋齡 {{age}}・{{address_or_area}}
+- 格局 {{room}}房{{living_room}}廳{{bathroom}}衛・車位 {{parking}}・類型 {{type_layout}}
 - {{walk_line}}
 - {{tenure_line}}
-- {{price}} 萬／{{ping}} 坪／{{unit_price}} 萬/坪・{{floor}}/{{total_floor}} 樓・屋齡 {{age}}・{{address_or_area}}
-- 格局 {{room}}房{{living_room}}廳{{bathroom}}衛・車位 {{parking}}・類型 {{type_layout}}
-- 行情狀態 {{market_status}}｜官方中位 {{market_median_wan}} 萬/坪（P25–P75 {{market_p25_wan}}–{{market_p75_wan}}）・信心 {{market_confidence}}・可比 {{comparable_count}} 筆・階段 {{selected_stage}}・官方資料 {{official_source_date}}（{{market_freshness}}）
-{{#if market_requires_review}}
-
-- 需人工確認：{{market_manual_review_reason}}
-
-{{/if}}
+- {{market_summary_line}}
+{{#if valuation_review_line}}
 - 覆核：{{valuation_review_line}}
-- 亮點：{{strengths}}
-- 需確認：{{manual_checks}}
+{{/if}}
+- 符合：{{strengths}}
+- 下一步：{{manual_checks}}
 
 {{/each}}
 
 {{else}}
 
-- 無符合自住條件且值得立即查看的物件。
+- 今日無符合條件的物件。
 
 {{/if}}
 
@@ -52,26 +43,23 @@
 
 {{#each candidates}}
 
-#### {{rank}}. [{{title}}]({{url}}) ｜ {{candidate_reason}}
+#### {{rank}}. [{{title}}]({{url}})
 
+- {{price}} 萬・{{ping}} 坪・{{unit_price}} 萬/坪・{{floor}}/{{total_floor}} 樓・屋齡 {{age}}・{{address_or_area}}
+- 格局 {{room}}房{{living_room}}廳{{bathroom}}衛・車位 {{parking}}・類型 {{type_layout}}
 - {{walk_line}}
 - {{tenure_line}}
-- {{price}} 萬／{{ping}} 坪／{{unit_price}} 萬/坪・{{floor}}/{{total_floor}} 樓・屋齡 {{age}}・{{address_or_area}}
-- 格局 {{room}}房{{living_room}}廳{{bathroom}}衛・車位 {{parking}}・類型 {{type_layout}}
-- 行情狀態 {{market_status}}｜官方中位 {{market_median_wan}} 萬/坪（P25–P75 {{market_p25_wan}}–{{market_p75_wan}}）・信心 {{market_confidence}}・可比 {{comparable_count}} 筆・階段 {{selected_stage}}・官方資料 {{official_source_date}}（{{market_freshness}}）
-{{#if market_requires_review}}
-
-- 需人工確認：{{market_manual_review_reason}}
-
-{{/if}}
+- {{market_summary_line}}
+{{#if valuation_review_line}}
 - 覆核：{{valuation_review_line}}
-- 需確認：{{manual_checks}}
+{{/if}}
+- 下一步：{{manual_checks}}
 
 {{/each}}
 
 {{else}}
 
-- 無候選物件。
+- 今日無候選物件。
 
 {{/if}}
 
@@ -83,33 +71,27 @@
 
 #### {{rank}}. [{{title}}]({{url}}) ｜ `{{risk_label}}`
 
+- {{price}} 萬・{{ping}} 坪・{{unit_price}} 萬/坪・{{floor}}/{{total_floor}} 樓・屋齡 {{age}}・{{address_or_area}}
+- 格局 {{room}}房{{living_room}}廳{{bathroom}}衛・車位 {{parking}}・類型 {{type_layout}}
+- {{walk_line}}
 - {{tenure_line}}
-- 命中訊號：{{risk_signals}}
-- 行情狀態 {{market_status}}｜官方中位 {{market_median_wan}} 萬/坪（P25–P75 {{market_p25_wan}}–{{market_p75_wan}}）・信心 {{market_confidence}}・可比 {{comparable_count}} 筆・階段 {{selected_stage}}・官方資料 {{official_source_date}}（{{market_freshness}}）
-{{#if market_requires_review}}
-
-- 需人工確認：{{market_manual_review_reason}}
-
-{{/if}}
+- {{market_summary_line}}
+{{#if valuation_review_line}}
 - 覆核：{{valuation_review_line}}
-- 理由：{{risk_reason}}（信心：{{risk_confidence}}・{{detail_page_checked}}）
+{{/if}}
+- 風險：{{risk_reason}}（{{risk_confidence}}・{{detail_page_checked}}）
 
 {{/each}}
 
 {{else}}
 
-- 無 agent 標記為風險／待查的物件。
+- 今日無風險物件。
 
 {{/if}}
 
 ### 排除摘要
 
-- 排除筆數：{{excluded_count}} 筆
-- 其中刊登超過 profile 年限：{{tenure_expired_count}} 筆
+- 刊登超過上限：{{tenure_expired_count}} 筆
+- 自住硬性條件不符：{{hard_criteria_excluded_count}} 筆
+- 其他硬性排除：{{other_hard_exclusion_count}} 筆
 - 主要原因：{{main_exclusion_reasons}}
-
-### 規則來源
-
-- Profile config：`profile.json`
-- Profile rules：`evaluation.md`
-- 共通規則：`docs/reporting-rules.md`
