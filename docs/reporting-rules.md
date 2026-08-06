@@ -53,21 +53,19 @@ exclusion.
 
 ## Calculations
 
-- Monthly mortgage payment must use total price, 80% loan-to-value, 2.6% annual interest, and 30-year principal and interest repayment.
-- 租金覆蓋率 `估計月租 / 月房貸` 與現金流 `月租 − 房貸` 僅供參考顯示，不參與分桶或排序
-  （見下方 Rent 段）。
+- Monthly mortgage payment must use total price, 80% loan-to-value, 2.6% annual interest, and 30-year principal and interest repayment. It is workflow/local data only and never appears in `report.md`.
+- 租金覆蓋率 `估計月租 / 月房貸` 與現金流 `月租 − 房貸` 僅供 workflow/local reference，不參與分桶或排序，也不出現在 `report.md`（見下方 Rent 段）。
 
 ## Market Price (成交行情) Evidence
 
 成交行情用來提供官方市場脈絡，並驗證物件的用途、車位與可比資料品質。
-報告保留官方中位數、P25–P75 與可靠性證據，但不把待售開價與官方估值的差異當作分桶、可疑訊號或排序依據。
+完整的官方中位數、P25–P75 與可靠性證據保留在本地 evidence；`report.md` 只使用精簡的 `market_summary_line`，且不把待售開價與官方估值的差異當作分桶、可疑訊號或排序依據。
 
 ### 預設來源與可靠性閘門
 
 `enriched.json` 的 `marketEstimate` 是成交行情的預設且權威的工作來源：它以本地、版本化的
-內政部實價登錄與台北市門牌資料選出可比成交。報告必須顯示 `reliable`、`review` 或
-`unavailable`，以及中位數、P25–P75、信心、可比筆數、選用階段與官方資料日期/新鮮度。
-通知只顯示這個摘要；完整可比成交及其排除理由留在 git-ignored 的 `enriched.json`，不可整份貼進通知。
+內政部實價登錄與台北市門牌資料選出可比成交。完整的 status、中位數、P25–P75、信心、可比筆數、選用階段與官方資料日期/新鮮度都保留在 git-ignored 的 `enriched.json` 和本地 evidence。
+`report.md` 只顯示由該證據組成的精簡 `market_summary_line`：可靠資料可顯示官方中位數及可比筆數；review/unavailable 則顯示人類可讀的原因。不可逐筆顯示 raw status、P25–P75、階段、信心 enum、資料日期或完整可比／原因清單。
 
 - 門牌索引與交易查找共用結構化的 base-doorplate key（市／區／路、選填段巷弄、號與子號），
   只有明確且完整的樓層／戶別文法可移除後再配對；`附近`、`隔壁巷` 或混合／不完整尾碼一律
@@ -136,12 +134,10 @@ P25/中位/P75、兩邊單價皆有時的差異、是否採納、理由與結果
 - 產權類型與 profile 或官方證據不相容是重要資料品質／風險訊號，放入
   `風險物件／待查`；若已確認違反 profile 硬性產權條件，則排除並說明。
 
-## Rent (預估月租金，僅供參考)
+## Rent (預估月租金，workflow/local only)
 
-- 租金降為純參考：只顯示 `月租 ~X（參考·低信心）` 與 `現金流 ~Y/月（參考）`
-  （現金流 = 月租 − 房貸），**永不影響分桶或排序**。
-- 由 agent 粗估同區同類型可比租金即可；不建租金資料集。標來源（若有）與低信心。
-- 一律提醒人工確認實際可租金額與空置期。
+- 租金為純 workflow/local 參考（現金流 = 月租 − 房貸），**永不影響分桶或排序，也不出現在 `report.md`**。
+- agent 可粗估同區同類型可比租金，不建租金資料集；來源（若有）、低信心和實際可租金額／空置期確認均留在本地 workflow data。
 
 ## Manual Checks
 
@@ -261,8 +257,11 @@ precedence over a positive or clean-data candidate bucket.
 - Put one conclusion sentence first, followed by one compact count line. Render `data_warning` only when stale, weak, missing, or inconsistent data affects safe interpretation.
 - List every positive, candidate, and risk property. Summarize excluded properties by valid hard reason and count; never list excluded properties individually.
 - Every individually rendered property shows total price, area, asking unit price, profile-relevant basics, `walk_line`, `tenure_line`, `market_summary_line`, and one bucket reason or next action.
-- Keep the current Google Maps coordinate-link and three-state walking composition. Apply it to positive, candidate, and risk buckets.
-- Keep `今日上架`, known days on market plus `未降價`/`曾降價`/`曾調漲`, and `刊登天數待確認` fallbacks.
+- Compose `walk_line` from enriched `walk` and `coordinate`, and apply it to positive, candidate, and risk buckets:
+  - Reliable `walk`: `🚶 {stationZh} {exitId} 號出口・{minutes} 分鐘（[地圖](https://www.google.com/maps?q=<lat>,<lng>)）`; omit the 出口 segment when `exitId` is absent.
+  - Unreliable `walk` with a coordinate: `🚶 約{station}・步行待確認（[地圖](https://www.google.com/maps?q=<lat>,<lng>)）`; when no station is inferred, use `🚶 步行待人工確認（[地圖](https://www.google.com/maps?q=<lat>,<lng>)）`.
+  - No coordinate: `🚶 無位置資訊` (without a map link).
+- Compose `tenure_line` from enriched `tenure`: `🕒 今日上架` for `daysOnMarket === 0`; for known tenure use `🕒 已刊登 {daysOnMarket} 天` plus `・未降價`, `・曾降價 {firstPrice}→{latestPrice}萬`, or `・曾調漲 {firstPrice}→{latestPrice}萬` for the known price history. When history or days are unknown, use `🕒 刊登天數待確認`; never invent a price-history value.
 - Omit an unavailable optional segment instead of printing repeated `—`. Convert decision-relevant missing data into a short action phrase; never invent a value.
 - Compose `market_summary_line` from authoritative `marketEstimate`: reliable evidence may show the official median and comparable count; review/unavailable evidence states the human-readable reason. Do not print raw status syntax, P25-P75, internal stage, raw confidence enum, source-check date, or the full reason list per property.
 - Any stale official source remains visible in the top warning and affected listing, forces `warn`, and blocks an automatic positive bucket.

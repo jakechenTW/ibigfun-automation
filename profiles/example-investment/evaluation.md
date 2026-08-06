@@ -23,13 +23,13 @@ Use this profile for rental-yield-oriented investment screening.
   只進「快速摘要」的稽核計數行（見 `docs/reporting-rules.md` Region Gate 與
   `data/region-allowlist.md`）。`regionGate === 'review'`（`withinWalk === null`）不排除，
   送 triage／人工。
-- 租金覆蓋率與現金流僅供參考顯示，不參與分桶或排序。
+- 租金覆蓋率與現金流僅供 workflow/local 參考，不參與分桶或排序，也不出現在通知。
 
 ## Estimation
 
 - 行情：使用 enriched `marketEstimate` 的官方中位數及 P25–P75 作為市場脈絡與可靠性證據；
   不用待售開價與官方估值的差異決定分桶或排序。
-  完整可比證據留在本地 `enriched.json`，通知只呈現筆數、階段、信心和資料日期。詳見
+  完整可比證據留在本地 `enriched.json`；通知只呈現 `market_summary_line`。詳見
   `docs/reporting-rules.md`（Market Price Evidence）。
 - 僅能對低信心、review/unavailable 或其他有明確可解決行情疑點的少數物件做有界外部覆核；外部值不覆寫官方值。
   若外部覆核影響分桶，必須寫同 run 的 `valuation-review.json`，否則不可改桶。
