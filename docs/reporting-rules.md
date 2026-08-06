@@ -255,45 +255,21 @@ precedence over a positive or clean-data candidate bucket.
 
 ## Notification Format
 
-- Send with the canonical `ai-notify` command in `AGENTS.md`, which also defines the `ok`/`warn`/`fail` status selection.
-- Use Markdown.
-- Do not use tables.
-- Put the quick summary before listing details.
-- Add a Markdown link to every listing title.
-- Render `detail_page_checked` as a short phrase (e.g. 已點詳情頁 / 未查證), not a raw boolean.
-- Compose walk lines from the listing's enriched `walk` and `coordinate`:
-  - Reliable (`walk` present): `🚶 {stationZh} {exitId} 號出口・{minutes} 分鐘（[地圖]({map_url})）`. If `exitId` is missing, drop the 出口 part: `🚶 {stationZh}・{minutes} 分鐘（[地圖]({map_url})）`.
-  - Unreliable but `coordinate` present (`walk` is null — e.g. coordinate inconsistent, route ratio implausible): show the triage result and mark it pending: `🚶 約{station}・步行待確認（[地圖]({map_url})）`, or `🚶 步行待人工確認（[地圖]({map_url})）` when no station can be inferred.
-  - No `coordinate`: `🚶 無位置資訊` (no map link).
-- Map link `{map_url}` is exactly `https://www.google.com/maps?q=<lat>,<lng>` using the listing `coordinate`, with link text `地圖`.
-- Emit the 🕒 tenure line (`{{tenure_line}}`) in every listing block unless a
-  profile template explicitly omits tenure. Compose it from the listing's
-  enriched `tenure`:
-  - `recordCount === 0` (no 刊登紀錄 parsed): `🕒 刊登史不明`.
-  - `daysOnMarket` is `0` (earliest record is the target date — genuinely fresh): `🕒 本日新上架`.
-  - Otherwise: `🕒 已刊登 {daysOnMarket} 天・{price_part}（最早 {firstListedDate}・{sourceCount} 來源）`, where `{price_part}` is:
-    - `priceTrend === 'flat'` → `未降價`
-    - `priceTrend === 'dropped'` → `曾降價 {firstPrice}→{latestPrice}萬`
-    - `priceTrend === 'raised'` → `曾調漲 {firstPrice}→{latestPrice}萬`
-    - `priceTrend === 'unknown'` → drop the `・{price_part}` segment entirely: `🕒 已刊登 {daysOnMarket} 天（最早 {firstListedDate}・{sourceCount} 來源）`
-  Apply the enriched `tenureGate` before each profile's remaining criteria:
-  - `eligible`: continue through the selected profile's remaining criteria.
-  - `expired`: exclude; never recommend or place in a candidate bucket.
-  - `review`: never auto-recommend; place a clean listing in `候選／資料待確認`.
-  - A suspicious/likely-auction or other verified risk verdict takes precedence and goes to `風險物件／待查`.
-  An `expired` gate remains a hard exclusion; for non-expired listings, the risk verdict takes
-  precedence over the positive or candidate route. Every profile quick summary must separately
-  show the `tenureExpired` and `tenureReview` counts.
-- When any field (月租, 現金流, 行情, 屋齡, 地址 等) is null, render it as `—` rather than dropping the line.
-- For every evaluated listing, render one compact market-evidence line: status (`reliable` / `review` / `unavailable`), official median and P25–P75 when available, confidence, comparable count, selected stage, official source date, and freshness. A `review` or `unavailable` result must say `需人工確認`; do not imply it is a reliable valuation.
-- In the profile templates, set `market_requires_review` for `review` or `unavailable` and render `需人工確認：{{market_manual_review_reason}}`; the reason is a compact summary of `unavailableReasons`/freshness, never raw comparables. Apply this to every individually rendered bucket.
-- If an external valuation was consulted, render one compact review line. Do not embed raw comparables or the external response in the notification.
-- Render each listed property with a 1-based `rank` value inside its section.
-- Use the selected profile template for bucket names, inline metrics, omitted
-  sections, exclusion-detail limits, and sorting.
-- Keep a single notification around 3,500 Chinese characters when possible.
-  Compress low-priority exclusions first; keep core numbers for the
-  highest-priority profile buckets.
+- `report.md` is the exact user-facing Markdown body sent to `ai-notify`; do not create a second notification artifact.
+- Use `✅` for `ok`, `⚠️` for `warn`, and `❌` for `fail`. The title contains the date/range, profile purpose, and primary outcome.
+- Pass the same concise status-icon/date/outcome wording through `pipeline mark report --title`; do not use a generic notifier title that disagrees with the report heading.
+- Put one conclusion sentence first, followed by one compact count line. Render `data_warning` only when stale, weak, missing, or inconsistent data affects safe interpretation.
+- List every positive, candidate, and risk property. Summarize excluded properties by valid hard reason and count; never list excluded properties individually.
+- Every individually rendered property shows total price, area, asking unit price, profile-relevant basics, `walk_line`, `tenure_line`, `market_summary_line`, and one bucket reason or next action.
+- Keep the current Google Maps coordinate-link and three-state walking composition. Apply it to positive, candidate, and risk buckets.
+- Keep `今日上架`, known days on market plus `未降價`/`曾降價`/`曾調漲`, and `刊登天數待確認` fallbacks.
+- Omit an unavailable optional segment instead of printing repeated `—`. Convert decision-relevant missing data into a short action phrase; never invent a value.
+- Compose `market_summary_line` from authoritative `marketEstimate`: reliable evidence may show the official median and comparable count; review/unavailable evidence states the human-readable reason. Do not print raw status syntax, P25-P75, internal stage, raw confidence enum, source-check date, or the full reason list per property.
+- Any stale official source remains visible in the top warning and affected listing, forces `warn`, and blocks an automatic positive bucket.
+- A bounded external review that affects a bucket gets one compact review conclusion. It never overwrites official evidence and raw external content remains local.
+- Never describe a listing as cheap, expensive, a deal, overpriced, suspicious, sorted, bucketed, or excludable from asking price versus official evidence.
+- Do not show mortgage, rent, cash flow, financing assumptions, generic repeated manual-check lists, rule-source footers, route/cache/enrich counters, timestamps, internal event names, or raw stack traces.
+- Keep a single notification around 3,500 Chinese characters when possible. Completeness of positive, candidate, and risk buckets takes precedence; never silently truncate.
 
 ## Rule Ownership
 

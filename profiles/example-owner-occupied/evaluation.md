@@ -54,3 +54,14 @@ Room, living-room, and bathroom counts are displayed but are not hard criteria i
   or unverified coded filter mapping (including any remaining `待驗證` entry).
 - Use `ok` only when there are no matches, candidates, or risk listings and coded filter mappings are verified.
 - Use `fail` only when the monitor cannot complete.
+
+## Notification Format
+
+- Use `notify-template.md` and the shared concise contract in `docs/reporting-rules.md`.
+- Render all `符合條件`, `候選／資料待確認`, and `風險物件／待查`; never render excluded listings individually.
+- Sort each rendered bucket by known `daysOnMarket` ascending and then total price ascending. Unknown tenure follows known tenure; verified risk still remains in the risk bucket.
+- Core facts are total price, area, asking unit price, floor, building age, address/area, room layout, flat parking, and building type when available.
+- Show `walk_line`, `tenure_line`, `market_summary_line`, and one listing-specific self-use fit, review action, or risk phrase.
+- Do not show investment-only mortgage, rent, cash-flow, coverage, or financing fields.
+- Put an unverified coded filter mapping in `data_warning`; it still forces `warn` and blocks a clean `ok` conclusion.
+- Summarize the configured tenure limit, self-use hard-criteria failures, and other confirmed hard failures by count.

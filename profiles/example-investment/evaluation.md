@@ -49,21 +49,11 @@ Use this profile for rental-yield-oriented investment screening.
 
 ## Notification Format
 
-Use `notify-template.md` for structure. These details are
-investment-specific and should not be applied to owner-occupied reports:
-
-- Each listing section header is `#### {rank}. [title](url)`; do not emit a `- 狀態：...` line because the section heading already names the bucket.
-- Do not emit the old raw `刊登日` / `publishedDate` line in recommended or
-  candidate listings; do emit `{{tenure_line}}` exactly as shown in the
-  template.
-- Recommended and candidate listings use the full compact layout: walk line, one
-  tenure line `{{tenure_line}}`, one basics line
-  `總價／坪數／單價・樓層・屋齡・地址`, one financial/evidence line
-  `官方中位/P25–P75・狀態・信心・可比筆數・階段・資料日期・房貸・月租(參考)・現金流(參考)`,
-  then compact external-review/reason/risk or manual-check lines.
-- 月租與現金流為參考欄位，標 `（參考）`；不再輸出覆蓋率。
-- Pre-excluded, risk, and excluded listings use the shorter layouts shown in the template.
-- Emit the 🚶 walk line in 推薦 and 候選／資料待確認 only; do not emit it in 風險物件／待查 or 排除物件. 區域閘門物件只計數、不逐列，故無 walk line。
-- If the target-date new-listing count is 10 or lower, list all excluded properties. If it is above 10, list only the 5 excluded properties nearest to satisfying the remaining criteria.
-- 逐筆顯示的各桶先按已知 `daysOnMarket` 由小到大、再按總價由低到高排序。刊登年限不明的
-  乾淨物件只能進候選且排在已知年限之後；若有已驗證風險，仍優先進風險桶並在該桶末位。
+- Use `notify-template.md` and the shared concise contract in `docs/reporting-rules.md`.
+- Render all `推薦物件`, `候選／資料待確認`, and `風險物件／待查`; never render excluded listings individually.
+- Sort each rendered bucket by known `daysOnMarket` ascending and then total price ascending. Unknown tenure follows known tenure; verified risk still remains in the risk bucket.
+- Core facts are total price, area, asking unit price, floor, building age, and address/area when available.
+- Show `walk_line`, `tenure_line`, `market_summary_line`, and one listing-specific recommendation, review action, or risk phrase.
+- Mortgage, estimated rent, cash flow, rental coverage, and financing assumptions remain workflow data but do not appear in the notification.
+- The exclusion summary separately counts target-station-outside, in-region-too-far, expired tenure, and other confirmed hard failures.
+- Do not emit asking-premium, conservative-price threshold, P25 gate, `p*`, or price-versus-market deal language.
