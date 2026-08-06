@@ -65,7 +65,7 @@ Trigger 也會在訊息裡告訴你要監測的區間。把它對應成 pipeline
   npm run pipeline -- fail [profile 參數] [範圍參數] --reason "<短原因>" [tool 參數]
   ```
 
-  它會記錄 run-level 失敗、用安全的 journal tail 組一份 details，送出**一則** `status=fail` 通知，然後停。送出前可先加 `--dry-run` 檢查要送的內容。
+  它會記錄 run-level 失敗、建立精簡的使用者 failure details（profile/range、可讀的中斷步驟、已遮蔽的操作原因與安全的下一步），完整 journal 保留於本機，送出**一則** `status=fail` 通知，然後停。送出前可先加 `--dry-run` 檢查要送的內容。
 
 ## 完成判準
 
