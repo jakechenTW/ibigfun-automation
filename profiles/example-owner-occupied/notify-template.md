@@ -91,7 +91,15 @@
 
 ### 排除摘要
 
+{{#if tenure_expired_count}}
 - 刊登超過上限：{{tenure_expired_count}} 筆
+{{/if}}
+{{#if hard_criteria_excluded_count}}
 - 自住硬性條件不符：{{hard_criteria_excluded_count}} 筆
+{{/if}}
+{{#if other_hard_exclusion_count}}
 - 其他硬性排除：{{other_hard_exclusion_count}} 筆
+{{/if}}
+{{#if main_exclusion_reasons}}
 - 主要原因：{{main_exclusion_reasons}}
+{{/if}}

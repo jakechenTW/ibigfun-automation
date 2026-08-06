@@ -20,9 +20,9 @@ Use this profile for rental-yield-oriented investment screening.
 - 排除：包含 `tenureGate === 'expired'`、區域／走路硬性失敗，以及其他無法解決或已確認的硬性失敗。
 - 區域閘門（硬排除）：`regionGate` 為 `out-of-region`（最近站不在目標白名單）或
   `in-region-too-far`（白名單站但可靠步行 >10 分）的物件一律排除，且**不逐筆列出**，
-  只進「快速摘要」的稽核計數行（見 `docs/reporting-rules.md` Region Gate 與
+  只在「排除摘要」依原因分開計數（見 `docs/reporting-rules.md` Region Gate 與
   `data/region-allowlist.md`）。`regionGate === 'review'`（`withinWalk === null`）不排除，
-  送 triage／人工。
+  送 triage／人工。若 `進入評估` 異常為 0，將警訊寫入 `data_warning`。
 - 租金覆蓋率與現金流僅供 workflow/local 參考，不參與分桶或排序，也不出現在通知。
 
 ## Estimation
@@ -45,7 +45,7 @@ Use this profile for rental-yield-oriented investment screening.
 - `風險物件／待查`: suspicious/likely-auction 或重大產權／用途／資訊品質風險的非 expired 物件。
 - `排除物件`: `tenureGate === 'expired'`、區域／走路硬性失敗與其他硬性失敗。
 - `區域閘門（計數）`: `out-of-region` 與 `in-region-too-far` 物件不分桶逐列，只在
-  快速摘要稽核計數行分別計數（目標捷運站外／站內走路過遠）。
+  `排除摘要` 分別計數（目標捷運站外／站內走路過遠）；零筆原因不顯示。
 
 ## Notification Format
 

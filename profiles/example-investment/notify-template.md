@@ -88,8 +88,18 @@
 
 ### 排除摘要
 
+{{#if out_of_region_count}}
 - 目標捷運站外：{{out_of_region_count}} 筆
+{{/if}}
+{{#if in_region_too_far_count}}
 - 站內走路過遠：{{in_region_too_far_count}} 筆
+{{/if}}
+{{#if tenure_expired_count}}
 - 刊登超過上限：{{tenure_expired_count}} 筆
+{{/if}}
+{{#if other_hard_exclusion_count}}
 - 其他硬性排除：{{other_hard_exclusion_count}} 筆
+{{/if}}
+{{#if main_exclusion_reasons}}
 - 主要原因：{{main_exclusion_reasons}}
+{{/if}}

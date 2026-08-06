@@ -29,24 +29,36 @@ test('composeNotifyCommand quotes args with spaces for safe display', () => {
   assert.ok(cmd.includes('--details-file state/runs/owner-occupied/2026-06-26/report.md'));
 });
 
-test('renderFailDetails maps the stopped step without copying journal content', () => {
+test('renderFailDetails maps each pipeline step to safe guidance without copying journal content', () => {
   const range = { from: '2026-06-20', to: '2026-06-25', label: '2026-06-20_2026-06-25' };
-  const tail = [
-    { ts: '2026-06-27T00:00:00.000Z', step: 'fetch', level: 'error', event: 'step.error', msg: 'fetch failed: boom' },
+  const cases = [
+    ['fetch', '抓取房源', '確認 iBigFun 登入與連線狀態後，重新執行本次任務'],
+    ['enrich', '補充房源資料', '確認路線與官方市場資料狀態後，重新執行本次任務'],
+    ['report', '產生報告', '查看本機 pipeline 狀態與報告輸入後，重新產生本次報告'],
+    ['notify', '發送通知', '確認 NOTIFY_CMD 或 ai-notify 設定後，重新執行通知步驟'],
   ] as const;
-  const md = renderFailDetails('iBigFun 台北自住房源監測', range, 'login blocked', tail as any);
-  assert.match(md, /❌ 2026-06-20_2026-06-25 iBigFun 台北自住房源監測中斷/);
-  assert.match(md, /中斷步驟：抓取房源/);
-  assert.match(md, /原因：login blocked/);
-  assert.match(md, /建議：確認 iBigFun 登入與連線狀態後，重新執行本次任務/);
-  assert.doesNotMatch(md, /2026-06-27T00:00:00\.000Z|step\.error|fetch failed: boom|journal/);
+  for (const [step, label, action] of cases) {
+    const tail = [
+      { ts: '2026-06-27T00:00:00.000Z', step, level: 'error', event: 'step.error', msg: `${step} failed: boom` },
+    ] as const;
+    const md = renderFailDetails('iBigFun 台北自住房源監測', range, 'operation blocked', tail as any);
+    assert.match(md, /❌ 2026-06-20_2026-06-25 iBigFun 台北自住房源監測中斷/);
+    assert.match(md, new RegExp(`中斷步驟：${label}`));
+    assert.match(md, /原因：operation blocked/);
+    assert.match(md, new RegExp(`建議：${action}`));
+    assert.doesNotMatch(md, /2026-06-27T00:00:00\.000Z|step\.error|failed: boom|journal/);
+  }
 });
 
 test('renderFailDetails uses safe generic guidance when no step is known', () => {
   const range = { from: '2026-06-25', to: '2026-06-25', label: '2026-06-25' };
-  const md = renderFailDetails('iBigFun 台北投資房源監測', range, 'operator stopped', []);
+  const tail = [
+    { ts: '2026-06-27T00:00:00.000Z', step: 'unexpected-step', level: 'error', event: 'step.error', msg: 'secret journal detail' },
+  ] as const;
+  const md = renderFailDetails('iBigFun 台北投資房源監測', range, 'operator stopped', tail as any);
   assert.match(md, /中斷步驟：未知/);
   assert.match(md, /建議：查看本機 pipeline 狀態，排除原因後重新執行本次任務/);
+  assert.doesNotMatch(md, /unexpected-step|2026-06-27T00:00:00\.000Z|step\.error|secret journal detail|journal/);
 });
 
 test('defaultFailTitle includes status icon, range, and profile name', () => {

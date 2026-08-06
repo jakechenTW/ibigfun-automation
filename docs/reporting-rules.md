@@ -45,11 +45,11 @@ exclusion.
 - `in-region-too-far`：最近站在白名單但 `withinWalk === false` → 排除，僅計數。
 - `review`：`withinWalk === null`（座標/路線不可靠）→ 不排除，送既有人工 triage。
 
-`enriched.json` 彙總 `outOfRegionCount` 與 `inRegionTooFarCount`。投資報告「快速摘要」
-須輸出一行稽核計數，兩個排除原因分開列，例如：
-`本日新案 {count} 筆｜目標捷運站外 {outOfRegionCount} 筆｜站內走路過遠 {inRegionTooFarCount} 筆｜進入評估 {in 計} 筆（待人工確認 {manualReviewCount} 筆）`。
-`out-of-region` 與 `in-region-too-far` 的物件不逐筆列出，只進此計數行；若 `進入評估`
-異常為 0，視為白名單/資料異常的警訊。
+`enriched.json` 彙總 `outOfRegionCount` 與 `inRegionTooFarCount`。投資報告在「排除摘要」
+將兩個區域排除原因分開計數：`目標捷運站外 {outOfRegionCount} 筆` 與
+`站內走路過遠 {inRegionTooFarCount} 筆`；各 reason 為 0 時隱藏該列。
+`out-of-region` 與 `in-region-too-far` 的物件不逐筆列出。若 `進入評估` 異常為 0，
+將白名單／資料異常警訊寫入 `data_warning`，不要增加另一條稽核摘要。
 
 ## Calculations
 
@@ -104,7 +104,7 @@ exclusion.
 - 待售物件含車位時，保守 `marketEstimate` 會標為 `listing-parking-not-separable`／review；只有
   車位家族與數量已確認、該家族 acceptance 已通過且 `marketScenarios` 其餘證據也完整時，車位估值
   才能作補充情境，不能單獨把物件升為自動推薦。
-- 任一官方來源過期時，受影響物件不得推薦，快速摘要必須寫明資料偏舊，整則通知一律使用 `warn`。
+- 任一官方來源過期時，受影響物件不得推薦；偏舊解讀同時寫入 `data_warning` 與受影響物件的 `market_summary_line`，不印來源日期，整則通知一律使用 `warn`。
 
 ### 有界外部覆核（非靜默覆寫）
 
@@ -150,9 +150,9 @@ P25/中位/P75、兩邊單價皆有時的差異、是否採納、理由與結果
 ## Data Quality Rules
 
 - Prefer fresh iBigFun listing and official market data for the target report date.
-- If market data is stale, cached, timed out, or externally reviewed, say so in the quick summary and the affected listing's compact evidence line.
+- If market data is stale, cached, timed out, or externally reviewed, put the compact interpretation in `data_warning` and the affected listing's `market_summary_line`.
 - Do not label a listing as recommended when its market evidence is stale, low-confidence, `review`, `unavailable`, or weak. Put a clean listing with resolvable uncertainty in `候選／資料待確認`; otherwise follow the profile's risk or exclusion rules.
-- Keep the official source date/freshness and compact evidence summary visible in the listing notes; preserve the full local evidence in `enriched.json` and (when used) `valuation-review.json`.
+- Keep only a compact stale/freshness interpretation in `data_warning` and the affected listing's `market_summary_line`; official source dates and full evidence stay local in `enriched.json` and (when used) `valuation-review.json`.
 - Track seen listing IDs using `docs/automation-state.md` so reposts, edited listings, and cross-day duplicates can be handled consistently.
 
 ## Walking-Distance Triage (Agent)
@@ -261,7 +261,12 @@ precedence over a positive or clean-data candidate bucket.
   - Reliable `walk`: `🚶 {stationZh} {exitId} 號出口・{minutes} 分鐘（[地圖](https://www.google.com/maps?q=<lat>,<lng>)）`; omit the 出口 segment when `exitId` is absent.
   - Unreliable `walk` with a coordinate: `🚶 約{station}・步行待確認（[地圖](https://www.google.com/maps?q=<lat>,<lng>)）`; when no station is inferred, use `🚶 步行待人工確認（[地圖](https://www.google.com/maps?q=<lat>,<lng>)）`.
   - No coordinate: `🚶 無位置資訊` (without a map link).
-- Compose `tenure_line` from enriched `tenure`: `🕒 今日上架` for `daysOnMarket === 0`; for known tenure use `🕒 已刊登 {daysOnMarket} 天` plus `・未降價`, `・曾降價 {firstPrice}→{latestPrice}萬`, or `・曾調漲 {firstPrice}→{latestPrice}萬` for the known price history. When history or days are unknown, use `🕒 刊登天數待確認`; never invent a price-history value.
+- Compose `tenure_line` from enriched `tenure`:
+  - For `daysOnMarket === 0`, use `🕒 今日上架`.
+  - For known positive days with flat, dropped, or raised price trend, use `🕒 已刊登 {daysOnMarket} 天` plus `・未降價`, `・曾降價 {firstPrice}→{latestPrice}萬`, or `・曾調漲 {firstPrice}→{latestPrice}萬` for the known price history.
+  - For known positive days with unknown price trend, use `🕒 已刊登 {daysOnMarket} 天` with no trend suffix.
+  - For only unknown days, use `🕒 刊登天數待確認`.
+  - Never invent a price-history value.
 - Omit an unavailable optional segment instead of printing repeated `—`. Convert decision-relevant missing data into a short action phrase; never invent a value.
 - Compose `market_summary_line` from authoritative `marketEstimate`: reliable evidence may show the official median and comparable count; review/unavailable evidence states the human-readable reason. Do not print raw status syntax, P25-P75, internal stage, raw confidence enum, source-check date, or the full reason list per property.
 - Any stale official source remains visible in the top warning and affected listing, forces `warn`, and blocks an automatic positive bucket.
