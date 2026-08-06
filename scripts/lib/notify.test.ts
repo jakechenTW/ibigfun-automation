@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { composeNotifyArgs, composeNotifyCommand, renderFailDetails } from './notify.ts';
+import {
+  composeNotifyArgs,
+  composeNotifyCommand,
+  defaultFailTitle,
+  renderFailDetails,
+} from './notify.ts';
 
 const params = { tool: 'claude', status: 'warn', title: '3 件待覆核' } as const;
 const investmentTask = '每日 iBigFun 投資房源監測';
@@ -24,17 +29,32 @@ test('composeNotifyCommand quotes args with spaces for safe display', () => {
   assert.ok(cmd.includes('--details-file state/runs/owner-occupied/2026-06-26/report.md'));
 });
 
-test('renderFailDetails includes the profile, range, reason, and journal tail lines', () => {
+test('renderFailDetails maps the stopped step without copying journal content', () => {
   const range = { from: '2026-06-20', to: '2026-06-25', label: '2026-06-20_2026-06-25' };
   const tail = [
     { ts: '2026-06-27T00:00:00.000Z', step: 'fetch', level: 'error', event: 'step.error', msg: 'fetch failed: boom' },
   ] as const;
-  const md = renderFailDetails('owner-occupied', range, 'login blocked', tail as any);
-  assert.ok(md.includes('owner-occupied'));
-  assert.ok(md.includes('2026-06-20_2026-06-25'));
-  assert.ok(md.includes('2026-06-20 → 2026-06-25'));
-  assert.ok(md.includes('login blocked'));
-  assert.ok(md.includes('fetch:step.error fetch failed: boom'));
+  const md = renderFailDetails('iBigFun 台北自住房源監測', range, 'login blocked', tail as any);
+  assert.match(md, /❌ 2026-06-20_2026-06-25 iBigFun 台北自住房源監測中斷/);
+  assert.match(md, /中斷步驟：抓取房源/);
+  assert.match(md, /原因：login blocked/);
+  assert.match(md, /建議：確認 iBigFun 登入與連線狀態後，重新執行本次任務/);
+  assert.doesNotMatch(md, /2026-06-27T00:00:00\.000Z|step\.error|fetch failed: boom|journal/);
+});
+
+test('renderFailDetails uses safe generic guidance when no step is known', () => {
+  const range = { from: '2026-06-25', to: '2026-06-25', label: '2026-06-25' };
+  const md = renderFailDetails('iBigFun 台北投資房源監測', range, 'operator stopped', []);
+  assert.match(md, /中斷步驟：未知/);
+  assert.match(md, /建議：查看本機 pipeline 狀態，排除原因後重新執行本次任務/);
+});
+
+test('defaultFailTitle includes status icon, range, and profile name', () => {
+  const range = { from: '2026-06-25', to: '2026-06-25', label: '2026-06-25' };
+  assert.equal(
+    defaultFailTitle('iBigFun 台北投資房源監測', range),
+    '❌ 2026-06-25 iBigFun 台北投資房源監測中斷',
+  );
 });
 
 import { resolveNotifyCommand, runNotify } from './notify.ts';

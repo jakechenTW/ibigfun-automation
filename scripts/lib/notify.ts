@@ -78,20 +78,58 @@ export function runNotify(
   return { exitCode: r.status ?? 1, stderr: r.stderr ?? '', command };
 }
 
-/**
- * Markdown body for a fail notification. Built ONLY from the operator reason
- * and the (already redact()-ed) journal tail — never raw secrets.
- */
-export function renderFailDetails(profileId: string, range: RunRange, reason: string, tail: JournalEvent[]): string {
-  const lines = [
-    `# 監測中斷 ${range.label}`,
-    ``,
-    `- Profile: ${profileId}`,
-    `- 區間: ${range.from} → ${range.to}`,
-    `- 原因: ${reason}`,
-    ``,
-    `## journal (最後 ${tail.length} 筆)`,
-    ...tail.map((e) => `- ${e.ts} [${e.level}] ${e.step}:${e.event} ${e.msg}`),
-  ];
-  return lines.join('\n') + '\n';
+interface FailureGuidance {
+  label: string;
+  nextAction: string;
+}
+
+const FAILURE_GUIDANCE: Record<string, FailureGuidance> = {
+  fetch: {
+    label: '抓取房源',
+    nextAction: '確認 iBigFun 登入與連線狀態後，重新執行本次任務',
+  },
+  enrich: {
+    label: '補充房源資料',
+    nextAction: '確認路線與官方市場資料狀態後，重新執行本次任務',
+  },
+  report: {
+    label: '產生報告',
+    nextAction: '查看本機 pipeline 狀態與報告輸入後，重新產生本次報告',
+  },
+  notify: {
+    label: '發送通知',
+    nextAction: '確認 NOTIFY_CMD 或 ai-notify 設定後，重新執行通知步驟',
+  },
+};
+
+const UNKNOWN_FAILURE_GUIDANCE: FailureGuidance = {
+  label: '未知',
+  nextAction: '查看本機 pipeline 狀態，排除原因後重新執行本次任務',
+};
+
+function failureGuidance(tail: JournalEvent[]): FailureGuidance {
+  const lastStep = [...tail].reverse().find((event) => event.step.trim())?.step;
+  return lastStep ? FAILURE_GUIDANCE[lastStep] ?? UNKNOWN_FAILURE_GUIDANCE : UNKNOWN_FAILURE_GUIDANCE;
+}
+
+export function defaultFailTitle(profileName: string, range: RunRange): string {
+  return `❌ ${range.label} ${profileName}中斷`;
+}
+
+/** Markdown body for a concise, safe fail notification. */
+export function renderFailDetails(
+  profileName: string,
+  range: RunRange,
+  reason: string,
+  tail: JournalEvent[],
+): string {
+  const guidance = failureGuidance(tail);
+  return [
+    `# ❌ ${range.label} ${profileName}中斷`,
+    '',
+    `- 區間：${range.from} → ${range.to}`,
+    `- 中斷步驟：${guidance.label}`,
+    `- 原因：${reason}`,
+    `- 建議：${guidance.nextAction}`,
+  ].join('\n') + '\n';
 }

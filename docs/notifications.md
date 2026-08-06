@@ -32,3 +32,13 @@ own notifier (Slack, email, a shell script, etc.).
 
 If `NOTIFY_CMD` **is** set but the command is missing or exits non-zero, that is
 treated as a real error.
+
+## Message body
+
+Profile `report.md` is already the concise user-facing notification body. Full
+enrichment, valuation-review, manifest, and journal evidence stays local.
+
+Failure notifications contain only the profile/range, human-readable stopped
+step, redacted operator reason, and safe next action. They never include the
+journal tail, timestamps, internal event names, raw stack traces, credentials,
+or source payloads.

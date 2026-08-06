@@ -170,9 +170,9 @@ evaluation, and writing the report.
   - `npm run pipeline -- fail --profile <profile> [--date <d> | --from <a>
     --to <b>] --reason "<short>" --tool <codex|claude> [--dry-run]` —
     headless failure escape hatch: marks the run failed, writes a safe details
-    file from the (redacted) journal tail, and sends one `status=fail`
-    notification. `--dry-run` writes the details and prints the composed command
-    without sending.
+    file with concise user-facing guidance while retaining the journal locally,
+    and sends one `status=fail` notification. `--dry-run` writes the details
+    and prints the composed command without sending.
   - `fetch`/`enrich` remain runnable standalone; under the pipeline their
     warnings/summaries flow to the journal instead of stderr.
 

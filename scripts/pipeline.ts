@@ -26,7 +26,7 @@ import {
 } from './lib/manifest.ts';
 import { readJournal, journalLogger } from './lib/journal.ts';
 import { runStep } from './lib/run.ts';
-import { composeNotifyCommand, runNotify, renderFailDetails } from './lib/notify.ts';
+import { composeNotifyCommand, defaultFailTitle, runNotify, renderFailDetails } from './lib/notify.ts';
 import { fetchStep, enrichStep } from './lib/steps.ts';
 import { resolveRange, rangeFlags, type RunRange } from './lib/range.ts';
 import { runDir, reportPath, enrichedPath, valuationReviewPath } from './lib/runpaths.ts';
@@ -220,7 +220,7 @@ async function cmdFail(argv: string[]): Promise<void> {
   const reason = flag(argv, '--reason');
   if (!reason || reason.startsWith('--')) fail('fail requires --reason "<short>".');
   const tool = requiredTool(argv);
-  const title = flag(argv, '--title') ?? '每日監測中斷';
+  const title = flag(argv, '--title') ?? defaultFailTitle(profile.displayName, range);
   const dryRun = has(argv, '--dry-run');
 
   const m = readManifest(profile.id, range.label) ?? loadOrCreateManifest(profile.id, range.from, range.to, now());
@@ -232,7 +232,7 @@ async function cmdFail(argv: string[]): Promise<void> {
   const tail = readJournal(profile.id, range.label).slice(-20);
   const detailsFile = path.join(runDir(profile.id, range.label), 'fail-details.md');
   fs.mkdirSync(runDir(profile.id, range.label), { recursive: true });
-  fs.writeFileSync(detailsFile, renderFailDetails(profile.id, range, reason, tail));
+  fs.writeFileSync(detailsFile, renderFailDetails(profile.displayName, range, reason, tail));
 
   const params: NotifyParams = { tool, status: 'fail', title };
   if (dryRun) {
