@@ -118,15 +118,13 @@ export function defaultFailTitle(profileName: string, range: RunRange): string {
 
 /** Markdown body for a concise, safe fail notification. */
 export function renderFailDetails(
-  profileName: string,
+  _profileName: string,
   range: RunRange,
   reason: string,
   tail: JournalEvent[],
 ): string {
   const guidance = failureGuidance(tail);
   return [
-    `# ❌ ${range.label} ${profileName}中斷`,
-    '',
     `- 區間：${range.from} → ${range.to}`,
     `- 中斷步驟：${guidance.label}`,
     `- 原因：${reason}`,

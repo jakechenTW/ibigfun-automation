@@ -42,7 +42,8 @@ test('renderFailDetails maps each pipeline step to safe guidance without copying
       { ts: '2026-06-27T00:00:00.000Z', step, level: 'error', event: 'step.error', msg: `${step} failed: boom` },
     ] as const;
     const md = renderFailDetails('iBigFun 台北自住房源監測', range, 'operation blocked', tail as any);
-    assert.match(md, /❌ 2026-06-20_2026-06-25 iBigFun 台北自住房源監測中斷/);
+    assert.doesNotMatch(md, /^#{1,6}\s/m);
+    assert.match(md, /^- 區間：2026-06-20 → 2026-06-25/);
     assert.match(md, new RegExp(`中斷步驟：${label}`));
     assert.match(md, /原因：operation blocked/);
     assert.match(md, new RegExp(`建議：${action}`));

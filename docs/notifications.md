@@ -18,7 +18,7 @@ spaces and are shell-quoted only for display):
 - `--tool`: which agent produced the report (`codex` or `claude`).
 - `--status`: `ok` (clean run), `warn` (matches / needs review), `fail` (run could not complete).
 - `--task`: the selected profile's `displayName`.
-- `--title`: a short human title.
+- `--title`: the sole user-facing notification title; include the concise status/date/outcome wording here and do not repeat it in the details body.
 - `--details-file`: path to the Markdown report; the notifier reads the body from here.
 
 A notifier should exit `0` on success and non-zero on failure.
@@ -35,8 +35,12 @@ treated as a real error.
 
 ## Message body
 
-Profile `report.md` is already the concise user-facing notification body. Full
-enrichment, valuation-review, manifest, and journal evidence stays local.
+Profile `report.md` is already the concise user-facing notification body. It
+starts directly with the conclusion, without a repeated Markdown title. Every
+rendered walking line backed by a coordinate includes a clickable
+`[地圖](https://www.google.com/maps?q=<lat>,<lng>)` link; only
+`🚶 無位置資訊` omits it. Full enrichment, valuation-review, manifest, and
+journal evidence stays local.
 
 Failure notifications contain only the profile/range, human-readable stopped
 step, redacted operator reason, and safe next action. They never include the

@@ -251,9 +251,8 @@ precedence over a positive or clean-data candidate bucket.
 
 ## Notification Format
 
-- `report.md` is the exact user-facing Markdown body sent to `ai-notify`; do not create a second notification artifact.
-- Use `✅` for `ok`, `⚠️` for `warn`, and `❌` for `fail`. The title contains the date/range, profile purpose, and primary outcome.
-- Pass the same concise status-icon/date/outcome wording through `pipeline mark report --title`; do not use a generic notifier title that disagrees with the report heading.
+- `report.md` is the exact user-facing Markdown body sent to `ai-notify`; do not create a second notification artifact. Its first content line is the conclusion, never a Markdown heading.
+- Use `✅` for `ok`, `⚠️` for `warn`, and `❌` for `fail`. The `pipeline mark report --title` value is the sole notification title and contains the status icon, date/range, profile purpose, and primary outcome; do not repeat it in `report.md`.
 - Put one conclusion sentence first, followed by one compact count line. Render `data_warning` only when stale, weak, missing, or inconsistent data affects safe interpretation.
 - List every positive, candidate, and risk property. Summarize excluded properties by valid hard reason and count; never list excluded properties individually.
 - Every individually rendered property shows total price, area, asking unit price, profile-relevant basics, `walk_line`, `tenure_line`, `market_summary_line`, and one bucket reason or next action.

@@ -1,5 +1,3 @@
-## {{status_icon}} {{date}} 自住房源｜{{headline}}
-
 {{conclusion}}
 
 **新案 {{new_listing_count}}｜符合 {{matched_count}}｜候選 {{candidate_count}}｜風險 {{risk_count}}｜排除 {{excluded_count}}**

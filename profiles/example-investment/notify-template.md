@@ -1,5 +1,3 @@
-## {{status_icon}} {{date}} 投資房源｜{{headline}}
-
 {{conclusion}}
 
 **新案 {{new_listing_count}}｜推薦 {{recommended_count}}｜候選 {{candidate_count}}｜風險 {{suspicious_count}}｜排除 {{excluded_count}}**

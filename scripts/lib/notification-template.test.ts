@@ -38,8 +38,8 @@ function bucketBody(template: string, bucket: string): string {
 }
 
 function assertCommonContract(template: string, buckets: string[]): void {
-  assert.match(template, /\{\{status_icon\}\}/);
-  assert.match(template, /\{\{headline\}\}/);
+  assert.match(template, /^\{\{conclusion\}\}/);
+  assert.doesNotMatch(template, /\{\{status_icon\}\}|\{\{date\}\}|\{\{headline\}\}/);
   assert.match(template, /\{\{data_warning\}\}/);
   for (const bucket of buckets) {
     const body = bucketBody(template, bucket);
@@ -150,6 +150,8 @@ test('active report instructions retain full evidence locally and render only co
   assert.match(workerPrompt, /完整[^。\n]*(?:本地|本機|local)[^。\n]*(?:evidence|證據)/i);
   assert.match(sharedRules, /Do not print raw status syntax, P25-P75, internal stage, raw confidence enum, source-check date/i);
   assert.match(sharedRules, /Do not show mortgage, rent, cash flow[^.]*\./i);
+  assert.match(workerPrompt, /`--title`[^。\n]*唯一[^。\n]*標題/);
+  assert.match(workerPrompt, /有座標[^。\n]*\[地圖\]\(https:\/\/www\.google\.com\/maps\?q=<lat>,<lng>\)/);
 });
 
 test('shared rules preserve known tenure without inventing an unknown price trend', () => {

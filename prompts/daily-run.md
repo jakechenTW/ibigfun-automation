@@ -35,6 +35,8 @@ Trigger 也會在訊息裡告訴你要監測的區間。把它對應成 pipeline
 
 2. 親手完成 `report` 步：對 `state/runs/<profile>/<label>/enriched.json` 做 `withinWalk:null` 三角定位、估價/評估、跨日彙整，依 `docs/reporting-rules.md`、profile 規則檔與 profile 模板寫出**一份**合併報告到 orchestrator 指定的 `state/runs/<profile>/<label>/report.md`。先依 profile 的 `evaluation.maxDaysOnMarket` 與 enriched `tenureGate` 判斷刊登年限；`expired` 排除，`review` 不得自動推薦。官方行情保留為成交證據與可靠性閘門，不再比較開價與官方行情來決定划算程度。行情一律先讀 `marketEstimate`：完整 status、官方中位與 P25–P75、信心、可比筆數、選用階段及資料日期／新鮮度只保留在 git-ignored 的 `enriched.json` 與本地 evidence；`report.md` 每筆只呈現人類可讀的 `market_summary_line`，資料過期時標示偏舊但不印來源日期。Policy-7 `marketScenarios` 是已核准的用途／車位情境證據，但不得取代 `marketEstimate` 或資料品質限制。`review`/`unavailable`、low 信心、資料過期或未獲核准的車位情境不得自動推薦。只在低信心/review/unavailable 的少數邊界物件做外部覆核，絕不可靜默覆寫官方值；若覆核改變 bucket，於同一 run 寫 `valuation-review.json`（來源 URL、查核時間、外部回傳值或 `null`、官方 status/unavailable reasons 與可用區間、`(外部單價−官方中位)/官方中位*100` 差異、理由、結果 bucket 完整記錄）。官方欄位必須逐欄複製同一 listing 的 `marketEstimate`，不可自行填補；未取得外部價格時必須 `accepted: false`；官方 unavailable/review 不得因外部值升為推薦。通知只放一行精簡覆核結論，不貼完整可比或外部原始資料。
 
+   送出格式契約：`--title` 是通知中唯一的摘要標題，`report.md` 不得再放 Markdown 標題，第一個內容直接寫結論。有座標的每個 `walk_line` 都必須包含 `[地圖](https://www.google.com/maps?q=<lat>,<lng>)` 可點連結；只有沒有座標時使用 `🚶 無位置資訊`。
+
 3. 標記完成（會自動觸發 notify，idempotent）：
 
    ```
@@ -43,7 +45,7 @@ Trigger 也會在訊息裡告訴你要監測的區間。把它對應成 pipeline
    npm run pipeline -- run [profile 參數] [範圍參數]
    ```
 
-   第二行重跑會把 `notify` 步送出。完成。
+   在第一行標記前先確認本文沒有重複標題，且所有有座標的 `walk_line` 都有 Google Maps 座標連結；`pipeline mark report` 也會強制檢查。第二行重跑會把 `notify` 步送出。完成。
 
 ## status 對應
 
