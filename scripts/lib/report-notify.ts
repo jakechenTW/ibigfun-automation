@@ -78,9 +78,6 @@ export function assertNotificationStatusAllowsMarketData(status: NotificationSta
   if (actual.marketDataStale > 0) {
     throw new Error('stale official market data requires --status-notify warn, not ok');
   }
-  if (actual.marketReview > 0 || actual.marketUnavailable > 0) {
-    throw new Error('market review or unavailable evidence requires --status-notify warn, not ok');
-  }
 }
 
 /** Validates optional review evidence for every status, then applies the ok-only market gate. */

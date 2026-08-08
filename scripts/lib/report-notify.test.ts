@@ -73,8 +73,8 @@ test('rejects ok notification status when the enriched artifact is malformed', (
   assert.throws(() => assertNotificationStatusAllowsMarketData('ok', { marketDataStale: 0 }), /valid enriched artifact/);
 });
 
-test('rejects ok notification status when any listing needs market review', () => {
-  assert.throws(() => assertNotificationStatusAllowsMarketData('ok', {
+test('allows ok when fresh market review evidence is internally consistent', () => {
+  assert.doesNotThrow(() => assertNotificationStatusAllowsMarketData('ok', {
     ...freshEnrichment,
     marketReliable: 0,
     marketReview: 1,
@@ -82,11 +82,11 @@ test('rejects ok notification status when any listing needs market review', () =
       tenureGate: 'eligible',
       marketEstimate: { status: 'review', sourceFreshness: { transactionStale: false, doorplateStale: false } },
     }],
-  }), /review or unavailable.*--status-notify warn/);
+  }));
 });
 
-test('rejects ok notification status when the market bundle was unavailable', () => {
-  assert.throws(() => assertNotificationStatusAllowsMarketData('ok', {
+test('allows ok when fresh unavailable market evidence is internally consistent', () => {
+  assert.doesNotThrow(() => assertNotificationStatusAllowsMarketData('ok', {
     ...freshEnrichment,
     marketReliable: 0,
     marketUnavailable: 1,
@@ -94,7 +94,7 @@ test('rejects ok notification status when the market bundle was unavailable', ()
       tenureGate: 'eligible',
       marketEstimate: { status: 'unavailable', sourceFreshness: { transactionStale: false, doorplateStale: false } },
     }],
-  }), /review or unavailable.*--status-notify warn/);
+  }));
 });
 
 test('fails closed when market summary counts disagree with listings', () => {
