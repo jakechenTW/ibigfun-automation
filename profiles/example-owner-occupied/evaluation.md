@@ -50,9 +50,10 @@ Room, living-room, and bathroom counts are displayed but are not hard criteria i
 
 ## Notification Status
 
-- Use `warn` when there is any match, candidate, risk listing, manual review, stale data,
-  or unverified coded filter mapping (including any remaining `待驗證` entry).
-- Use `ok` only when there are no matches, candidates, or risk listings and coded filter mappings are verified.
+- Use `ok` when the run has no unresolved actionable warnings; fully supported matches may use `ok`.
+- Use `warn` for candidates, risk listings, unresolved actionable manual review, stale data,
+  unverified coded filter mappings (including any remaining `待驗證` entry), or other weak evidence affecting safe interpretation.
+- A fresh market `review`/`unavailable` result on a confirmed hard exclusion does not force `warn`.
 - Use `fail` only when the monitor cannot complete.
 
 ## Notification Format

@@ -88,10 +88,11 @@ recovery action.
    `docs/reporting-rules.md` and `profiles/<profile>/evaluation.md`.
 10. Write `state/runs/<profile>/<label>/report.md` using the profile's
    `profiles/<profile>/notify-template.md` as the structure.
-11. Notify with the canonical command below. Any stale official market source
-   requires notification status `warn`; `pipeline mark report --status ok`
-   rejects `--status-notify ok` when the run's enriched market evidence is stale,
-   `review`, `unavailable`, malformed, or inconsistent with its summary counts.
+11. Notify with the canonical command below. Any stale official market source requires notification status `warn`;
+   `pipeline mark report --status ok` rejects malformed or internally inconsistent
+   enriched market evidence and any stale official source. Fresh `review` or
+   `unavailable` evidence affects notification status only when it leaves an
+   actionable candidate or risk item after hard exclusions.
 
 ### Tooling
 
@@ -201,9 +202,9 @@ ai-notify --tool <codex|claude> --status <ok|warn|fail> \
 - `--tool`: the agent actually running (`codex` or `claude`).
 - `--task`: use the selected profile's `displayName` from
   `profiles/<profile>/profile.json`.
-- `--status warn`: recommendations/matches, candidates, stale or
-  weak data (including stale official market data), login fallback, or anything needing review.
-- `--status ok`: a clean no-recommendation/no-match run with fresh data.
+- `--status warn`: candidates, risk listings, unresolved actionable manual review,
+  stale or weak data affecting safe interpretation, login fallback, or unverified mappings.
+- `--status ok`: a completed run with no unresolved actionable warning; fully supported recommendations/matches may use `ok`.
 - `--status fail`: only when the monitor cannot complete.
 
 ## Safety Rules

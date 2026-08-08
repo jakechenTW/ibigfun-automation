@@ -16,7 +16,7 @@ spaces and are shell-quoted only for display):
 ```
 
 - `--tool`: which agent produced the report (`codex` or `claude`).
-- `--status`: `ok` (clean run), `warn` (matches / needs review), `fail` (run could not complete).
+- `--status`: `ok` means the run completed without unresolved actionable warnings; fully supported recommendations or matches may use `ok`. `warn` means candidates, risks, unresolved actionable manual review, stale sources, unverified mappings, or other weak evidence affects safe interpretation. A fresh market review/unavailable result on a confirmed hard exclusion does not force `warn`. `fail` means the run could not complete.
 - `--task`: the selected profile's `displayName`.
 - `--title`: the sole user-facing notification title; include the concise status/date/outcome wording here and do not repeat it in the details body.
 - `--details-file`: path to the Markdown report; the notifier reads the body from here.

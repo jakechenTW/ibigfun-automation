@@ -22,6 +22,14 @@ const ownerRules = readFileSync(
   new URL('../../profiles/example-owner-occupied/evaluation.md', import.meta.url),
   'utf8',
 );
+const agentsInstructions = readFileSync(
+  new URL('../../AGENTS.md', import.meta.url),
+  'utf8',
+);
+const notificationRules = readFileSync(
+  new URL('../../docs/notifications.md', import.meta.url),
+  'utf8',
+);
 const workerPrompt = readFileSync(
   new URL('../../prompts/daily-run.md', import.meta.url),
   'utf8',
@@ -167,4 +175,12 @@ test('region exclusions, anomalies, and stale evidence use the concise summary c
   assert.match(sharedRules, /(?:stale|過期|偏舊)[^\n]*data_warning[^\n]*market_summary_line/i);
   assert.match(investmentRules, /區域閘門[\s\S]*排除摘要/);
   assert.match(investmentRules, /進入評估[\s\S]{0,100}?0[\s\S]{0,100}?data_warning/);
+});
+
+test('active notification policy separates result presence from warning conditions', () => {
+  const statusRules = [agentsInstructions, notificationRules, ownerRules, workerPrompt].join('\n');
+  assert.match(statusRules, /recommendations? or matches? may use `ok`/i);
+  assert.match(statusRules, /candidate[^\n]*risk[^\n]*manual[^\n]*stale/i);
+  assert.match(statusRules, /hard exclusion[^\n]*(?:does not|doesn't)[^\n]*(?:force|require) `warn`/i);
+  assert.doesNotMatch(statusRules, /`warn`[^\n]*(?:recommendations?\/matches?|有推薦\/符合條件)/i);
 });
