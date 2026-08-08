@@ -35,6 +35,8 @@ const workerPrompt = readFileSync(
   'utf8',
 );
 
+const legacyResultPresenceWarning = /(?:`--status warn`|(?:Use )?`warn`)[^\n]*(?:recommendation|match|有推薦\/符合條件)/i;
+
 function occurrences(text: string, token: string): number {
   return text.split(token).length - 1;
 }
@@ -177,10 +179,59 @@ test('region exclusions, anomalies, and stale evidence use the concise summary c
   assert.match(investmentRules, /進入評估[\s\S]{0,100}?0[\s\S]{0,100}?data_warning/);
 });
 
-test('active notification policy separates result presence from warning conditions', () => {
-  const statusRules = [agentsInstructions, notificationRules, ownerRules, workerPrompt].join('\n');
-  assert.match(statusRules, /recommendations? or matches? may use `ok`/i);
-  assert.match(statusRules, /candidate[^\n]*risk[^\n]*manual[^\n]*stale/i);
-  assert.match(statusRules, /hard exclusion[^\n]*(?:does not|doesn't)[^\n]*(?:force|require) `warn`/i);
-  assert.doesNotMatch(statusRules, /`warn`[^\n]*(?:recommendations?\/matches?|有推薦\/符合條件)/i);
+test('each active notification policy separates result presence from warning conditions', () => {
+  const policySources = [
+    {
+      name: 'AGENTS.md',
+      text: agentsInstructions,
+      supportedResults: /fully supported recommendations\/matches may use `ok`/i,
+      actionableWarnings: /`--status warn`: candidates, risk listings, unresolved actionable manual review,\s+stale/i,
+      hardExclusion: /Fresh `review` or\s+`unavailable` evidence affects notification status only when it leaves an\s+actionable candidate or risk item after hard exclusions/i,
+    },
+    {
+      name: 'docs/notifications.md',
+      text: notificationRules,
+      supportedResults: /fully supported recommendations or matches may use `ok`/i,
+      actionableWarnings: /`warn` means candidates, risks, unresolved actionable manual review, stale sources/i,
+      hardExclusion: /hard exclusion does not force `warn`/i,
+    },
+    {
+      name: 'docs/reporting-rules.md',
+      text: sharedRules,
+      supportedResults: /may contain fully supported recommendations or matches/i,
+      actionableWarnings: /`warn` means candidates, risks, unresolved actionable manual review, stale sources/i,
+      hardExclusion: /hard exclusion does not force `warn`/i,
+    },
+    {
+      name: 'profiles/example-owner-occupied/evaluation.md',
+      text: ownerRules,
+      supportedResults: /fully supported matches may use `ok`/i,
+      actionableWarnings: /Use `warn` for candidates, risk listings, unresolved actionable manual review, stale data/i,
+      hardExclusion: /hard exclusion does not force `warn`/i,
+    },
+    {
+      name: 'prompts/daily-run.md',
+      text: workerPrompt,
+      supportedResults: /完整支持的推薦／符合條件可使用 `ok`/,
+      actionableWarnings: /`warn`：候選、風險物件、未解決且可行動的 manual-review、過期來源/,
+      hardExclusion: /hard exclusion 上的 fresh market `review`／`unavailable` 不會強制使用 `warn`/,
+    },
+  ];
+
+  for (const policy of policySources) {
+    assert.match(policy.text, policy.supportedResults, `${policy.name} must allow supported positive results to use ok`);
+    assert.match(policy.text, policy.actionableWarnings, `${policy.name} must retain actionable warn conditions`);
+    assert.match(policy.text, policy.hardExclusion, `${policy.name} must not warn for review evidence on hard exclusions`);
+    assert.doesNotMatch(policy.text, legacyResultPresenceWarning, `${policy.name} must not warn merely because results exist`);
+  }
+});
+
+test('legacy result-presence warning forms are detected', () => {
+  for (const legacyPolicy of [
+    '`--status warn`: recommendations/matches, candidates, stale data.',
+    'Use `warn` when there is any match, candidate, or risk listing.',
+    '`warn`：有推薦/符合條件、候選或 manual-review 項。',
+  ]) {
+    assert.match(legacyPolicy, legacyResultPresenceWarning);
+  }
 });
