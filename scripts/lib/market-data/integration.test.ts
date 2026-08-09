@@ -314,6 +314,19 @@ test('doorplate distance beyond 100 metres stays review-only', () => {
   ));
 });
 
+test('doorplate distance at exactly 300 metres stays review-only', () => {
+  const [result] = attachMarketEstimates([
+    listing({ addressOrArea: '台北市中正區定位路1號' }),
+  ], bundleWithNearestDoorplate(300), AS_OF);
+
+  const evidence = result.marketEstimate.subjectLocationEvidence;
+  assert.equal(evidence?.verdict, 'uncertain');
+  assert.equal(result.marketEstimate.status, 'review');
+  assert.ok(result.marketEstimate.unavailableReasons.includes(
+    'listing-coordinate-doorplate-distance-uncertain',
+  ));
+});
+
 test('doorplate unavailable within 300 metres leaves an unresolved address unavailable', () => {
   const [result] = attachMarketEstimates([
     listing({ addressOrArea: '台北市中正區定位路1號' }),
@@ -325,6 +338,21 @@ test('doorplate unavailable within 300 metres leaves an unresolved address unava
   assert.deepEqual(result.marketEstimate.unavailableReasons, [
     'listing-coordinate-doorplate-unavailable',
   ]);
+});
+
+test('missing administrative evidence leaves unresolved coordinates unavailable', () => {
+  for (const addressOrArea of ['中正區定位路1號', '台北市定位路1號']) {
+    const [result] = attachMarketEstimates([
+      listing({ addressOrArea }),
+    ], bundleWithNearestDoorplate(25.5), AS_OF);
+
+    const evidence = result.marketEstimate.subjectLocationEvidence;
+    assert.equal(evidence?.verdict, 'unavailable', addressOrArea);
+    assert.equal(result.marketEstimate.status, 'unavailable', addressOrArea);
+    assert.deepEqual(result.marketEstimate.unavailableReasons, [
+      'listing-coordinate-administrative-area-unavailable',
+    ], addressOrArea);
+  }
 });
 
 test('same-district wrong-neighborhood GPS pin cannot receive an automatic estimate', () => {

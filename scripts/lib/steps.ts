@@ -76,12 +76,15 @@ function unavailableMarketEstimate(
   };
 }
 
-function reverseAdministrativeConflict(input: string, matchedAddress: string | null): boolean {
-  if (!matchedAddress) return false;
+function reverseAdministrativeAgreement(
+  input: string,
+  matchedAddress: string,
+): 'agrees' | 'mismatch' | 'unavailable' {
   const expected = normalizeTaiwanAddress(input);
   const actual = normalizeTaiwanAddress(matchedAddress);
   const fields = ['city', 'district'] as const;
-  return fields.some((field) => expected[field] === null || actual[field] === null || expected[field] !== actual[field]);
+  if (fields.some((field) => expected[field] === null || actual[field] === null)) return 'unavailable';
+  return fields.some((field) => expected[field] !== actual[field]) ? 'mismatch' : 'agrees';
 }
 
 function validateListingLocation(
@@ -132,19 +135,7 @@ function validateListingLocation(
     };
   }
 
-  if (reverseAdministrativeConflict(input, reverse.matchedAddress)) {
-    return {
-      verdict: 'conflict',
-      address,
-      nearestDoorplate: reverse,
-      addressDistanceMeters: null,
-      distanceBeyondUncertaintyMeters: null,
-      thresholdMeters: LISTING_LOCATION_TOLERANCE_M,
-      reasons: ['listing-coordinate-address-conflict'],
-    };
-  }
-
-  if (reverse.method === 'unresolved' || reverse.uncertaintyMeters === null) {
+  if (reverse.method === 'unresolved' || reverse.uncertaintyMeters === null || !reverse.matchedAddress) {
     return {
       verdict: 'unavailable',
       address,
@@ -153,6 +144,31 @@ function validateListingLocation(
       distanceBeyondUncertaintyMeters: null,
       thresholdMeters: LISTING_LOCATION_TOLERANCE_M,
       reasons: ['listing-coordinate-doorplate-unavailable'],
+    };
+  }
+
+  const administrativeAgreement = reverseAdministrativeAgreement(input, reverse.matchedAddress);
+  if (administrativeAgreement === 'unavailable') {
+    return {
+      verdict: 'unavailable',
+      address,
+      nearestDoorplate: reverse,
+      addressDistanceMeters: null,
+      distanceBeyondUncertaintyMeters: null,
+      thresholdMeters: LISTING_LOCATION_TOLERANCE_M,
+      reasons: ['listing-coordinate-administrative-area-unavailable'],
+    };
+  }
+
+  if (administrativeAgreement === 'mismatch') {
+    return {
+      verdict: 'conflict',
+      address,
+      nearestDoorplate: reverse,
+      addressDistanceMeters: null,
+      distanceBeyondUncertaintyMeters: null,
+      thresholdMeters: LISTING_LOCATION_TOLERANCE_M,
+      reasons: ['listing-coordinate-address-conflict'],
     };
   }
 
