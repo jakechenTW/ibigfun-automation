@@ -4,7 +4,13 @@ import { test } from 'node:test';
 import { attachMarketEstimates } from '../steps.ts';
 import type { PreMarketEnrichedListing } from '../types.ts';
 import { ACTIVE_ESTIMATOR_POLICY, ESTIMATOR_POLICY_VERSION } from './config.ts';
-import type { BacktestAcceptance, CandidateBacktestAcceptance, MarketDataBundle } from './types.ts';
+import { gridKey } from './grid.ts';
+import type {
+  BacktestAcceptance,
+  CandidateBacktestAcceptance,
+  DoorplatePoint,
+  MarketDataBundle,
+} from './types.ts';
 
 const AS_OF = '2026-07-25';
 const bundle = JSON.parse(
@@ -181,6 +187,24 @@ function listing(overrides: Partial<PreMarketEnrichedListing> = {}): PreMarketEn
   };
 }
 
+function bundleWithNearestDoorplate(distanceM: number): MarketDataBundle {
+  const accepted = bundleWithAcceptance();
+  const coordinate = {
+    lat: 25.033964 + (distanceM / 6_371_000) * (180 / Math.PI),
+    lng: 121.564468,
+  };
+  const point: DoorplatePoint = {
+    canonicalAddress: '台北市中正區別路88號',
+    coordinate,
+    district: '中正區',
+    roadKey: '台北市中正區別路',
+    mainNumber: 88,
+    subNumber: null,
+  };
+  accepted.doorplates.cells = { [gridKey(coordinate)]: [point] };
+  return accepted;
+}
+
 test('production estimate stays review before approval and becomes reliable only for matching acceptance', () => {
   const [unapproved] = attachMarketEstimates([listing()], bundle, AS_OF);
   const [mismatched] = attachMarketEstimates([listing()], bundleWithAcceptance('different-dataset'), AS_OF);
@@ -260,6 +284,49 @@ test('one listing batch scans acceptance coverage exactly once', () => {
   assert.equal(diagnostics.eligibleTransactionScans, 1);
 });
 
+test('coordinate-near-doorplate accepts unresolved cross-road addresses through 100 metres', () => {
+  for (const distanceM of [25.5, 37.6, 100]) {
+    const [result] = attachMarketEstimates([
+      listing({ addressOrArea: '台北市中正區定位路1號' }),
+    ], bundleWithNearestDoorplate(distanceM), AS_OF);
+
+    const evidence = result.marketEstimate.subjectLocationEvidence;
+    assert.equal(evidence?.verdict, 'matched', `${distanceM}m`);
+    assert.ok(result.marketEstimate.unavailableReasons.every((reason) =>
+      reason !== 'listing-coordinate-address-conflict'
+      && reason !== 'listing-address-location-unresolved'), `${distanceM}m`);
+    assert.notEqual(result.marketEstimate.status, 'unavailable', `${distanceM}m`);
+    assert.equal(evidence?.nearestDoorplate.method, 'nearest-doorplate', `${distanceM}m`);
+    assert.equal(evidence?.address.matchedAddress, null, `${distanceM}m`);
+  }
+});
+
+test('doorplate distance beyond 100 metres stays review-only', () => {
+  const [result] = attachMarketEstimates([
+    listing({ addressOrArea: '台北市中正區定位路1號' }),
+  ], bundleWithNearestDoorplate(200), AS_OF);
+
+  const evidence = result.marketEstimate.subjectLocationEvidence;
+  assert.equal(evidence?.verdict, 'uncertain');
+  assert.equal(result.marketEstimate.status, 'review');
+  assert.ok(result.marketEstimate.unavailableReasons.includes(
+    'listing-coordinate-doorplate-distance-uncertain',
+  ));
+});
+
+test('doorplate unavailable within 300 metres leaves an unresolved address unavailable', () => {
+  const [result] = attachMarketEstimates([
+    listing({ addressOrArea: '台北市中正區定位路1號' }),
+  ], bundleWithNearestDoorplate(300.1), AS_OF);
+
+  const evidence = result.marketEstimate.subjectLocationEvidence;
+  assert.equal(evidence?.verdict, 'unavailable');
+  assert.equal(result.marketEstimate.status, 'unavailable');
+  assert.deepEqual(result.marketEstimate.unavailableReasons, [
+    'listing-coordinate-doorplate-unavailable',
+  ]);
+});
+
 test('same-district wrong-neighborhood GPS pin cannot receive an automatic estimate', () => {
   const [result] = attachMarketEstimates([
     listing({
@@ -290,15 +357,14 @@ test('masked listing address preserves range uncertainty and stays review-only w
   assert.ok((evidence?.distanceBeyondUncertaintyMeters ?? Infinity) <= 300);
 });
 
-test('incomplete unresolved listing address stays review-only when the reverse road still matches', () => {
+test('incomplete unresolved listing address accepts a nearby same-road doorplate', () => {
   const [result] = attachMarketEstimates([
     listing({ addressOrArea: '台北市中正區測試路' }),
-  ], bundle, AS_OF);
+  ], bundleWithAcceptance(), AS_OF);
 
-  assert.equal(result.marketEstimate.status, 'review');
-  assert.ok(result.marketEstimate.unavailableReasons.includes('listing-address-location-unresolved'));
+  assert.equal(result.marketEstimate.status, 'reliable');
   const evidence = result.marketEstimate.subjectLocationEvidence;
-  assert.equal(evidence?.verdict, 'uncertain');
+  assert.equal(evidence?.verdict, 'matched');
   assert.equal(evidence?.address.method, 'unresolved');
   assert.equal(evidence?.nearestDoorplate.matchedAddress, '台北市中正區測試路1號');
 });
@@ -308,10 +374,14 @@ test('untyped, unreliable GPS, and inseparable listing parking stay unavailable 
   const unreliable = attachMarketEstimates([
     listing({ reliability: { coordPresent: true, coordConsistent: false, routeOk: null, ratio: null, reason: 'district mismatch' } }),
   ], bundle, AS_OF)[0]!;
+  const unknownConsistency = attachMarketEstimates([
+    listing({ reliability: { coordPresent: true, coordConsistent: null, routeOk: null, ratio: null, reason: 'district unknown' } }),
+  ], bundle, AS_OF)[0]!;
   const parking = attachMarketEstimates([listing({ parking: '平面車位' })], bundle, AS_OF)[0]!;
 
   assert.deepEqual(untyped.marketEstimate.unavailableReasons, ['listing-building-type-unavailable']);
   assert.deepEqual(unreliable.marketEstimate.unavailableReasons, ['listing-coordinate-unreliable']);
+  assert.deepEqual(unknownConsistency.marketEstimate.unavailableReasons, ['listing-coordinate-unreliable']);
   assert.equal(parking.marketEstimate.status, 'review');
   assert.deepEqual(parking.marketEstimate.unavailableReasons, ['listing-parking-not-separable']);
   assert.ok(parking.marketScenarios);

@@ -42,6 +42,7 @@ import { haversineMeters } from './geo.ts';
 const MRT_CSV = 'data/taipei_mrt_exits.csv';
 const ORS_DELAY_MS = 1600;        // ORS free tier ~40 req/min
 const ORS_RETRY_WAIT_MS = 65_000; // wait out the per-minute window once
+const LISTING_LOCATION_ACCEPT_M = 100;
 const LISTING_LOCATION_TOLERANCE_M = 300;
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -75,12 +76,12 @@ function unavailableMarketEstimate(
   };
 }
 
-function reverseAddressConflicts(input: string, matchedAddress: string | null): boolean {
+function reverseAdministrativeConflict(input: string, matchedAddress: string | null): boolean {
   if (!matchedAddress) return false;
   const expected = normalizeTaiwanAddress(input);
   const actual = normalizeTaiwanAddress(matchedAddress);
-  const fields = ['city', 'district', 'road', 'section', 'lane', 'alley'] as const;
-  return fields.some((field) => expected[field] !== null && actual[field] !== null && expected[field] !== actual[field]);
+  const fields = ['city', 'district'] as const;
+  return fields.some((field) => expected[field] === null || actual[field] === null || expected[field] !== actual[field]);
 }
 
 function validateListingLocation(
@@ -131,7 +132,7 @@ function validateListingLocation(
     };
   }
 
-  if (reverse.method !== 'unresolved' && reverseAddressConflicts(input, reverse.matchedAddress)) {
+  if (reverseAdministrativeConflict(input, reverse.matchedAddress)) {
     return {
       verdict: 'conflict',
       address,
@@ -143,6 +144,30 @@ function validateListingLocation(
     };
   }
 
+  if (reverse.method === 'unresolved' || reverse.uncertaintyMeters === null) {
+    return {
+      verdict: 'unavailable',
+      address,
+      nearestDoorplate: reverse,
+      addressDistanceMeters: null,
+      distanceBeyondUncertaintyMeters: null,
+      thresholdMeters: LISTING_LOCATION_TOLERANCE_M,
+      reasons: ['listing-coordinate-doorplate-unavailable'],
+    };
+  }
+
+  if (reverse.uncertaintyMeters <= LISTING_LOCATION_ACCEPT_M) {
+    return {
+      verdict: 'matched',
+      address,
+      nearestDoorplate: reverse,
+      addressDistanceMeters: null,
+      distanceBeyondUncertaintyMeters: null,
+      thresholdMeters: LISTING_LOCATION_TOLERANCE_M,
+      reasons: ['listing-coordinate-near-doorplate'],
+    };
+  }
+
   return {
     verdict: 'uncertain',
     address,
@@ -150,7 +175,7 @@ function validateListingLocation(
     addressDistanceMeters: null,
     distanceBeyondUncertaintyMeters: null,
     thresholdMeters: LISTING_LOCATION_TOLERANCE_M,
-    reasons: ['listing-address-location-unresolved'],
+    reasons: ['listing-coordinate-doorplate-distance-uncertain'],
   };
 }
 
@@ -289,7 +314,7 @@ export function attachMarketEstimates(
         marketScenarios: unavailableMarketScenarios(freshness, parking, reasons),
       };
     }
-    if (listing.reliability.coordConsistent === false) {
+    if (listing.reliability.coordConsistent !== true) {
       const reasons = ['listing-coordinate-unreliable'];
       return {
         ...listing,
@@ -301,7 +326,7 @@ export function attachMarketEstimates(
       listing as PreMarketEnrichedListing & { coordinate: NonNullable<PreMarketEnrichedListing['coordinate']> },
       bundle,
     );
-    if (locationEvidence.verdict === 'conflict') {
+    if (locationEvidence.verdict === 'conflict' || locationEvidence.verdict === 'unavailable') {
       return {
         ...listing,
         marketEstimate: unavailableMarketEstimate(

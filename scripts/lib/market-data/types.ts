@@ -36,7 +36,7 @@ export interface LocationEvidence {
 }
 
 export interface SubjectLocationEvidence {
-  verdict: 'matched' | 'uncertain' | 'conflict';
+  verdict: 'matched' | 'uncertain' | 'conflict' | 'unavailable';
   address: LocationEvidence;
   nearestDoorplate: LocationEvidence;
   addressDistanceMeters: number | null;
