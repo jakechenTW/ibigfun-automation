@@ -83,7 +83,7 @@ export interface BacktestReport {
   cases: BacktestCase[];
 }
 
-/** Full policy-7 diagnostics used by candidate and production backtests. */
+/** Full policy-8 diagnostics used by candidate and production backtests. */
 export interface CandidateBacktestReport extends BacktestReport {
   /** Exact-use metrics with grade-B building evidence disabled. */
   byPrimaryUseDirectOnly: Record<Exclude<NormalizedPrimaryUse, 'unknown'>, BacktestMetrics>;
@@ -539,7 +539,7 @@ function parkingFamilyAcceptances(
   };
 }
 
-/** Strict policy-7 publication and acceptance gate. */
+/** Strict policy-8 publication and acceptance gate. */
 export function evaluateCandidateBacktestGate(report: CandidateBacktestReport): BacktestGateResult {
   const legacy = evaluateBacktestGate(report);
   const reasons = [...legacy.reasons];
@@ -602,7 +602,7 @@ export function backtestAcceptance(
   };
 }
 
-/** Builds the current aggregate acceptance after every policy-7 gate passes. */
+/** Builds the current aggregate acceptance after every policy-8 gate passes. */
 export function candidateBacktestAcceptance(
   report: CandidateBacktestReport,
   transactionArtifactSha256: string,

@@ -1223,7 +1223,7 @@ export async function validateStagedBuild(
   return validateBuild(stageRoot, options);
 }
 
-/** Validates an isolated schema-5 / policy-7 candidate build only. */
+/** Validates an isolated schema-5 / policy-8 candidate build only. */
 export async function validateCandidateStagedBuild(
   stageRoot: string,
   options: PublishOptions = {},
@@ -1480,7 +1480,11 @@ function validateAcceptanceForBundle(
     throw new Error('Backtest acceptance transaction artifact checksum does not match the staged build');
   }
   const validShape = current
-    ? validCandidateBacktestAcceptanceForPolicy(acceptance, ACTIVE_ESTIMATOR_POLICY.id, 7)
+    ? validCandidateBacktestAcceptanceForPolicy(
+      acceptance,
+      ACTIVE_ESTIMATOR_POLICY.id,
+      ESTIMATOR_POLICY_VERSION,
+    )
     : legacySchema3
       ? validBacktestAcceptanceForPolicy(acceptance, 4, ACTIVE_ESTIMATOR_POLICY.id)
       : validCandidateBacktestAcceptanceForPolicy(acceptance, ACTIVE_ESTIMATOR_POLICY.id, 5);

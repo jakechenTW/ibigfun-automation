@@ -18,7 +18,7 @@ export interface AcceptedParkingImputation {
   buildingUnitPriceBoundsWan: NonNullable<MarketTransaction['buildingUnitPriceBoundsWan']>;
 }
 
-/** Pure policy-7 derivation from a subject and its authoritative causal history. */
+/** Pure policy-8 derivation from a subject and its authoritative causal history. */
 export function deriveAcceptedParkingImputation(
   transaction: MarketTransaction,
   directGradeA: readonly MarketTransaction[],

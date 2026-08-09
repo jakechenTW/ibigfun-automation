@@ -404,11 +404,11 @@ async function convertBuildToCandidate(root: string): Promise<void> {
   await writeFile(join(root, 'manifest.json'), `${JSON.stringify(candidateManifest)}\n`);
 }
 
-test('activation loads only the schema-5 policy-7 pair', async (t) => {
+test('activation loads only the schema-5 policy-8 pair', async (t) => {
   assert.equal(MARKET_SCHEMA_VERSION, 5);
-  assert.equal(ESTIMATOR_POLICY_VERSION, 7);
+  assert.equal(ESTIMATOR_POLICY_VERSION, 8);
   assert.equal(CANDIDATE_MARKET_SCHEMA_VERSION, 5);
-  assert.equal(CANDIDATE_ESTIMATOR_POLICY_VERSION, 7);
+  assert.equal(CANDIDATE_ESTIMATOR_POLICY_VERSION, 8);
 
   const parent = await mkdtemp(join(tmpdir(), 'market-store-activation-contract-'));
   const root = join(parent, 'taipei');

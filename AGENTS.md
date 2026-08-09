@@ -115,7 +115,7 @@ evaluation, and writing the report.
   unreliable→manual). This command never refreshes official sources, rebuilds
   indexes, runs a full backtest, or publishes market data.
 - `npm run market-data -- update --city taipei` — refreshes, validates, fully
-  backtests, and atomically publishes a schema-5 / policy-7 build with its
+  backtests, and atomically publishes a schema-5 / policy-8 build with its
   matching aggregate schema-3 acceptance. Every global, residential-use,
   Grade-B, and family-specific parking gate must pass; otherwise the previous
   accepted pair is retained.
@@ -123,7 +123,7 @@ evaluation, and writing the report.
   <baseline|48-month|1000-meter>` — builds and backtests a fresh candidate
   without publishing it. Standard output is aggregate-only and omits held-out
   cases, rows, IDs, and addresses.
-  Evaluation is isolated in a disposable schema-5 / policy-7 staging directory
+  Evaluation is isolated in a disposable schema-5 / policy-8 staging directory
   and can never publish production state. Evaluate `baseline` first. Try
   `48-month` only when baseline misses the 70%
   eligible-coverage target and has no accuracy/calibration failure; try
@@ -138,10 +138,10 @@ evaluation, and writing the report.
   estimates; a historical `--as-of` cannot approve a newer index and
   `--no-gate` is diagnostic and never approves. Bump
   `ESTIMATOR_POLICY_VERSION` whenever selector, weighting, outlier, confidence,
-  status, or backtest semantics change. A bump that changes transaction
-  normalization or eligibility requires `update` to rebuild, gate, and
-  atomically publish a matching build/acceptance pair. Never use `backtest` to
-  mint new acceptance for a pre-change index. The schema-5 build manifest
+  listing-location status/eligibility, or backtest semantics change. A bump
+  that changes transaction normalization or eligibility requires `update` to
+  rebuild, gate, and atomically publish a matching build/acceptance pair. Never
+  use `backtest` to mint new acceptance for a pre-change index. The schema-5 build manifest
   records the policy version that created its indexes;
   standalone backtest (including `--no-gate`) rejects missing or mismatched
   provenance before evaluating cases, and the acceptance writer revalidates

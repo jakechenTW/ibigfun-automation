@@ -8,8 +8,9 @@ in review rather than becoming an automatic recommendation.
 
 ## Current production contract
 
-The activated contract is build schema 5, estimator policy 7, and acceptance
-schema 3. `marketEstimate` supplies official transaction context and the
+The activated contract is build schema 5, estimator policy 8, and acceptance
+schema 3. Policy 8 includes listing-location status/eligibility semantics and
+requires a fresh fully gated atomic build/acceptance publication. `marketEstimate` supplies official transaction context and the
 reliability gates used by reports; `marketScenarios` supplies approved exact-use
 and parking-family evidence only when the matching acceptance authorizes those
 cohorts. Neither is compared with a listing's asking price to determine whether
@@ -120,7 +121,7 @@ npm run market-data -- update --city taipei
 ```
 
 The command recovers an interrupted publication, refreshes public sources,
-builds schema-5/policy-7 indexes in staging, runs every global, use-cohort,
+builds schema-5/policy-8 indexes in staging, runs every global, use-cohort,
 Grade-B comparison, and parking-family gate, then atomically publishes the
 build with its schema-3 acceptance. Failure retains the last-known-good pair
 and exits `3`; an invalid older build is never silently promoted.
@@ -326,8 +327,9 @@ fully gated atomic publication.
 
 `ESTIMATOR_POLICY_VERSION` is the intentional valuation compatibility
 contract. Any change to transaction eligibility, comparable selection stages,
-weights, outlier handling, confidence, estimate status, coverage, or backtest
-semantics must bump it and obtain a new passing acceptance. The market-data
+weights, outlier handling, confidence, listing-location status/eligibility,
+estimate status, coverage, or backtest semantics must bump it and obtain a new
+passing acceptance through atomic writer publication. The market-data
 schema version is not a substitute for this policy bump.
 
 The acceptance artifact's `asOf`, `evaluatedThrough`, and
@@ -361,5 +363,5 @@ recalibrate selection/weight constants with tests and backtest evidence.
 | `market-data-unavailable` | Run `npm run market-data -- update --city taipei`. If rebuilding or any gate fails and no valid prior pair exists, continue with market estimates unavailable and use `warn`, without substituting a guessed price. |
 | `listing-coordinate-unavailable` or `listing-coordinate-unreliable` | Use the existing listing location-triage procedure. Do not force a coordinate into the market index; the listing stays unavailable until reliable. |
 | `no-comparables`, low confidence, or `review` | Read included and excluded evidence. Fewer than three retained comparables, a wide interval, stale data, or a hard conflict is review-only; do not relax criteria in report prose. |
-| `listing-parking-not-separable` | The conservative base estimate stays review-only. A policy-7 scenario may show an approved parking-family adjustment only when listing family/count and all other evidence are verified; it does not independently authorize automatic recommendation. |
+| `listing-parking-not-separable` | The conservative base estimate stays review-only. A policy-8 scenario may show an approved parking-family adjustment only when listing family/count and all other evidence are verified; it does not independently authorize automatic recommendation. |
 | Active build appears corrupt | Do not edit it. Run the updater so journal recovery and a fresh fully gated build can replace it atomically; if that fails, keep market evidence unavailable. |

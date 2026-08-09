@@ -36,9 +36,9 @@ test('approved weights and stale windows are centralized', () => {
 });
 
 test('production activates the validated challenger compatibility versions', () => {
-  assert.equal(ESTIMATOR_POLICY_VERSION, 7);
+  assert.equal(ESTIMATOR_POLICY_VERSION, 8);
   assert.equal(MARKET_SCHEMA_VERSION, 5);
-  assert.equal(CANDIDATE_ESTIMATOR_POLICY_VERSION, 7);
+  assert.equal(CANDIDATE_ESTIMATOR_POLICY_VERSION, 8);
   assert.equal(CANDIDATE_MARKET_SCHEMA_VERSION, 5);
 });
 

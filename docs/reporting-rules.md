@@ -102,11 +102,11 @@ reason list per property.
   只含符合 production eligibility 的 held-out 交易；`review-only` 與硬性排除項均不在分母。
   缺少 acceptance、backtest 未完成/未達標、歷史 `--as-of` 未涵蓋完整索引、估值政策已變更或資料集
   已更新時一律降為 `review`，不得自動推薦。任何 eligibility、selector、weight、outlier、
-  confidence、status、coverage 或 backtest 語意變更都必須提高 `ESTIMATOR_POLICY_VERSION`
-  並重新通過完整 backtest。
-- 2026-08-03 修正兩車位遮罩總額與住宅專屬 Grade-B 比較後，policy-7 baseline candidate 已通過
-  全部固定 gate，並啟用 schema-5／policy-7／acceptance-schema-3 正式契約。
-  `update` 只有在完整 gate 通過後才可原子發布，否則保留 last-known-good。
+  confidence、listing-location status/eligibility、status、coverage 或 backtest 語意變更都必須提高
+  `ESTIMATOR_POLICY_VERSION` 並重新通過完整 backtest。
+- policy-8 將 listing-location status/eligibility 納入相容性契約，並啟用
+  schema-5／policy-8／acceptance-schema-3 正式契約。此 bump 必須由 `update`
+  完整通過 gate 後原子發布，否則保留 last-known-good。
   `marketEstimate` 仍是官方市場脈絡與資料品質的基準；`marketScenarios` 只依 acceptance 已核准的用途與
   車位家族補充情境證據，不得繞過用途、車位數、地址、freshness 或信心檢查。
   詳見 [safe-stop design](superpowers/specs/2026-08-03-multi-use-parking-safe-stop-design.md)。
