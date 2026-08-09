@@ -16,6 +16,11 @@ const freshEnrichment = {
   }],
 };
 
+const matchedLocationEvidence = {
+  verdict: 'matched',
+  reasons: ['listing-coordinate-near-doorplate'],
+};
+
 test('all report statuses reject legacy enrichment without tenureGate', () => {
   const legacy = {
     ...freshEnrichment,
@@ -95,6 +100,75 @@ test('allows ok when fresh unavailable market evidence is internally consistent'
       marketEstimate: { status: 'unavailable', sourceFreshness: { transactionStale: false, doorplateStale: false } },
     }],
   }));
+});
+
+test('rejects ok when a reliable estimate carries unavailable location evidence', () => {
+  assert.throws(() => assertNotificationStatusAllowsMarketData('ok', {
+    ...freshEnrichment,
+    listings: [{
+      tenureGate: 'eligible',
+      marketEstimate: {
+        status: 'reliable',
+        sourceFreshness: { transactionStale: false, doorplateStale: false },
+        subjectLocationEvidence: {
+          verdict: 'unavailable',
+          reasons: ['listing-coordinate-doorplate-unavailable'],
+        },
+      },
+    }],
+  }), /location evidence.*market status/);
+});
+
+test('rejects ok when location evidence has an unknown verdict', () => {
+  assert.throws(() => assertNotificationStatusAllowsMarketData('ok', {
+    ...freshEnrichment,
+    listings: [{
+      tenureGate: 'eligible',
+      marketEstimate: {
+        status: 'reliable',
+        sourceFreshness: { transactionStale: false, doorplateStale: false },
+        subjectLocationEvidence: { verdict: 'future-verdict', reasons: [] },
+      },
+    }],
+  }), /valid subjectLocationEvidence verdict and reasons/);
+});
+
+test('rejects ok when location evidence has an unknown reason', () => {
+  assert.throws(() => assertNotificationStatusAllowsMarketData('ok', {
+    ...freshEnrichment,
+    listings: [{
+      tenureGate: 'eligible',
+      marketEstimate: {
+        status: 'reliable',
+        sourceFreshness: { transactionStale: false, doorplateStale: false },
+        subjectLocationEvidence: { verdict: 'matched', reasons: ['future-location-reason'] },
+      },
+    }],
+  }), /valid subjectLocationEvidence verdict and reasons/);
+});
+
+test('allows ok for valid current location evidence and market-status combinations', () => {
+  for (const [status, subjectLocationEvidence] of [
+    ['reliable', matchedLocationEvidence],
+    ['review', { verdict: 'uncertain', reasons: ['listing-address-range-uncertain'] }],
+    ['unavailable', { verdict: 'conflict', reasons: ['listing-coordinate-address-conflict'] }],
+    ['unavailable', { verdict: 'unavailable', reasons: ['listing-coordinate-administrative-area-unavailable'] }],
+  ] as const) {
+    assert.doesNotThrow(() => assertNotificationStatusAllowsMarketData('ok', {
+      ...freshEnrichment,
+      marketReliable: status === 'reliable' ? 1 : 0,
+      marketReview: status === 'review' ? 1 : 0,
+      marketUnavailable: status === 'unavailable' ? 1 : 0,
+      listings: [{
+        tenureGate: 'eligible',
+        marketEstimate: {
+          status,
+          sourceFreshness: { transactionStale: false, doorplateStale: false },
+          subjectLocationEvidence,
+        },
+      }],
+    }));
+  }
 });
 
 test('fails closed when market summary counts disagree with listings', () => {

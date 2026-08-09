@@ -57,7 +57,9 @@ function subjectReasons(subject: ScenarioMarketSubject): string[] {
   if (locationEvidence) {
     reasons.push(...locationEvidence.reasons);
     if (locationEvidence.verdict === 'uncertain') reasons.push('location-uncertain');
-    if (locationEvidence.verdict === 'conflict') reasons.push('location-unreliable');
+    if (locationEvidence.verdict === 'conflict' || locationEvidence.verdict === 'unavailable') {
+      reasons.push('location-unreliable');
+    }
   }
   if (!Number.isFinite(subject.coordinate.lat) || !Number.isFinite(subject.coordinate.lng)) reasons.push('location-unreliable');
   if (!subject.district) reasons.push('missing-district');

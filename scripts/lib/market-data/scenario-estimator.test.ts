@@ -588,6 +588,42 @@ test('conflicting listing location blocks scenario derivation with its exact evi
   assert.ok(result.scenarios.every((scenario) => scenario.reasons.includes('location-unreliable')));
 });
 
+test('unavailable listing location blocks scenario derivation when called directly', () => {
+  const result = estimateMarketScenarios(
+    {
+      ...unknownUseSubject,
+      registeredUse: { value: 'residential', source: 'official', detail: '使用執照' },
+      subjectLocationEvidence: {
+        verdict: 'unavailable',
+        address: {
+          method: 'unresolved', coordinate: null, normalizedAddress: '台北市中正區測試路',
+          matchedAddress: null, uncertaintyMeters: null,
+          confidence: 'low', datasetVersion: 'fixture',
+        },
+        nearestDoorplate: {
+          method: 'unresolved', coordinate: null, normalizedAddress: '台北市中正區測試路',
+          matchedAddress: null, uncertaintyMeters: null,
+          confidence: 'low', datasetVersion: 'fixture',
+        },
+        addressDistanceMeters: null,
+        distanceBeyondUncertaintyMeters: null,
+        thresholdMeters: 300,
+        reasons: ['listing-coordinate-doorplate-unavailable'],
+      },
+    },
+    indexWithTransactions(allUseTransactions()),
+    fresh,
+    AS_OF,
+    scenarioAcceptance,
+  );
+
+  assert.ok(result.scenarios.every((scenario) => scenario.status === 'unavailable'));
+  assert.ok(result.scenarios.every((scenario) => scenario.reasons.includes(
+    'listing-coordinate-doorplate-unavailable',
+  )));
+  assert.ok(result.scenarios.every((scenario) => scenario.reasons.includes('location-unreliable')));
+});
+
 test('high joint parking uncertainty downgrades accepted grade-B evidence to low-confidence review', () => {
   const imputation = {
     asOf: '2025-12-15', stage: 'nearby-500m' as const,

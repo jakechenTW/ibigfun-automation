@@ -2,9 +2,48 @@ import { validateValuationReview, validateValuationReviewAgainstEnriched } from 
 
 export type NotificationStatus = 'ok' | 'warn' | 'fail';
 
+const LOCATION_REASON_BY_VERDICT = {
+  matched: new Set(['listing-coordinate-near-doorplate']),
+  uncertain: new Set([
+    'listing-address-range-uncertain',
+    'listing-coordinate-doorplate-distance-uncertain',
+  ]),
+  conflict: new Set(['listing-coordinate-address-conflict']),
+  unavailable: new Set([
+    'listing-coordinate-doorplate-unavailable',
+    'listing-coordinate-administrative-area-unavailable',
+  ]),
+} as const;
+
 function record(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown> : null;
+}
+
+function assertValidLocationEvidence(estimate: Record<string, unknown>, estimateStatus: string): void {
+  const rawEvidence = estimate.subjectLocationEvidence;
+  if (rawEvidence === undefined || rawEvidence === null) return;
+  const evidence = record(rawEvidence);
+  const verdict = evidence?.verdict;
+  const reasons = evidence?.reasons;
+  const allowedReasons = typeof verdict === 'string'
+    ? LOCATION_REASON_BY_VERDICT[verdict as keyof typeof LOCATION_REASON_BY_VERDICT]
+    : undefined;
+  const validReasons = Array.isArray(reasons)
+    && reasons.every((reason): reason is string => typeof reason === 'string')
+    && (verdict === 'matched'
+      ? reasons.length <= 1 && reasons.every((reason) => allowedReasons?.has(reason) === true)
+      : reasons.length === 1 && reasons.every((reason) => allowedReasons?.has(reason) === true));
+  if (!allowedReasons || !validReasons) {
+    throw new Error('a valid subjectLocationEvidence verdict and reasons are required for --status-notify ok');
+  }
+
+  const statusAllowed = verdict === 'matched'
+    || (verdict === 'uncertain' && (estimateStatus === 'review' || estimateStatus === 'unavailable'))
+    || ((verdict === 'conflict' || verdict === 'unavailable') && estimateStatus === 'unavailable');
+  if (!statusAllowed) {
+    throw new Error('location evidence must be consistent with market status before --status-notify ok');
+  }
 }
 
 /** Rejects legacy enrichment so every completed report has tenure evidence. */
@@ -69,6 +108,7 @@ export function assertNotificationStatusAllowsMarketData(status: NotificationSta
       typeof freshness?.transactionStale !== 'boolean' || typeof freshness.doorplateStale !== 'boolean') {
       throw new Error('a valid enriched artifact with listing market status and freshness is required for --status-notify ok');
     }
+    assertValidLocationEvidence(estimate!, estimateStatus);
     actual[estimateStatus === 'reliable' ? 'marketReliable' : estimateStatus === 'review' ? 'marketReview' : 'marketUnavailable'] += 1;
     if (freshness.transactionStale || freshness.doorplateStale) actual.marketDataStale += 1;
   }

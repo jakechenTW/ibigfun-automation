@@ -187,17 +187,21 @@ function listing(overrides: Partial<PreMarketEnrichedListing> = {}): PreMarketEn
   };
 }
 
-function bundleWithNearestDoorplate(distanceM: number): MarketDataBundle {
+function bundleWithNearestDoorplate(
+  distanceM: number,
+  canonicalAddress = '台北市中正區別路88號',
+  district = '中正區',
+): MarketDataBundle {
   const accepted = bundleWithAcceptance();
   const coordinate = {
     lat: 25.033964 + (distanceM / 6_371_000) * (180 / Math.PI),
     lng: 121.564468,
   };
   const point: DoorplatePoint = {
-    canonicalAddress: '台北市中正區別路88號',
+    canonicalAddress,
     coordinate,
-    district: '中正區',
-    roadKey: '台北市中正區別路',
+    district,
+    roadKey: canonicalAddress.replace(/\d+號$/u, ''),
     mainNumber: 88,
     subNumber: null,
   };
@@ -352,6 +356,23 @@ test('missing administrative evidence leaves unresolved coordinates unavailable'
     assert.deepEqual(result.marketEstimate.unavailableReasons, [
       'listing-coordinate-administrative-area-unavailable',
     ], addressOrArea);
+  }
+});
+
+test('unresolved listing address with a city or district mismatch is a conflict', () => {
+  for (const [canonicalAddress, district] of [
+    ['新北市中正區別路88號', '中正區'],
+    ['台北市大安區別路88號', '大安區'],
+  ] as const) {
+    const [result] = attachMarketEstimates([
+      listing({ addressOrArea: '台北市中正區定位路' }),
+    ], bundleWithNearestDoorplate(25.5, canonicalAddress, district), AS_OF);
+
+    assert.equal(result.marketEstimate.subjectLocationEvidence?.verdict, 'conflict', canonicalAddress);
+    assert.equal(result.marketEstimate.status, 'unavailable', canonicalAddress);
+    assert.deepEqual(result.marketEstimate.unavailableReasons, [
+      'listing-coordinate-address-conflict',
+    ], canonicalAddress);
   }
 });
 
