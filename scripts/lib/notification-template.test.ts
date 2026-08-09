@@ -164,6 +164,32 @@ test('active report instructions retain full evidence locally and render only co
   assert.match(workerPrompt, /有座標[^。\n]*\[地圖\]\(https:\/\/www\.google\.com\/maps\?q=<lat>,<lng>\)/);
 });
 
+test('active report instructions render every available official median compactly', () => {
+  const activeInstructionSets = [
+    sharedRules,
+    investmentRules,
+    ownerRules,
+    workerPrompt,
+  ];
+
+  for (const instructions of activeInstructionSets) {
+    assert.match(instructions, /marketUnitPriceMedian/);
+    assert.match(instructions, /comparables\.length/);
+    assert.match(instructions, /(?:小數點後? ?1 位|1 decimal)/i);
+    assert.match(instructions, /官方成交中位約/);
+    assert.match(instructions, /review[^\n]*(?:一則|one)[^\n]*(?:限制|limitation)/i);
+    assert.match(instructions, /median is null|中位數[^\n]*(?:null|無)/i);
+  }
+
+  assert.match(sharedRules, /官方成交中位約 56\.4 萬\/坪（13 筆可比）/);
+  assert.match(sharedRules, /官方成交中位約 56\.4 萬\/坪（13 筆可比；地址定位待確認）/);
+  assert.match(sharedRules, /官方行情無法估算：座標附近無可驗證門牌。/);
+  assert.match(sharedRules, /<= ?100 ?(?:m|公尺|metres)/i);
+  assert.match(sharedRules, /> ?100[^\n]*<= ?300 ?(?:m|公尺|metres)/i);
+  assert.match(sharedRules, /road[^\n]*mismatch[^\n]*(?:not a warning|不是警訊)/i);
+  assert.match(sharedRules, /Do not print raw status syntax,\s*P25[–-]P75/i);
+});
+
 test('shared rules preserve known tenure without inventing an unknown price trend', () => {
   assert.match(sharedRules, /daysOnMarket === 0[^\n]*`🕒 今日上架`/);
   assert.match(sharedRules, /known positive days[^\n]*unknown price trend[^\n]*`🕒 已刊登 \{daysOnMarket\} 天`/i);

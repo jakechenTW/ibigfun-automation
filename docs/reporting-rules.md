@@ -65,13 +65,28 @@ exclusion.
 
 `enriched.json` 的 `marketEstimate` 是成交行情的預設且權威的工作來源：它以本地、版本化的
 內政部實價登錄與台北市門牌資料選出可比成交。完整的 status、中位數、P25–P75、信心、可比筆數、選用階段與官方資料日期/新鮮度都保留在 git-ignored 的 `enriched.json` 和本地 evidence。
-`report.md` 只顯示由該證據組成的精簡 `market_summary_line`：可靠資料可顯示官方中位數及可比筆數；review/unavailable 則顯示人類可讀的原因。不可逐筆顯示 raw status、P25–P75、階段、信心 enum、資料日期或完整可比／原因清單。
+`report.md` 只顯示由該證據組成的精簡 `market_summary_line`。
+When
+`marketUnitPriceMedian` is non-null, render `官方成交中位約 {median rounded to 1 decimal} 萬/坪（{comparables.length} 筆可比{review limitation, when applicable}）`.
+A `review` value retains exactly one concise human-readable limitation and never
+becomes recommendation-eligible merely because a value exists. When the median
+is null, render only a concise unavailable reason. Examples:
+`官方成交中位約 56.4 萬/坪（13 筆可比）`
+`官方成交中位約 56.4 萬/坪（13 筆可比；地址定位待確認）`
+`官方行情無法估算：座標附近無可驗證門牌。`
+Do not print raw status syntax,
+P25–P75, internal stage, raw confidence enum, source-check date, or the full
+reason list per property.
 
 - 門牌索引與交易查找共用結構化的 base-doorplate key（市／區／路、選填段巷弄、號與子號），
   只有明確且完整的樓層／戶別文法可移除後再配對；`附近`、`隔壁巷` 或混合／不完整尾碼一律
   unresolved。相同 base key 的所有保留點必須有完全相同的經緯度才可 exact match；座標衝突時
   不得任選一點。原始地址、完整正規化地址、配對門牌、方法與不確定範圍仍完整保留在本機
   evidence。不可用模糊文字補猜缺失的市、區、路或號。
+- 未解析文字地址只要 listing coordinate 可靠、行政區一致，且最近官方門牌距離 `<=100 m`，
+  即為已接受的位置證據；`>100 m && <=300 m` 為 review-only，300 m 內無可驗證門牌則
+  unavailable。An incomplete road-name mismatch within the accepted band is not a warning；它不會
+  變成同棟門牌，也不會啟用同棟情境。
 - 官方交易先分成三類：一般市場、單一建物、`住家用` 且車位為 Grade A（明確無車位，或
   價格與面積皆可直接分離）並通過所有硬性品質檢查者為 `reliable-eligible`。已知的
   `住商用`／辦公／商業／工業／住工用途、多棟移轉，或車位為 Grade B（僅缺一項或兩項）
@@ -270,7 +285,7 @@ precedence over a positive or clean-data candidate bucket.
   - For only unknown days, use `🕒 刊登天數待確認`.
   - Never invent a price-history value.
 - Omit an unavailable optional segment instead of printing repeated `—`. Convert decision-relevant missing data into a short action phrase; never invent a value.
-- Compose `market_summary_line` from authoritative `marketEstimate`: reliable evidence may show the official median and comparable count; review/unavailable evidence states the human-readable reason. Do not print raw status syntax, P25-P75, internal stage, raw confidence enum, source-check date, or the full reason list per property.
+- Compose `market_summary_line` from authoritative `marketEstimate`: When `marketUnitPriceMedian` is non-null, render `官方成交中位約 {median rounded to 1 decimal} 萬/坪（{comparables.length} 筆可比{review limitation, when applicable}）`. A `review` value retains exactly one concise human-readable limitation and never becomes recommendation-eligible merely because a value exists. When the median is null, render only a concise unavailable reason. Do not print raw status syntax, P25-P75, internal stage, raw confidence enum, source-check date, or the full reason list per property.
 - Any stale official source remains visible in the top warning and affected listing, forces `warn`, and blocks an automatic positive bucket.
 - A bounded external review that affects a bucket gets one compact review conclusion. It never overwrites official evidence and raw external content remains local.
 - Never describe a listing as cheap, expensive, a deal, overpriced, suspicious, sorted, bucketed, or excludable from asking price versus official evidence.

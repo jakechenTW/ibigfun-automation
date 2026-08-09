@@ -47,6 +47,7 @@ Room, living-room, and bathroom counts are displayed but are not hard criteria i
   or blocked-detail listings in the explicit `風險物件／待查` bucket rather than hiding them in exclusions.
 - Walking distance is a preference and sorting signal, not a disqualifier, unless this profile later adds an explicit walking threshold.
 - A `marketEstimate` with `review`/`unavailable`, stale source data, low confidence, or inseparable parking cannot support an automatic `符合條件` judgment; keep a clean, otherwise qualifying listing in `候選／資料待確認` with the compact evidence reason.
+- `market_summary_line` contract：When `marketUnitPriceMedian` is non-null, render `官方成交中位約 {median rounded to 1 decimal} 萬/坪（{comparables.length} 筆可比{review limitation, when applicable}）`. A `review` value retains exactly one concise human-readable limitation and never becomes recommendation-eligible merely because a value exists. When the median is null, render only a concise unavailable reason.
 
 ## Notification Status
 
@@ -66,3 +67,4 @@ Room, living-room, and bathroom counts are displayed but are not hard criteria i
 - Do not show investment-only mortgage, rent, cash-flow, coverage, or financing fields.
 - Put an unverified coded filter mapping in `data_warning`; it still forces `warn` and blocks a clean `ok` conclusion.
 - Summarize the configured tenure limit, self-use hard-criteria failures, and other confirmed hard failures by count.
+- Do not put P25–P75, raw market status/confidence/stage/dates, or complete unavailable reasons in `report.md`.

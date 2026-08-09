@@ -31,6 +31,7 @@ Use this profile for rental-yield-oriented investment screening.
   不用待售開價與官方估值的差異決定分桶或排序。
   完整可比證據留在本地 `enriched.json`；通知只呈現 `market_summary_line`。詳見
   `docs/reporting-rules.md`（Market Price Evidence）。
+- `market_summary_line` contract：When `marketUnitPriceMedian` is non-null, render `官方成交中位約 {median rounded to 1 decimal} 萬/坪（{comparables.length} 筆可比{review limitation, when applicable}）`. A `review` value retains exactly one concise human-readable limitation and never becomes recommendation-eligible merely because a value exists. When the median is null, render only a concise unavailable reason.
 - 僅能對低信心、review/unavailable 或其他有明確可解決行情疑點的少數物件做有界外部覆核；外部值不覆寫官方值。
   若外部覆核影響分桶，必須寫同 run 的 `valuation-review.json`，否則不可改桶。
 - 行情資料若過期、弱、review/unavailable，或車位不可分離，物件不可標推薦。
@@ -57,3 +58,4 @@ Use this profile for rental-yield-oriented investment screening.
 - Mortgage, estimated rent, cash flow, rental coverage, and financing assumptions remain workflow data but do not appear in the notification.
 - The exclusion summary separately counts target-station-outside, in-region-too-far, expired tenure, and other confirmed hard failures.
 - Do not emit asking-premium, conservative-price threshold, P25 gate, `p*`, or price-versus-market deal language.
+- Do not put P25–P75, raw market status/confidence/stage/dates, or complete unavailable reasons in `report.md`.
