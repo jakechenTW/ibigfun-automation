@@ -358,6 +358,18 @@ async function downgradeBuildToLegacySchema(
   await writeFile(join(root, 'manifest.json'), `${JSON.stringify(legacyManifest)}\n`);
 }
 
+async function setBuildPolicyVersion(root: string, estimatorPolicyVersion: number): Promise<void> {
+  const legacyManifest = JSON.parse(
+    await readFile(join(root, 'manifest.json'), 'utf8'),
+  ) as MarketDataManifest;
+  legacyManifest.estimatorPolicyVersion = estimatorPolicyVersion;
+  await writeFile(join(root, 'manifest.json'), `${JSON.stringify(legacyManifest)}\n`);
+}
+
+async function downgradeBuildToPolicy7(root: string): Promise<void> {
+  await setBuildPolicyVersion(root, 7);
+}
+
 async function convertBuildToCandidate(root: string): Promise<void> {
   for (const indexFile of ['doorplates-index.json', 'transactions-index.json']) {
     const index = JSON.parse(await readFile(join(root, indexFile), 'utf8')) as {
@@ -665,6 +677,49 @@ test('transactional publication loads the new build with its matching acceptance
   assert.equal(marketDataBacktestAccepted(loaded!), true);
 });
 
+test('publication replaces an accepted schema-5 policy-7 predecessor with policy-8', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-policy7-predecessor-'));
+  const active = join(parent, 'taipei');
+  const stage = join(parent, '.taipei-staging-next');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(active, 'policy7-build');
+  await downgradeBuildToPolicy7(active);
+  await writeFile(backtestAcceptancePath(active), `${stableJson({
+    ...await passingAcceptance(active),
+    estimatorPolicyVersion: 7,
+  })}\n`);
+  await writeBuild(stage, 'policy8-build');
+
+  const published = await publishStagedBuildWithAcceptance(active, stage, await passingAcceptance(stage), {
+    minDoorplates: 1,
+    minTransactions: 0,
+  });
+
+  assert.equal(published.manifest.estimatorPolicyVersion, 8);
+  assert.equal(published.backtestAcceptance?.estimatorPolicyVersion, 8);
+  assert.equal(marketDataBacktestAccepted(published), true);
+});
+
+test('publication rejects schema-5 predecessors outside policy-7 and policy-8', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'market-store-invalid-predecessor-'));
+  const active = join(parent, 'taipei');
+  const stage = join(parent, '.taipei-staging-next');
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await writeBuild(active, 'invalid-predecessor');
+  await writeBuild(stage, 'policy8-build');
+
+  for (const invalidPolicyVersion of [6, 7.5, 9]) {
+    await setBuildPolicyVersion(active, invalidPolicyVersion);
+    await assert.rejects(
+      async () => publishStagedBuildWithAcceptance(active, stage, await passingAcceptance(stage), {
+        minDoorplates: 1,
+        minTransactions: 0,
+      }),
+      /policy provenance/i,
+    );
+  }
+});
+
 test('acceptance publication failure restores the old build and acceptance pair', async (t) => {
   const parent = await mkdtemp(join(tmpdir(), 'market-store-'));
   const active = join(parent, 'taipei');
@@ -705,13 +760,15 @@ test('publication rollback preserves exact accepted predecessor bytes', async (t
   for (const predecessor of [
     { schemaVersion: 3 as const, policyVersion: 4, acceptanceSchema: 2 as const },
     { schemaVersion: 4 as const, policyVersion: 5, acceptanceSchema: 3 as const },
+    { schemaVersion: 5 as const, policyVersion: 7, acceptanceSchema: 3 as const },
   ]) await t.test(`schema-${predecessor.schemaVersion} policy-${predecessor.policyVersion}`, async (t) => {
     const parent = await mkdtemp(join(tmpdir(), 'market-store-predecessor-rollback-'));
     const active = join(parent, 'taipei');
     const stage = join(parent, '.taipei-staging-next');
     t.after(() => rm(parent, { recursive: true, force: true }));
     await writeBuild(active, `old-schema-${predecessor.schemaVersion}`);
-    await downgradeBuildToLegacySchema(active, predecessor.schemaVersion);
+    if (predecessor.schemaVersion === 5) await downgradeBuildToPolicy7(active);
+    else await downgradeBuildToLegacySchema(active, predecessor.schemaVersion);
     const oldAcceptance = predecessor.acceptanceSchema === 2
       ? { ...await passingLegacyAcceptance(active), estimatorPolicyVersion: predecessor.policyVersion }
       : { ...await passingAcceptance(active), estimatorPolicyVersion: predecessor.policyVersion };

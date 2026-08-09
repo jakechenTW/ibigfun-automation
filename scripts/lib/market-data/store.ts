@@ -1121,9 +1121,16 @@ function validateManifestPolicy(
   if ((manifest.schemaVersion === 1 || manifest.schemaVersion === 2) && hasPolicyVersion) {
     throw new Error('Legacy market manifest policy provenance does not match its schema');
   }
+  if (manifest.schemaVersion === MARKET_SCHEMA_VERSION) {
+    const currentOrImmediatePredecessor = manifest.estimatorPolicyVersion === ESTIMATOR_POLICY_VERSION
+      || (mode === 'restorable' && manifest.estimatorPolicyVersion === 7);
+    if (!currentOrImmediatePredecessor) {
+      throw new Error('Legacy market manifest policy provenance does not match its schema');
+    }
+    return;
+  }
   const expectedPolicy = manifest.schemaVersion === 3 ? 4
-    : manifest.schemaVersion === 4 ? 5
-      : manifest.schemaVersion === MARKET_SCHEMA_VERSION ? ESTIMATOR_POLICY_VERSION : null;
+    : manifest.schemaVersion === 4 ? 5 : null;
   if (expectedPolicy !== null && manifest.estimatorPolicyVersion !== expectedPolicy) {
     throw new Error('Legacy market manifest policy provenance does not match its schema');
   }
@@ -1473,7 +1480,9 @@ function validateAcceptanceForBundle(
     && manifest.schemaVersion === 3 && manifest.estimatorPolicyVersion === 4;
   const legacySchema4 = mode === 'restorable'
     && manifest.schemaVersion === 4 && manifest.estimatorPolicyVersion === 5;
-  if (!current && !legacySchema3 && !legacySchema4) {
+  const immediatePredecessor = mode === 'restorable'
+    && manifest.schemaVersion === MARKET_SCHEMA_VERSION && manifest.estimatorPolicyVersion === 7;
+  if (!current && !legacySchema3 && !legacySchema4 && !immediatePredecessor) {
     throw new Error('Backtest acceptance does not match a restorable build policy');
   }
   if (acceptance.transactionArtifactSha256 !== transactionArtifactChecksum(bundle.manifest)) {
@@ -1487,7 +1496,9 @@ function validateAcceptanceForBundle(
     )
     : legacySchema3
       ? validBacktestAcceptanceForPolicy(acceptance, 4, ACTIVE_ESTIMATOR_POLICY.id)
-      : validCandidateBacktestAcceptanceForPolicy(acceptance, ACTIVE_ESTIMATOR_POLICY.id, 5);
+      : legacySchema4
+        ? validCandidateBacktestAcceptanceForPolicy(acceptance, ACTIVE_ESTIMATOR_POLICY.id, 5)
+        : validCandidateBacktestAcceptanceForPolicy(acceptance, ACTIVE_ESTIMATOR_POLICY.id, 7);
   if (!validShape) {
     throw new Error('Refusing to publish a non-passing backtest acceptance');
   }
