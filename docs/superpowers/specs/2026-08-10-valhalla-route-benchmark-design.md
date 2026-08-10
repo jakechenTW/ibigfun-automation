@@ -78,9 +78,10 @@ array, then calls `/sources_to_targets` with:
 
 It returns `(number | null)[]` in meters aligned to the destinations, matching
 the existing `routeWalkDistances` boundary. The client validates HTTP status,
-response shape, source/target alignment, finite non-negative distances, and
-timeout behavior. It does not know about profiles, listings, MRT exits, caches,
-or report rules.
+the compact `sources_to_targets.distances` response shape, source/target
+alignment, finite non-negative distances, and timeout behavior. It does not
+accept a top-level `distances` fallback and does not know about profiles,
+listings, MRT exits, caches, or report rules.
 
 ### Historical case loader
 

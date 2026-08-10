@@ -73,7 +73,14 @@ export async function routeValhallaWalkDistances(
 Create tests that inject `fetchFn`, capture the URL, headers, and JSON body, and return:
 
 ```ts
-new Response(JSON.stringify({ distances: [[0.42, null, 1.005]] }), {
+new Response(JSON.stringify({
+  sources_to_targets: {
+    durations: [[315, null, 754]],
+    distances: [[0.42, null, 1.005]],
+  },
+  units: 'kilometers',
+  algorithm: 'costmatrix',
+}), {
   status: 200,
   headers: { 'Content-Type': 'application/json' },
 });
@@ -127,8 +134,9 @@ const res = await fetchFn(`${baseUrl.replace(/\/$/, '')}/sources_to_targets`, {
 });
 ```
 
-Validate `json.distances` as a single row whose length equals `dests.length`.
-Accept only `null` or finite non-negative numbers, and convert kilometers with
+Validate `json.sources_to_targets.distances` as a single row whose length equals
+`dests.length`. Do not fall back to a top-level `distances` property. Accept
+only `null` or finite non-negative numbers, and convert kilometers with
 `Math.round(km * 1000)`.
 
 - [ ] **Step 4: Run the focused test and verify GREEN**
