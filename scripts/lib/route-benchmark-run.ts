@@ -94,6 +94,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function isNullableString(value: unknown): boolean {
+  return value === null || typeof value === 'string';
+}
+
+function isBenchmarkListing(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const coordinate = value.coordinate;
+  const validCoordinate = coordinate === null
+    || (isRecord(coordinate)
+      && typeof coordinate.lat === 'number'
+      && Number.isFinite(coordinate.lat)
+      && typeof coordinate.lng === 'number'
+      && Number.isFinite(coordinate.lng));
+  return typeof value.title === 'string'
+    && isNullableString(value.addressOrArea)
+    && isNullableString(value.totalPrice)
+    && isNullableString(value.totalPing)
+    && isNullableString(value.unitPrice)
+    && isNullableString(value.age)
+    && (value.id === null || (typeof value.id === 'number' && Number.isFinite(value.id)))
+    && validCoordinate;
+}
+
 function readFetchResult(file: string, date: string): FetchResult {
   if (!fs.existsSync(file)) {
     throw new Error(`missing listing input for ${date}: ${file}`);
@@ -105,12 +128,16 @@ function readFetchResult(file: string, date: string): FetchResult {
     throw new Error(`listing input for ${date} is not valid JSON: ${file}`);
   }
   if (!isRecord(parsed)
-    || typeof parsed.from !== 'string'
-    || typeof parsed.to !== 'string'
+    || parsed.from !== date
+    || parsed.to !== date
     || typeof parsed.fetchedAt !== 'string'
+    || !Number.isFinite(Date.parse(parsed.fetchedAt))
+    || typeof parsed.count !== 'number'
     || !Number.isSafeInteger(parsed.count)
+    || parsed.count < 0
     || !Array.isArray(parsed.listings)
-    || parsed.listings.some((listing) => !isRecord(listing))) {
+    || parsed.count !== parsed.listings.length
+    || parsed.listings.some((listing) => !isBenchmarkListing(listing))) {
     throw new Error(`listing input for ${date} has invalid FetchResult shape: ${file}`);
   }
   return parsed as unknown as FetchResult;

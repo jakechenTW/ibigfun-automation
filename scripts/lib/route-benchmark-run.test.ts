@@ -298,6 +298,118 @@ test('runRouteBenchmark rejects an invalid FetchResult shape before routing', as
   assert.equal(calls, 0);
 });
 
+test('runRouteBenchmark rejects malformed fields consumed from nested listings before routing', async (t) => {
+  // Would fail if the FetchResult boundary checked only that each listing was a plain object.
+  const cases: Array<{
+    name: string;
+    mutate: (listing: Record<string, unknown>) => void;
+    serialize?: (document: Record<string, unknown>) => string;
+  }> = [
+    { name: 'missing title', mutate: (item) => { delete item.title; } },
+    { name: 'non-string title', mutate: (item) => { item.title = 42; } },
+    { name: 'missing addressOrArea', mutate: (item) => { delete item.addressOrArea; } },
+    { name: 'non-string totalPrice', mutate: (item) => { item.totalPrice = 1000; } },
+    { name: 'non-string totalPing', mutate: (item) => { item.totalPing = false; } },
+    { name: 'non-string unitPrice', mutate: (item) => { item.unitPrice = []; } },
+    { name: 'non-string age', mutate: (item) => { item.age = {}; } },
+    { name: 'non-numeric id', mutate: (item) => { item.id = '9123456'; } },
+    { name: 'missing coordinate', mutate: (item) => { delete item.coordinate; } },
+    { name: 'non-numeric coordinate longitude', mutate: (item) => {
+      item.coordinate = { lat: 25.0321, lng: '121.5181' };
+    } },
+    {
+      name: 'non-finite coordinate latitude',
+      mutate: () => {},
+      serialize: (document) => JSON.stringify(document).replace('"lat":25.0321', '"lat":1e400'),
+    },
+  ];
+
+  for (const malformed of cases) {
+    await t.test(malformed.name, async (subtest) => {
+      const workspace = createWorkspace(subtest);
+      const document = JSON.parse(fs.readFileSync(workspace.listingPaths[0], 'utf8')) as {
+        listings: Array<Record<string, unknown>>;
+      } & Record<string, unknown>;
+      malformed.mutate(document.listings[0]);
+      fs.writeFileSync(
+        workspace.listingPaths[0],
+        malformed.serialize?.(document) ?? JSON.stringify(document),
+      );
+      let calls = 0;
+
+      await assert.rejects(
+        runRouteBenchmark(options(workspace.rootDir), {
+          route: async () => {
+            calls += 1;
+            return [];
+          },
+          sleep: async () => {},
+        }),
+        /listing input for 2026-08-01 has invalid FetchResult shape/i,
+      );
+      assert.equal(calls, 0);
+    });
+  }
+});
+
+test('runRouteBenchmark accepts an explicit null coordinate and classifies it as skipped', async (t) => {
+  // Would fail if boundary validation confused the documented null coordinate with a missing/malformed field.
+  const workspace = createWorkspace(t);
+  const document = JSON.parse(fs.readFileSync(workspace.listingPaths[0], 'utf8')) as {
+    listings: Array<Record<string, unknown>>;
+  } & Record<string, unknown>;
+  document.listings[0].coordinate = null;
+  fs.writeFileSync(workspace.listingPaths[0], JSON.stringify(document));
+  let calls = 0;
+
+  const { artifact } = await runRouteBenchmark(options(workspace.rootDir), {
+    route: async () => {
+      calls += 1;
+      return [650, 750, 850];
+    },
+    sleep: async () => {},
+  });
+
+  assert.equal(artifact.summary.skipped['no-coordinate'], 1);
+  assert.equal(artifact.summary.selected, 1);
+  assert.equal(calls, 1);
+});
+
+test('runRouteBenchmark rejects inconsistent daily FetchResult metadata before routing', async (t) => {
+  // Would fail if typed-looking metadata were trusted without matching the daily artifact or listing count.
+  const cases: Array<{
+    name: string;
+    mutate: (document: Record<string, unknown>) => void;
+  }> = [
+    { name: 'wrong from date', mutate: (document) => { document.from = '2026-07-31'; } },
+    { name: 'wrong to date', mutate: (document) => { document.to = '2026-08-02'; } },
+    { name: 'invalid fetchedAt', mutate: (document) => { document.fetchedAt = 'not-a-timestamp'; } },
+    { name: 'listing count mismatch', mutate: (document) => { document.count = 2; } },
+  ];
+
+  for (const malformed of cases) {
+    await t.test(malformed.name, async (subtest) => {
+      const workspace = createWorkspace(subtest);
+      const document = JSON.parse(fs.readFileSync(workspace.listingPaths[0], 'utf8')) as Record<string, unknown>;
+      malformed.mutate(document);
+      fs.writeFileSync(workspace.listingPaths[0], JSON.stringify(document));
+      let calls = 0;
+
+      await assert.rejects(
+        runRouteBenchmark(options(workspace.rootDir), {
+          route: async () => {
+            calls += 1;
+            return [];
+          },
+          sleep: async () => {},
+        }),
+        /listing input for 2026-08-01 has invalid FetchResult shape/i,
+      );
+      assert.equal(calls, 0);
+    });
+  }
+});
+
 test('runRouteBenchmark rejects a structurally invalid route cache before routing', async (t) => {
   // Would fail if valid JSON with the wrong cache shape were treated as cached route evidence.
   const workspace = createWorkspace(t);
