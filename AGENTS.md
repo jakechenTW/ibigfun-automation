@@ -159,9 +159,12 @@ evaluation, and writing the report.
   Timestamped detailed local evidence is written under `state/route-benchmarks/`
   and may contain privacy-sensitive per-case listing IDs, coordinates, exit IDs,
   and provider distances; keep it local and never notify or commit it. Only
-  stdout and stderr are aggregate-only. The benchmark never affects enrich,
-  report, or notify and cannot justify a provider switch without a separate
-  design and walking-policy revalidation.
+  stdout and stderr are aggregate-only. Before sensitive input reads or routing,
+  the artifact directory is preflighted for atomic hard-link publication;
+  unsupported filesystems fail early. If a detailed temporary artifact cannot be
+  removed after publication, the command fails and requires local cleanup. The
+  benchmark never affects enrich, report, or notify and cannot justify a provider
+  switch without a separate design and walking-policy revalidation.
 - `npm run pipeline -- run --profile <profile> [--date <target> | --from <a>
   --to <b>]` — thin orchestrator over fetch → enrich → report → notify. A run
   covers an inclusive date range; a single day is the default (previous Taipei
