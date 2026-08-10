@@ -6,14 +6,19 @@ import * as path from 'node:path';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 import {
+  ARTIFACT_PREFLIGHT_ERROR,
   benchmarkArtifactPath,
   inclusiveDates,
   parseBenchmarkLimit,
+  preflightHardLinkPublication,
   runRouteBenchmark,
   type RouteBenchmarkDeps,
   type RouteBenchmarkOptions,
 } from './route-benchmark-run.ts';
 import type { Listing } from './types.ts';
+
+const ARTIFACT_CLEANUP_ERROR =
+  'route benchmark published artifact but could not remove sensitive temporary data';
 
 test('parseBenchmarkLimit defaults to 25 when --limit is omitted', () => {
   assert.equal(parseBenchmarkLimit(['--profile', 'example-investment']), 25);
@@ -224,6 +229,67 @@ function options(rootDir: string): RouteBenchmarkOptions {
   };
 }
 
+test('preflightHardLinkPublication succeeds and removes its probe files', (t) => {
+  // Would fail if the capability check left sensitive probe files behind on success.
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'route-benchmark-preflight-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+
+  preflightHardLinkPublication(directory);
+
+  assert.deepEqual(fs.readdirSync(directory), []);
+});
+
+test('preflightHardLinkPublication reports a fixed error and removes both probes after link rejection', (t) => {
+  // Would fail if a rejected hard link leaked its source/target probe or filesystem details.
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'route-benchmark-preflight-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const created: string[] = [];
+  const removed: string[] = [];
+
+  assert.throws(
+    () => preflightHardLinkPublication(directory, {
+      writeExclusive: (file) => {
+        created.push(file);
+        fs.writeFileSync(file, '', { flag: 'wx', mode: 0o600 });
+      },
+      link: (_source, target) => {
+        fs.writeFileSync(target, '', { flag: 'wx', mode: 0o600 });
+        throw new Error('synthetic hard-link secret');
+      },
+      remove: (file) => {
+        removed.push(file);
+        fs.rmSync(file, { force: true });
+      },
+    }),
+    (error: Error) => error.message === ARTIFACT_PREFLIGHT_ERROR,
+  );
+
+  assert.equal(created.length, 1);
+  assert.equal(removed.length, 2);
+  assert.equal(new Set(removed).size, 2);
+  assert.deepEqual(fs.readdirSync(directory), []);
+});
+
+test('runRouteBenchmark preflight failure precedes sensitive input reads and routing', async (t) => {
+  // Would fail if the capability gate moved after listings, route cache, or network routing.
+  const workspace = createWorkspace(t);
+  fs.renameSync(workspace.listingPaths[0], `${workspace.listingPaths[0]}.unread`);
+  fs.renameSync(workspace.cachePath, `${workspace.cachePath}.unread`);
+  let routeCalls = 0;
+
+  await assert.rejects(
+    runRouteBenchmark(options(workspace.rootDir), {
+      preflight: () => { throw new Error(ARTIFACT_PREFLIGHT_ERROR); },
+      route: async () => {
+        routeCalls += 1;
+        return [];
+      },
+    }),
+    new RegExp(ARTIFACT_PREFLIGHT_ERROR),
+  );
+  assert.equal(routeCalls, 0);
+});
+
 test('runRouteBenchmark loads every day, runs sequentially, continues after failure, and persists safely', async (t) => {
   // Would fail if inputs are skipped/mutated, requests overlap or leak listing data, failures abort, or persistence bypasses the sibling rename.
   const workspace = createWorkspace(t);
@@ -349,11 +415,13 @@ test('runRouteBenchmark preserves colliding artifacts and uses a unique temporar
   assert.equal(outputNames.some((name) => name.includes('.tmp-')), false);
 });
 
-test('runRouteBenchmark removes its unique temporary sibling after publication failure', async (t) => {
-  // Would fail if the failure path leaked detailed temporary evidence or removed another run's file.
+test('runRouteBenchmark preserves publication failure when temporary cleanup also fails', async (t) => {
+  // Would fail if cleanup masked the primary publication failure or was skipped after that failure.
   const workspace = createWorkspace(t);
   const fixedNow = new Date('2026-08-10T12:34:56.789Z');
   const seenTemps: string[] = [];
+  const visibleMessages: string[] = [];
+  let cleanupAttempts = 0;
   const sentinel = path.join(workspace.rootDir, 'unrelated-sentinel');
   fs.writeFileSync(sentinel, 'keep');
 
@@ -362,19 +430,64 @@ test('runRouteBenchmark removes its unique temporary sibling after publication f
       route: async () => [650, 750, 850],
       sleep: async () => {},
       now: () => fixedNow,
+      progress: (message) => visibleMessages.push(message),
       publish: (tmpPath) => {
         seenTemps.push(tmpPath);
         assert.equal(fs.existsSync(tmpPath), true);
         throw new Error('synthetic publication failure');
       },
+      removeTemporary: () => {
+        cleanupAttempts += 1;
+        throw new Error('synthetic cleanup secret');
+      },
     }),
-    /synthetic publication failure/,
+    (error: Error) => {
+      visibleMessages.push(error.message);
+      return error.message === 'synthetic publication failure';
+    },
   );
 
   assert.equal(seenTemps.length, 1);
+  assert.equal(cleanupAttempts, 1);
   assert.match(path.basename(seenTemps[0]), /\.json\.tmp-/);
-  assert.equal(fs.existsSync(seenTemps[0]), false);
   assert.equal(fs.readFileSync(sentinel, 'utf8'), 'keep');
+  const visible = visibleMessages.join('\n');
+  assert.equal(visible.includes('synthetic cleanup secret'), false);
+  assert.equal(visible.includes(workspace.rootDir), false);
+  assert.equal(visible.includes(seenTemps[0]), false);
+});
+
+test('runRouteBenchmark reports cleanup failure safely and preserves the published artifact', async (t) => {
+  // Would fail if post-publication cleanup errors were suppressed, leaked, or deleted the final evidence.
+  const workspace = createWorkspace(t);
+  const fixedNow = new Date('2026-08-10T12:34:56.789Z');
+  const expectedFinalArtifact = benchmarkArtifactPath(
+    workspace.rootDir,
+    'test-profile',
+    '2026-08-01_2026-08-02',
+    fixedNow,
+  );
+  const visibleMessages: string[] = [];
+
+  await assert.rejects(
+    runRouteBenchmark(options(workspace.rootDir), {
+      route: async () => [650, 750, 850],
+      sleep: async () => {},
+      now: () => fixedNow,
+      progress: (message) => visibleMessages.push(message),
+      removeTemporary: () => { throw new Error('synthetic cleanup secret'); },
+    }),
+    (error: Error) => {
+      visibleMessages.push(error.message);
+      return error.message === ARTIFACT_CLEANUP_ERROR;
+    },
+  );
+
+  assert.equal(fs.existsSync(expectedFinalArtifact), true);
+  const visible = visibleMessages.join('\n');
+  assert.equal(visible.includes('synthetic cleanup secret'), false);
+  assert.equal(visible.includes(workspace.rootDir), false);
+  assert.equal(visible.includes(expectedFinalArtifact), false);
 });
 
 test('runRouteBenchmark rejects a missing daily input before routing', async (t) => {

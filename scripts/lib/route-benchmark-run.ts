@@ -29,12 +29,25 @@ export interface RouteBenchmarkOptions {
 }
 
 export interface RouteBenchmarkDeps {
+  preflight: (directory: string) => void;
   route: typeof routeValhallaWalkDistances;
   sleep: (ms: number) => Promise<void>;
   now: () => Date;
   progress: (message: string) => void;
   publish: (tmpPath: string, desiredPath: string) => string;
+  removeTemporary: (tmpPath: string) => void;
 }
+
+export interface ArtifactPreflightFs {
+  writeExclusive(file: string): void;
+  link(source: string, target: string): void;
+  remove(file: string): void;
+}
+
+export const ARTIFACT_PREFLIGHT_ERROR =
+  'route benchmark artifact filesystem does not support atomic no-clobber publication';
+export const ARTIFACT_CLEANUP_ERROR =
+  'route benchmark published artifact but could not remove sensitive temporary data';
 
 export interface RouteBenchmarkArtifact {
   schemaVersion: 1;
@@ -194,6 +207,46 @@ function readRouteCache(file: string): RouteCache {
 
 let temporaryArtifactSequence = 0;
 
+const defaultArtifactPreflightFs: ArtifactPreflightFs = {
+  writeExclusive: (file) => fs.writeFileSync(file, '', { flag: 'wx', mode: 0o600 }),
+  link: (source, target) => fs.linkSync(source, target),
+  remove: (file) => fs.rmSync(file, { force: true }),
+};
+
+function uniqueProbePath(directory: string, kind: 'source' | 'target'): string {
+  const sequence = temporaryArtifactSequence;
+  temporaryArtifactSequence += 1;
+  return path.join(directory, `.atomic-publish-probe-${process.pid}-${sequence}-${kind}`);
+}
+
+export function preflightHardLinkPublication(
+  directory: string,
+  operations: ArtifactPreflightFs = defaultArtifactPreflightFs,
+): void {
+  fs.mkdirSync(directory, { recursive: true });
+  const probeSource = uniqueProbePath(directory, 'source');
+  const probeTarget = uniqueProbePath(directory, 'target');
+  let failure: unknown = null;
+  try {
+    operations.writeExclusive(probeSource);
+    operations.link(probeSource, probeTarget);
+  } catch {
+    failure = new Error(ARTIFACT_PREFLIGHT_ERROR);
+  } finally {
+    try {
+      operations.remove(probeTarget);
+    } catch {
+      failure = new Error(ARTIFACT_PREFLIGHT_ERROR);
+    }
+    try {
+      operations.remove(probeSource);
+    } catch {
+      failure = new Error(ARTIFACT_PREFLIGHT_ERROR);
+    }
+  }
+  if (failure) throw failure;
+}
+
 function errorCode(error: unknown): string | undefined {
   return typeof error === 'object' && error !== null && 'code' in error
     ? String(error.code)
@@ -248,9 +301,20 @@ export async function runRouteBenchmark(
   const now = deps.now ?? (() => new Date());
   const progress = deps.progress ?? (() => {});
   const publish = deps.publish ?? publishNoClobber;
+  const removeTemporary = deps.removeTemporary ?? ((tmpPath) => fs.rmSync(tmpPath));
+  const preflight = deps.preflight ?? preflightHardLinkPublication;
   const valhallaBaseUrl = normalizeValhallaBaseUrl(options.valhallaBaseUrl);
   const valhallaEndpoint = valhallaEndpointIdentifier(valhallaBaseUrl);
   const dates = inclusiveDates(options.range.from, options.range.to);
+  const artifactDirectory = path.join(
+    options.rootDir,
+    'state',
+    'route-benchmarks',
+    options.profileId,
+    options.range.label,
+  );
+  fs.mkdirSync(artifactDirectory, { recursive: true });
+  preflight(artifactDirectory);
   const runs = dates.map((date) => ({
     date,
     result: readFetchResult(
@@ -305,15 +369,22 @@ export async function runRouteBenchmark(
     desiredArtifactPath,
     `${JSON.stringify(artifact, null, 2)}\n`,
   );
-  let artifactPath: string;
+  let publishedPath: string | undefined;
+  let publicationError: unknown;
   try {
-    artifactPath = publish(tmpPath, desiredArtifactPath);
-  } finally {
-    try {
-      fs.rmSync(tmpPath, { force: true });
-    } catch {
-      // A published artifact remains authoritative even if stale temporary cleanup fails.
-    }
+    publishedPath = publish(tmpPath, desiredArtifactPath);
+  } catch (error) {
+    publicationError = error;
   }
-  return { artifactPath, artifact };
+
+  let cleanupError: unknown;
+  try {
+    removeTemporary(tmpPath);
+  } catch (error) {
+    cleanupError = error;
+  }
+
+  if (publicationError !== undefined) throw publicationError;
+  if (cleanupError !== undefined) throw new Error(ARTIFACT_CLEANUP_ERROR);
+  return { artifactPath: publishedPath!, artifact };
 }
