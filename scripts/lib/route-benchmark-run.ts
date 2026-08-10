@@ -223,11 +223,11 @@ export function preflightHardLinkPublication(
   directory: string,
   operations: ArtifactPreflightFs = defaultArtifactPreflightFs,
 ): void {
-  fs.mkdirSync(directory, { recursive: true });
   const probeSource = uniqueProbePath(directory, 'source');
   const probeTarget = uniqueProbePath(directory, 'target');
   let failure: unknown = null;
   try {
+    fs.mkdirSync(directory, { recursive: true });
     operations.writeExclusive(probeSource);
     operations.link(probeSource, probeTarget);
   } catch {
@@ -313,8 +313,11 @@ export async function runRouteBenchmark(
     options.profileId,
     options.range.label,
   );
-  fs.mkdirSync(artifactDirectory, { recursive: true });
-  preflight(artifactDirectory);
+  try {
+    preflight(artifactDirectory);
+  } catch {
+    throw new Error(ARTIFACT_PREFLIGHT_ERROR);
+  }
   const runs = dates.map((date) => ({
     date,
     result: readFetchResult(
@@ -364,27 +367,28 @@ export async function runRouteBenchmark(
     options.range.label,
     benchmarkTime,
   );
-  fs.mkdirSync(path.dirname(desiredArtifactPath), { recursive: true });
   const tmpPath = writeUniqueTemporarySibling(
     desiredArtifactPath,
     `${JSON.stringify(artifact, null, 2)}\n`,
   );
   let publishedPath: string | undefined;
   let publicationError: unknown;
+  let publicationFailed = false;
   try {
     publishedPath = publish(tmpPath, desiredArtifactPath);
   } catch (error) {
+    publicationFailed = true;
     publicationError = error;
   }
 
-  let cleanupError: unknown;
+  let cleanupFailed = false;
   try {
     removeTemporary(tmpPath);
-  } catch (error) {
-    cleanupError = error;
+  } catch {
+    cleanupFailed = true;
   }
 
-  if (publicationError !== undefined) throw publicationError;
-  if (cleanupError !== undefined) throw new Error(ARTIFACT_CLEANUP_ERROR);
+  if (publicationFailed) throw publicationError;
+  if (cleanupFailed) throw new Error(ARTIFACT_CLEANUP_ERROR);
   return { artifactPath: publishedPath!, artifact };
 }

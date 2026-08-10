@@ -271,23 +271,31 @@ test('preflightHardLinkPublication reports a fixed error and removes both probes
 });
 
 test('runRouteBenchmark preflight failure precedes sensitive input reads and routing', async (t) => {
-  // Would fail if the capability gate moved after listings, route cache, or network routing.
+  // Would fail if the capability gate moved after listings, MRT exits, route cache, or network routing.
   const workspace = createWorkspace(t);
   fs.renameSync(workspace.listingPaths[0], `${workspace.listingPaths[0]}.unread`);
   fs.renameSync(workspace.cachePath, `${workspace.cachePath}.unread`);
+  const exitsPath = path.join(workspace.rootDir, 'data', 'taipei_mrt_exits.csv');
+  fs.renameSync(exitsPath, `${exitsPath}.unread`);
   let routeCalls = 0;
+  let visibleError = '';
 
   await assert.rejects(
     runRouteBenchmark(options(workspace.rootDir), {
-      preflight: () => { throw new Error(ARTIFACT_PREFLIGHT_ERROR); },
+      preflight: () => { throw new Error('synthetic preflight secret'); },
       route: async () => {
         routeCalls += 1;
         return [];
       },
     }),
-    new RegExp(ARTIFACT_PREFLIGHT_ERROR),
+    (error: Error) => {
+      visibleError = error.message;
+      return error.message === ARTIFACT_PREFLIGHT_ERROR;
+    },
   );
   assert.equal(routeCalls, 0);
+  assert.equal(visibleError.includes('synthetic preflight secret'), false);
+  assert.equal(visibleError.includes(workspace.rootDir), false);
 });
 
 test('runRouteBenchmark loads every day, runs sequentially, continues after failure, and persists safely', async (t) => {
@@ -488,6 +496,64 @@ test('runRouteBenchmark reports cleanup failure safely and preserves the publish
   assert.equal(visible.includes('synthetic cleanup secret'), false);
   assert.equal(visible.includes(workspace.rootDir), false);
   assert.equal(visible.includes(expectedFinalArtifact), false);
+});
+
+test('runRouteBenchmark treats publication throwing undefined as a failure', async (t) => {
+  // Would fail if publication success were inferred from the thrown value rather than control flow.
+  const workspace = createWorkspace(t);
+
+  const outcome = await runRouteBenchmark(options(workspace.rootDir), {
+    route: async () => [650, 750, 850],
+    sleep: async () => {},
+    publish: () => { throw undefined; },
+  }).then(
+    (value) => ({ status: 'fulfilled' as const, value }),
+    (reason: unknown) => ({ status: 'rejected' as const, reason }),
+  );
+
+  assert.deepEqual(outcome, { status: 'rejected', reason: undefined });
+});
+
+test('runRouteBenchmark treats cleanup throwing undefined as a fixed cleanup failure', async (t) => {
+  // Would fail if cleanup success were inferred from the thrown value rather than control flow.
+  const workspace = createWorkspace(t);
+
+  const outcome = await runRouteBenchmark(options(workspace.rootDir), {
+    route: async () => [650, 750, 850],
+    sleep: async () => {},
+    removeTemporary: () => { throw undefined; },
+  }).then(
+    (value) => ({ status: 'fulfilled' as const, value }),
+    (reason: unknown) => ({ status: 'rejected' as const, reason }),
+  );
+
+  assert.equal(outcome.status, 'rejected');
+  if (outcome.status === 'rejected') {
+    assert.equal(outcome.reason instanceof Error, true);
+    assert.equal((outcome.reason as Error).message, ARTIFACT_CLEANUP_ERROR);
+  }
+});
+
+test('runRouteBenchmark keeps undefined publication failure primary when cleanup also throws undefined', async (t) => {
+  // Would fail if dual undefined failures looked successful or cleanup replaced publication precedence.
+  const workspace = createWorkspace(t);
+  let cleanupAttempts = 0;
+
+  const outcome = await runRouteBenchmark(options(workspace.rootDir), {
+    route: async () => [650, 750, 850],
+    sleep: async () => {},
+    publish: () => { throw undefined; },
+    removeTemporary: () => {
+      cleanupAttempts += 1;
+      throw undefined;
+    },
+  }).then(
+    (value) => ({ status: 'fulfilled' as const, value }),
+    (reason: unknown) => ({ status: 'rejected' as const, reason }),
+  );
+
+  assert.equal(cleanupAttempts, 1);
+  assert.deepEqual(outcome, { status: 'rejected', reason: undefined });
 });
 
 test('runRouteBenchmark rejects a missing daily input before routing', async (t) => {
@@ -750,6 +816,33 @@ test('route-benchmark CLI rejects an unsafe VALHALLA_URL without leaking it', (t
   assert.equal(result.stdout, '');
   assert.equal(`${result.stdout}\n${result.stderr}`.includes(secret), false);
   assert.equal(fs.existsSync(path.join(workspace.rootDir, 'state', 'route-benchmarks')), false);
+});
+
+test('route-benchmark CLI maps artifact directory creation failure without leaking its path', (t) => {
+  // Would fail if mkdir errors escaped the preflight fixed-message boundary with absolute paths.
+  const sourceRoot = path.resolve(import.meta.dirname, '..', '..');
+  const workspace = createWorkspace(t, ['2026-08-01']);
+  createCliProfile(workspace.rootDir);
+  const blocker = path.join(workspace.rootDir, 'state', 'route-benchmarks');
+  fs.writeFileSync(blocker, 'not-a-directory');
+
+  const result = spawnSync(
+    process.execPath,
+    [
+      '--import', import.meta.resolve('tsx'),
+      path.join(sourceRoot, 'scripts', 'route-benchmark.ts'),
+      '--profile', 'test-profile',
+      '--date', '2026-08-01',
+      '--limit', '1',
+    ],
+    { cwd: workspace.rootDir, encoding: 'utf8' },
+  );
+
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, '');
+  assert.equal(result.stderr, `ERROR: ${ARTIFACT_PREFLIGHT_ERROR}\n`);
+  assert.equal(result.stderr.includes(workspace.rootDir), false);
+  assert.equal(result.stderr.includes(blocker), false);
 });
 
 test('route-benchmark CLI succeeds with VALHALLA_URL override and keeps endpoint secrets out of outputs', async (t) => {
