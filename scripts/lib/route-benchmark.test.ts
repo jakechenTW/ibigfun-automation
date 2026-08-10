@@ -112,6 +112,19 @@ test('selectBenchmarkCases uses route key to break equal-date and equal-ID ties'
   assert.deepEqual(selection.cases.map((item) => item.routeKey), [lowerRouteKey, upperRouteKey]);
 });
 
+test('selectBenchmarkCases uses route key when equal-date listing IDs are both null', () => {
+  // Would fail if null IDs received asymmetric ordering and input order leaked through.
+  const lower = listing({ id: null, coordinate: { lat: 25.0321, lng: 121.5181 } });
+  const upper = listing({ id: null, coordinate: { lat: 25.0339, lng: 121.5199 } });
+  const lowerKey = routeKeyFor(lower);
+  const upperKey = routeKeyFor(upper);
+  const routeCache: RouteCache = { [lowerKey]: [600, 700, 800], [upperKey]: [610, 710, 810] };
+  const selection = selectBenchmarkCases([
+    { date: '2026-08-01', result: fetchResult([upper, lower]) },
+  ], exits, routeCache, 25);
+  assert.deepEqual(selection.cases.map(({ routeKey }) => routeKey), [lowerKey, upperKey].sort());
+});
+
 test('selectBenchmarkCases classifies eligibility failures and never mutates inputs', () => {
   // Would fail if the exact precedence or cache validation of selection changed, or it mutates historical inputs.
   const missingCoordinate = listing({ id: 1, coordinate: null });

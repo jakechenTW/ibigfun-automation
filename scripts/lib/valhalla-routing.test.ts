@@ -245,24 +245,26 @@ test('normalizes a caller-provided sub-second retry cap to one second', async ()
 });
 
 test('uses the one-second fallback for an invalid Retry-After value', async () => {
-  // Would fail if malformed server metadata produced zero, NaN, or an unbounded delay.
-  const sleeps: number[] = [];
-  let attempts = 0;
-  await routeValhallaWalkDistances(
-    { lat: 25.033, lng: 121.565 },
-    [{ lat: 25.034, lng: 121.566 }],
-    {
-      sleep: async (ms) => { sleeps.push(ms); },
-      fetchFn: async () => {
-        attempts += 1;
-        return attempts === 1
-          ? new Response('', { status: 503, headers: { 'Retry-After': 'not-seconds' } })
-          : compactMatrixResponse([[0.42]]);
+  // Would fail if non-decimal or malformed server metadata produced a non-fallback delay.
+  for (const retryAfter of ['0x2', '+2', '1e1', '2.0', ' 2 ', 'Wed, 21 Oct 2015 07:28:00 GMT']) {
+    const sleeps: number[] = [];
+    let attempts = 0;
+    await routeValhallaWalkDistances(
+      { lat: 25.033, lng: 121.565 },
+      [{ lat: 25.034, lng: 121.566 }],
+      {
+        sleep: async (ms) => { sleeps.push(ms); },
+        fetchFn: async () => ++attempts === 1
+          ? {
+            ok: false,
+            status: 503,
+            headers: { get: (name: string) => name === 'Retry-After' ? retryAfter : null },
+          } as Response
+          : compactMatrixResponse([[0.42]]),
       },
-    },
-  );
-
-  assert.deepEqual(sleeps, [1000]);
+    );
+    assert.deepEqual(sleeps, [1000], retryAfter);
+  }
 });
 
 test('stops after two attempts when Valhalla remains unavailable', async () => {

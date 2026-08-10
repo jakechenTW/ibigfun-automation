@@ -42,6 +42,13 @@ const emptySkipped = (): Record<BenchmarkSkipReason, number> => ({
   'ors-cache-shape': 0,
 });
 
+function compareListingIds(a: number | null, b: number | null): number {
+  if (a === null && b === null) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return a - b;
+}
+
 export function selectBenchmarkCases(
   runs: DatedFetchResult[],
   exits: MrtExit[],
@@ -92,7 +99,7 @@ export function selectBenchmarkCases(
 
   eligible.sort((a, b) =>
     a.date.localeCompare(b.date)
-    || (a.listingId === null ? 1 : b.listingId === null ? -1 : a.listingId - b.listingId)
+    || compareListingIds(a.listingId, b.listingId)
     || a.routeKey.localeCompare(b.routeKey));
   const seenRouteKeys = new Set<string>();
   const unique = eligible.filter((benchmarkCase) => {

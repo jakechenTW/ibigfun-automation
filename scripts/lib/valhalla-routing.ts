@@ -35,10 +35,11 @@ const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => {
 });
 
 function retryDelayMs(retryAfter: string | null, maxDelayMs: number): number {
-  const seconds = retryAfter === null ? Number.NaN : Number(retryAfter);
-  const requestedMs = Number.isInteger(seconds) && seconds >= 0
+  const validDelaySeconds = retryAfter !== null && /^(0|[1-9][0-9]*)$/.test(retryAfter);
+  const seconds = validDelaySeconds ? Number(retryAfter) : Number.NaN;
+  const requestedMs = Number.isSafeInteger(seconds)
     ? seconds * 1000
-    : 1000;
+    : MIN_VALHALLA_RETRY_DELAY_MS;
   return Math.min(Math.max(requestedMs, MIN_VALHALLA_RETRY_DELAY_MS), maxDelayMs);
 }
 
