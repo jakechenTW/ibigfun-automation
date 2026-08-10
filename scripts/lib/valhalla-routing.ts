@@ -73,16 +73,32 @@ export async function routeValhallaWalkDistances(
       });
       if (!res.ok) throw new ValhallaHttpError(res.status, res.headers.get('Retry-After'));
 
-      let json: { distances?: unknown };
+      let json: unknown;
       try {
-        json = (await res.json()) as { distances?: unknown };
+        json = await res.json();
       } catch {
         throw new Error('Valhalla matrix invalid matrix shape');
       }
-      if (!Array.isArray(json.distances) || json.distances.length !== 1) {
+      if (
+        json === null
+        || typeof json !== 'object'
+        || Array.isArray(json)
+        || !('sources_to_targets' in json)
+      ) {
         throw new Error('Valhalla matrix invalid matrix shape');
       }
-      const row = json.distances[0];
+      const matrix = json.sources_to_targets;
+      if (
+        matrix === null
+        || typeof matrix !== 'object'
+        || Array.isArray(matrix)
+        || !('distances' in matrix)
+        || !Array.isArray(matrix.distances)
+        || matrix.distances.length !== 1
+      ) {
+        throw new Error('Valhalla matrix invalid matrix shape');
+      }
+      const row = matrix.distances[0];
       if (!Array.isArray(row) || row.length !== dests.length) {
         throw new Error('Valhalla matrix invalid matrix shape');
       }

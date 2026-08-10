@@ -4,6 +4,20 @@ import {
   routeValhallaWalkDistances,
 } from './valhalla-routing.ts';
 
+function compactMatrixResponse(distances: unknown): Response {
+  return new Response(JSON.stringify({
+    sources_to_targets: {
+      durations: [[315]],
+      distances,
+    },
+    units: 'kilometers',
+    algorithm: 'costmatrix',
+  }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
 test('sends the Valhalla pedestrian matrix request and converts kilometers to meters', async () => {
   let url = '';
   let headers = new Headers();
@@ -21,7 +35,14 @@ test('sends the Valhalla pedestrian matrix request and converts kilometers to me
         url = String(input);
         headers = new Headers(init?.headers);
         body = JSON.parse(String(init?.body));
-        return new Response(JSON.stringify({ distances: [[0.42, null, 1.005]] }), {
+        return new Response(JSON.stringify({
+          sources_to_targets: {
+            durations: [[315, null, 754]],
+            distances: [[0.42, null, 1.005]],
+          },
+          units: 'kilometers',
+          algorithm: 'costmatrix',
+        }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -87,15 +108,25 @@ test('reports a timeout when the request is aborted', async () => {
 
 test('rejects malformed matrix responses without leaking response data', async () => {
   const malformed: Array<() => Response> = [
-    () => new Response(JSON.stringify({ distances: [[0.1], [0.2]] })),
-    () => new Response(JSON.stringify({ distances: [[]] })),
-    () => new Response(JSON.stringify({ distances: [[-0.1]] })),
+    () => new Response(JSON.stringify(null)),
+    () => new Response(JSON.stringify({ distances: [[0.1]] })),
+    () => new Response(JSON.stringify({ sources_to_targets: null })),
+    () => compactMatrixResponse([[0.1], [0.2]]),
+    () => compactMatrixResponse([[]]),
+    () => compactMatrixResponse([[-0.1]]),
     () => ({
       ok: true,
       headers: new Headers(),
-      json: async () => ({ distances: [[Number.NaN]] }),
+      json: async () => ({
+        sources_to_targets: {
+          durations: [[315]],
+          distances: [[Number.NaN]],
+        },
+        units: 'kilometers',
+        algorithm: 'costmatrix',
+      }),
     } as unknown as Response),
-    () => new Response(JSON.stringify({ distances: [['0.1']] })),
+    () => compactMatrixResponse([['0.1']]),
   ];
 
   for (const makeResponse of malformed) {
@@ -138,7 +169,7 @@ test('retries one 429 using Retry-After seconds', async () => {
         attempts += 1;
         return attempts === 1
           ? new Response('', { status: 429, headers: { 'Retry-After': '2' } })
-          : new Response(JSON.stringify({ distances: [[0.42]] }));
+          : compactMatrixResponse([[0.42]]);
       },
     },
   );
@@ -159,7 +190,7 @@ test('retries one 503 with the fallback delay', async () => {
         attempts += 1;
         return attempts === 1
           ? new Response('', { status: 503 })
-          : new Response(JSON.stringify({ distances: [[0.42]] }));
+          : compactMatrixResponse([[0.42]]);
       },
     },
   );
@@ -199,7 +230,7 @@ test('caps Retry-After at the configured maximum delay', async () => {
         attempts += 1;
         return attempts === 1
           ? new Response('', { status: 429, headers: { 'Retry-After': '999' } })
-          : new Response(JSON.stringify({ distances: [[0.42]] }));
+          : compactMatrixResponse([[0.42]]);
       },
     },
   );
@@ -219,7 +250,7 @@ test('never lets a caller-provided retry cap exceed the global maximum', async (
         attempts += 1;
         return attempts === 1
           ? new Response('', { status: 429, headers: { 'Retry-After': '999' } })
-          : new Response(JSON.stringify({ distances: [[0.42]] }));
+          : compactMatrixResponse([[0.42]]);
       },
     },
   );

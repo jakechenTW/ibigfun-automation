@@ -155,9 +155,12 @@ evaluation, and writing the report.
   bare daily `state/runs/<profile>/<date>/listings.json` files and
   `state/route-cache.json`, then sends coordinate-only requests sequentially to
   the FOSSGIS fair-use demo. The limit defaults to 25 and is capped at 200.
-  Timestamped aggregate evidence is written under `state/route-benchmarks/` and
-  never affects enrich, report, or notify. This benchmark cannot justify a
-  provider switch without a separate design and walking-policy revalidation.
+  Timestamped detailed local evidence is written under `state/route-benchmarks/`
+  and may contain privacy-sensitive per-case listing IDs, coordinates, exit IDs,
+  and provider distances; keep it local and never notify or commit it. Only
+  stdout and stderr are aggregate-only. The benchmark never affects enrich,
+  report, or notify and cannot justify a provider switch without a separate
+  design and walking-policy revalidation.
 - `npm run pipeline -- run --profile <profile> [--date <target> | --from <a>
   --to <b>]` — thin orchestrator over fetch → enrich → report → notify. A run
   covers an inclusive date range; a single day is the default (previous Taipei
