@@ -149,6 +149,15 @@ evaluation, and writing the report.
 - `npm run route -- --lat <> --lng <>` — deterministic nearest-walk exit for one
   coordinate (shared ORS cache). Used during triage (step 5) to get a trustworthy
   walking distance after re-locating a listing from its address.
+- `npm run route-benchmark -- --profile <profile> --date <target> [--limit <1-200>]`
+  or `npm run route-benchmark -- --profile <profile> --from <a> --to <b>
+  [--limit <1-200>]` — evaluation-only Valhalla comparison. It reads the existing
+  bare daily `state/runs/<profile>/<date>/listings.json` files and
+  `state/route-cache.json`, then sends coordinate-only requests sequentially to
+  the FOSSGIS fair-use demo. The limit defaults to 25 and is capped at 200.
+  Timestamped aggregate evidence is written under `state/route-benchmarks/` and
+  never affects enrich, report, or notify. This benchmark cannot justify a
+  provider switch without a separate design and walking-policy revalidation.
 - `npm run pipeline -- run --profile <profile> [--date <target> | --from <a>
   --to <b>]` — thin orchestrator over fetch → enrich → report → notify. A run
   covers an inclusive date range; a single day is the default (previous Taipei
