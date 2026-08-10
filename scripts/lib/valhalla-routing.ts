@@ -3,6 +3,7 @@ import type { LatLng } from './geo.ts';
 export const DEFAULT_VALHALLA_URL = 'https://valhalla1.openstreetmap.de';
 export const DEFAULT_VALHALLA_TIMEOUT_MS = 15_000;
 export const DEFAULT_VALHALLA_CLIENT_ID = 'ibigfun-automation-route-benchmark/0.4';
+const MAX_VALHALLA_RETRY_DELAY_MS = 10_000;
 
 export interface ValhallaRouteOptions {
   baseUrl?: string;
@@ -44,7 +45,10 @@ export async function routeValhallaWalkDistances(
   const fetchFn = options.fetchFn ?? fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_VALHALLA_TIMEOUT_MS;
   const sleep = options.sleep ?? defaultSleep;
-  const maxRetryDelayMs = options.maxRetryDelayMs ?? 10_000;
+  const configuredRetryDelayMs = options.maxRetryDelayMs ?? MAX_VALHALLA_RETRY_DELAY_MS;
+  const maxRetryDelayMs = Number.isFinite(configuredRetryDelayMs)
+    ? Math.min(Math.max(configuredRetryDelayMs, 0), MAX_VALHALLA_RETRY_DELAY_MS)
+    : MAX_VALHALLA_RETRY_DELAY_MS;
   const body = {
     sources: [{ lat: origin.lat, lon: origin.lng }],
     targets: dests.map((dest) => ({ lat: dest.lat, lon: dest.lng })),

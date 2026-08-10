@@ -205,3 +205,23 @@ test('caps Retry-After at the configured maximum delay', async () => {
   );
   assert.deepEqual(sleeps, [10_000]);
 });
+
+test('never lets a caller-provided retry cap exceed the global maximum', async () => {
+  const sleeps: number[] = [];
+  let attempts = 0;
+  await routeValhallaWalkDistances(
+    { lat: 25.033, lng: 121.565 },
+    [{ lat: 25.034, lng: 121.566 }],
+    {
+      maxRetryDelayMs: 20_000,
+      sleep: async (ms) => { sleeps.push(ms); },
+      fetchFn: async () => {
+        attempts += 1;
+        return attempts === 1
+          ? new Response('', { status: 429, headers: { 'Retry-After': '999' } })
+          : new Response(JSON.stringify({ distances: [[0.42]] }));
+      },
+    },
+  );
+  assert.deepEqual(sleeps, [10_000]);
+});
