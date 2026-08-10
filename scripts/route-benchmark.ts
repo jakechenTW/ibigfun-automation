@@ -7,7 +7,10 @@ import {
   runRouteBenchmark,
   type RouteBenchmarkOptions,
 } from './lib/route-benchmark-run.ts';
-import { DEFAULT_VALHALLA_URL } from './lib/valhalla-routing.ts';
+import {
+  DEFAULT_VALHALLA_URL,
+  normalizeValhallaBaseUrl,
+} from './lib/valhalla-routing.ts';
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -21,15 +24,17 @@ function writeFailure(prefix: 'BAD INPUT' | 'ERROR', error: unknown, exitCode: 1
 async function main(argv: string[]): Promise<void> {
   let options: RouteBenchmarkOptions;
   try {
+    const limit = parseBenchmarkLimit(argv);
     const profile = resolveProfileFromArgs(argv);
     const range = resolveRange(argv, new Date());
-    const limit = parseBenchmarkLimit(argv);
     options = {
       rootDir: process.cwd(),
       profileId: profile.id,
       range,
       limit,
-      valhallaBaseUrl: process.env.VALHALLA_URL ?? DEFAULT_VALHALLA_URL,
+      valhallaBaseUrl: normalizeValhallaBaseUrl(
+        process.env.VALHALLA_URL ?? DEFAULT_VALHALLA_URL,
+      ),
       requestDelayMs: 1000,
     };
   } catch (error) {

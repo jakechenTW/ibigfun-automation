@@ -62,6 +62,8 @@ The Valhalla base URL defaults to `https://valhalla1.openstreetmap.de` and may
 be overridden with `VALHALLA_URL` for a local or paid hosted deployment. The
 client sends a stable, non-personal `X-Client-Id` identifying this repository's
 benchmark command. It requires no API key for the default FOSSGIS endpoint.
+The override must be an absolute HTTP(S) base without credentials, a query, or
+a fragment; invalid values fail before routing and are never echoed.
 
 ## Components
 
@@ -132,14 +134,14 @@ state/route-benchmarks/<profile>/<label>/valhalla-<timestamp>.json
 ```
 
 `state/` is already git-ignored. The artifact contains the benchmark version,
-timestamp, input run labels, Valhalla base URL, aggregate metrics, and per-case
-comparison evidence. Per-case evidence may contain the local listing ID,
+timestamp, input run labels, a sanitized Valhalla origin identifier, aggregate
+metrics, and per-case comparison evidence. Per-case evidence may contain the local listing ID,
 coordinates, candidate exit IDs, provider distances, selected walk result, and
 transition classification because it remains local workflow state.
 
 The command creates a new artifact rather than replacing an earlier benchmark.
-It writes through a temporary sibling and renames atomically so an interrupted
-run cannot leave a file that looks complete.
+It writes through a unique temporary sibling and publishes atomically without
+clobbering; a deterministic numeric suffix resolves a timestamp collision.
 
 Standard output is aggregate-only. It must not print listing coordinates,
 addresses, IDs, titles, source URLs, credentials, or raw response bodies.
@@ -157,7 +159,8 @@ An individual Valhalla failure is recorded and comparison continues. Invalid
 CLI arguments, missing historical artifacts, an unreadable ORS cache, or an
 unwritable output path fail the command before or at persistence. The command
 does not mark a pipeline run failed because it is outside the production
-pipeline.
+pipeline. Unknown transport exceptions are reduced to a fixed safe message;
+raw endpoint or dependency error text is not stored or printed.
 
 The FOSSGIS endpoint is a fair-use demo service without an SLA. The initial
 live verification uses the default 25-case limit. Larger experiments remain

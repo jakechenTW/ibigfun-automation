@@ -94,6 +94,24 @@ test('selectBenchmarkCases orders eligible cases and deduplicates route keys bef
   ]);
 });
 
+test('selectBenchmarkCases uses route key to break equal-date and equal-ID ties', () => {
+  // Would fail if input order leaked through when the first two documented sort keys are equal.
+  const lowerRouteKey = '25.03210,121.51810|R10:1,R10:2,G05:1';
+  const upperRouteKey = '25.03390,121.51990|G05:1,R10:2,R10:1';
+  const lower = listing({ id: 7, coordinate: { lat: 25.0321, lng: 121.5181 } });
+  const upper = listing({ id: 7, coordinate: { lat: 25.0339, lng: 121.5199 } });
+  const routeCache: RouteCache = {
+    [lowerRouteKey]: [600, 700, 800],
+    [upperRouteKey]: [610, 710, 810],
+  };
+
+  const selection = selectBenchmarkCases([
+    { date: '2026-08-01', result: fetchResult([upper, lower]) },
+  ], exits, routeCache, 25);
+
+  assert.deepEqual(selection.cases.map((item) => item.routeKey), [lowerRouteKey, upperRouteKey]);
+});
+
 test('selectBenchmarkCases classifies eligibility failures and never mutates inputs', () => {
   // Would fail if the exact precedence or cache validation of selection changed, or it mutates historical inputs.
   const missingCoordinate = listing({ id: 1, coordinate: null });
@@ -183,6 +201,35 @@ test('compareBenchmarkCase records threshold flips and nearest-exit disagreement
 
   const flip = compareBenchmarkCase(benchmarkCase([800, 850, 1_000]), [801, 900, 1_100]);
   assert.equal(flip.transition, 'true->false');
+});
+
+test('compareBenchmarkCase distinguishes separate blank-ID exits with identical display labels', () => {
+  // Would fail if agreement compared non-unique station/line/exit text instead of aligned candidate identity.
+  const taipeiMainLikeExits: MrtExit[] = [
+    { stationId: 'BL12', line: 'BL', nameZh: '台北車站', exitId: '', lat: 25.0461, lng: 121.5151 },
+    { stationId: 'BL12', line: 'BL', nameZh: '台北車站', exitId: '', lat: 25.0471, lng: 121.5161 },
+  ];
+  const distinctRows: BenchmarkCase = {
+    date: '2026-08-01',
+    listingId: 1,
+    routeKey: 'blank-id-distinct-rows',
+    origin: { lat: 25.046, lng: 121.515 },
+    candidates: [
+      { exit: taipeiMainLikeExits[0], distanceM: 500 },
+      { exit: taipeiMainLikeExits[1], distanceM: 600 },
+    ],
+    orsDistances: [600, 700],
+  };
+
+  const comparison = compareBenchmarkCase(distinctRows, [700, 650]);
+
+  assert.equal(comparison.ors.walk?.stationZh, '台北車站');
+  assert.equal(comparison.valhalla.walk?.stationZh, '台北車站');
+  assert.equal(comparison.ors.walk?.exitId, '');
+  assert.equal(comparison.valhalla.walk?.exitId, '');
+  assert.equal(comparison.nearestExitAgreement, false);
+  assert.equal(comparison.sameExitDeltaM, null);
+  assert.equal(comparison.sameExitDeltaPercent, null);
 });
 
 test('compareBenchmarkCase excludes implausible routes and includes 700m and 900m boundaries', () => {

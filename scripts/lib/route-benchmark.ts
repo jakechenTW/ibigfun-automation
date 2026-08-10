@@ -154,12 +154,32 @@ export interface BenchmarkSummary {
 const transitionFor = (ors: WalkPick, valhalla: WalkPick): WalkTransition =>
   `${String(ors.withinWalk)}->${String(valhalla.withinWalk)}` as WalkTransition;
 
-function sameExit(ors: WalkPick, valhalla: WalkPick): boolean {
-  return ors.walk !== null
-    && valhalla.walk !== null
-    && ors.walk.stationZh === valhalla.walk.stationZh
-    && ors.walk.line === valhalla.walk.line
-    && ors.walk.exitId === valhalla.walk.exitId;
+function selectedCandidateIndex(
+  routed: (number | null)[] | null,
+  candidateCount: number,
+): number | null {
+  if (routed === null) return null;
+  let best: { index: number; distanceM: number } | null = null;
+  for (let index = 0; index < candidateCount; index += 1) {
+    const distanceM = routed[index];
+    if (distanceM !== null && distanceM !== undefined && (!best || distanceM < best.distanceM)) {
+      best = { index, distanceM };
+    }
+  }
+  return best?.index ?? null;
+}
+
+function sameExit(
+  ors: WalkPick,
+  valhalla: WalkPick,
+  orsDistances: (number | null)[],
+  valhallaDistances: (number | null)[] | null,
+  candidateCount: number,
+): boolean {
+  if (ors.walk === null || valhalla.walk === null) return false;
+  const orsIndex = selectedCandidateIndex(orsDistances, candidateCount);
+  const valhallaIndex = selectedCandidateIndex(valhallaDistances, candidateCount);
+  return orsIndex !== null && orsIndex === valhallaIndex;
 }
 
 function isBoundary(pick: WalkPick): boolean {
@@ -174,7 +194,13 @@ function comparisonFor(
 ): BenchmarkComparison {
   const ors = pickWalk(benchmarkCase.candidates, benchmarkCase.orsDistances);
   const valhalla = pickWalk(benchmarkCase.candidates, valhallaDistances);
-  const exitsMatch = sameExit(ors, valhalla);
+  const exitsMatch = sameExit(
+    ors,
+    valhalla,
+    benchmarkCase.orsDistances,
+    valhallaDistances,
+    benchmarkCase.candidates.length,
+  );
   const sameExitDeltaM = exitsMatch && ors.walk && valhalla.walk
     ? valhalla.walk.distanceM - ors.walk.distanceM
     : null;

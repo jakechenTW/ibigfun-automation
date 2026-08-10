@@ -114,6 +114,7 @@ test('rejects malformed matrix responses without leaking response data', async (
     () => compactMatrixResponse([[0.1], [0.2]]),
     () => compactMatrixResponse([[]]),
     () => compactMatrixResponse([[-0.1]]),
+    () => compactMatrixResponse([[Number.MAX_VALUE]]),
     () => ({
       ok: true,
       headers: new Headers(),
@@ -199,6 +200,71 @@ test('retries one 503 with the fallback delay', async () => {
   assert.deepEqual(sleeps, [1000]);
 });
 
+test('never retries sooner than one second when Retry-After is zero', async () => {
+  // Would fail if a server-provided zero delay could start the retry immediately.
+  const events: string[] = [];
+  let attempts = 0;
+  await routeValhallaWalkDistances(
+    { lat: 25.033, lng: 121.565 },
+    [{ lat: 25.034, lng: 121.566 }],
+    {
+      sleep: async (ms) => { events.push(`sleep-${ms}`); },
+      fetchFn: async () => {
+        attempts += 1;
+        events.push(`fetch-${attempts}`);
+        return attempts === 1
+          ? new Response('', { status: 429, headers: { 'Retry-After': '0' } })
+          : compactMatrixResponse([[0.42]]);
+      },
+    },
+  );
+
+  assert.deepEqual(events, ['fetch-1', 'sleep-1000', 'fetch-2']);
+});
+
+test('normalizes a caller-provided sub-second retry cap to one second', async () => {
+  // Would fail if the configurable cap could undercut the public-service rate floor.
+  const sleeps: number[] = [];
+  let attempts = 0;
+  await routeValhallaWalkDistances(
+    { lat: 25.033, lng: 121.565 },
+    [{ lat: 25.034, lng: 121.566 }],
+    {
+      maxRetryDelayMs: 250,
+      sleep: async (ms) => { sleeps.push(ms); },
+      fetchFn: async () => {
+        attempts += 1;
+        return attempts === 1
+          ? new Response('', { status: 429, headers: { 'Retry-After': '999' } })
+          : compactMatrixResponse([[0.42]]);
+      },
+    },
+  );
+
+  assert.deepEqual(sleeps, [1000]);
+});
+
+test('uses the one-second fallback for an invalid Retry-After value', async () => {
+  // Would fail if malformed server metadata produced zero, NaN, or an unbounded delay.
+  const sleeps: number[] = [];
+  let attempts = 0;
+  await routeValhallaWalkDistances(
+    { lat: 25.033, lng: 121.565 },
+    [{ lat: 25.034, lng: 121.566 }],
+    {
+      sleep: async (ms) => { sleeps.push(ms); },
+      fetchFn: async () => {
+        attempts += 1;
+        return attempts === 1
+          ? new Response('', { status: 503, headers: { 'Retry-After': 'not-seconds' } })
+          : compactMatrixResponse([[0.42]]);
+      },
+    },
+  );
+
+  assert.deepEqual(sleeps, [1000]);
+});
+
 test('stops after two attempts when Valhalla remains unavailable', async () => {
   let attempts = 0;
   await assert.rejects(
@@ -255,4 +321,62 @@ test('never lets a caller-provided retry cap exceed the global maximum', async (
     },
   );
   assert.deepEqual(sleeps, [10_000]);
+});
+
+test('rejects malformed or unsafe Valhalla base URLs before transport', async () => {
+  // Would fail if relative, non-HTTP, credential-bearing, or secret-bearing URLs reached fetch.
+  const secret = 'synthetic-url-secret-7f9c';
+  const unsafeUrls = [
+    'not-a-url',
+    '/relative',
+    'ftp://example.test',
+    `https://user:${secret}@example.test`,
+    `https://example.test?token=${secret}`,
+    `https://example.test/#${secret}`,
+    'https://[',
+  ];
+  let fetchCalls = 0;
+
+  for (const baseUrl of unsafeUrls) {
+    await assert.rejects(
+      routeValhallaWalkDistances(
+        { lat: 25.033, lng: 121.565 },
+        [{ lat: 25.034, lng: 121.566 }],
+        {
+          baseUrl,
+          fetchFn: async () => {
+            fetchCalls += 1;
+            return compactMatrixResponse([[0.42]]);
+          },
+        },
+      ),
+      (error: Error) => {
+        assert.equal(
+          error.message,
+          'Invalid Valhalla base URL; expected an absolute HTTP(S) URL without credentials, query, or hash.',
+        );
+        assert.equal(error.message.includes(secret), false);
+        return true;
+      },
+    );
+  }
+
+  assert.equal(fetchCalls, 0);
+});
+
+test('normalizes unknown transport failures to a fixed safe message', async () => {
+  // Would fail if a fetch implementation could leak endpoint or credential text through its exception.
+  const secret = 'synthetic-transport-secret-4c2e';
+  await assert.rejects(
+    routeValhallaWalkDistances(
+      { lat: 25.033, lng: 121.565 },
+      [{ lat: 25.034, lng: 121.566 }],
+      { fetchFn: async () => { throw new Error(`socket failed for ${secret}`); } },
+    ),
+    (error: Error) => {
+      assert.equal(error.message, 'Valhalla matrix transport failure');
+      assert.equal(error.message.includes(secret), false);
+      return true;
+    },
+  );
 });

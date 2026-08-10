@@ -4,6 +4,8 @@ export const DEFAULT_VALHALLA_URL = 'https://valhalla1.openstreetmap.de';
 export const DEFAULT_VALHALLA_TIMEOUT_MS = 15_000;
 export const DEFAULT_VALHALLA_CLIENT_ID = 'ibigfun-automation-route-benchmark/0.4';
 const MAX_VALHALLA_RETRY_DELAY_MS = 10_000;
+const MIN_VALHALLA_RETRY_DELAY_MS = 1_000;
+const INVALID_BASE_URL_MESSAGE = 'Invalid Valhalla base URL; expected an absolute HTTP(S) URL without credentials, query, or hash.';
 
 export interface ValhallaRouteOptions {
   baseUrl?: string;
@@ -22,6 +24,12 @@ class ValhallaHttpError extends Error {
   }
 }
 
+class ValhallaMatrixShapeError extends Error {
+  constructor() {
+    super('Valhalla matrix invalid matrix shape');
+  }
+}
+
 const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => {
   setTimeout(resolve, ms);
 });
@@ -31,7 +39,45 @@ function retryDelayMs(retryAfter: string | null, maxDelayMs: number): number {
   const requestedMs = Number.isInteger(seconds) && seconds >= 0
     ? seconds * 1000
     : 1000;
-  return Math.min(requestedMs, maxDelayMs);
+  return Math.min(Math.max(requestedMs, MIN_VALHALLA_RETRY_DELAY_MS), maxDelayMs);
+}
+
+export function normalizeValhallaBaseUrl(raw: string): string {
+  let parsed: URL;
+  try {
+    if (raw.trim() !== raw) throw new Error(INVALID_BASE_URL_MESSAGE);
+    parsed = new URL(raw);
+  } catch {
+    throw new Error(INVALID_BASE_URL_MESSAGE);
+  }
+  if (
+    (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')
+    || parsed.username !== ''
+    || parsed.password !== ''
+    || parsed.href.includes('?')
+    || parsed.href.includes('#')
+  ) {
+    throw new Error(INVALID_BASE_URL_MESSAGE);
+  }
+  const pathname = parsed.pathname.replace(/\/+$/, '');
+  return `${parsed.origin}${pathname === '' ? '' : pathname}`;
+}
+
+export function valhallaEndpointIdentifier(baseUrl: string): string {
+  return new URL(normalizeValhallaBaseUrl(baseUrl)).origin;
+}
+
+export function safeValhallaErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : '';
+  if (
+    /^Valhalla matrix HTTP \d{3}$/.test(message)
+    || /^Valhalla matrix timeout after \d+ms$/.test(message)
+    || message === 'Valhalla matrix invalid matrix shape'
+    || message === 'Valhalla matrix transport failure'
+  ) {
+    return message;
+  }
+  return 'Valhalla matrix transport failure';
 }
 
 export async function routeValhallaWalkDistances(
@@ -39,15 +85,18 @@ export async function routeValhallaWalkDistances(
   dests: LatLng[],
   options: ValhallaRouteOptions = {},
 ): Promise<(number | null)[]> {
+  const baseUrl = normalizeValhallaBaseUrl(options.baseUrl ?? DEFAULT_VALHALLA_URL);
   if (dests.length === 0) return [];
 
-  const baseUrl = options.baseUrl ?? DEFAULT_VALHALLA_URL;
   const fetchFn = options.fetchFn ?? fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_VALHALLA_TIMEOUT_MS;
   const sleep = options.sleep ?? defaultSleep;
   const configuredRetryDelayMs = options.maxRetryDelayMs ?? MAX_VALHALLA_RETRY_DELAY_MS;
   const maxRetryDelayMs = Number.isFinite(configuredRetryDelayMs)
-    ? Math.min(Math.max(configuredRetryDelayMs, 0), MAX_VALHALLA_RETRY_DELAY_MS)
+    ? Math.min(
+      Math.max(configuredRetryDelayMs, MIN_VALHALLA_RETRY_DELAY_MS),
+      MAX_VALHALLA_RETRY_DELAY_MS,
+    )
     : MAX_VALHALLA_RETRY_DELAY_MS;
   const body = {
     sources: [{ lat: origin.lat, lon: origin.lng }],
@@ -77,7 +126,7 @@ export async function routeValhallaWalkDistances(
       try {
         json = await res.json();
       } catch {
-        throw new Error('Valhalla matrix invalid matrix shape');
+        throw new ValhallaMatrixShapeError();
       }
       if (
         json === null
@@ -85,7 +134,7 @@ export async function routeValhallaWalkDistances(
         || Array.isArray(json)
         || !('sources_to_targets' in json)
       ) {
-        throw new Error('Valhalla matrix invalid matrix shape');
+        throw new ValhallaMatrixShapeError();
       }
       const matrix = json.sources_to_targets;
       if (
@@ -96,24 +145,29 @@ export async function routeValhallaWalkDistances(
         || !Array.isArray(matrix.distances)
         || matrix.distances.length !== 1
       ) {
-        throw new Error('Valhalla matrix invalid matrix shape');
+        throw new ValhallaMatrixShapeError();
       }
       const row = matrix.distances[0];
       if (!Array.isArray(row) || row.length !== dests.length) {
-        throw new Error('Valhalla matrix invalid matrix shape');
+        throw new ValhallaMatrixShapeError();
       }
       return row.map((distance) => {
         if (distance === null) return null;
         if (typeof distance !== 'number' || !Number.isFinite(distance) || distance < 0) {
-          throw new Error('Valhalla matrix invalid matrix shape');
+          throw new ValhallaMatrixShapeError();
         }
-        return Math.round(distance * 1000);
+        const meters = Math.round(distance * 1000);
+        if (!Number.isFinite(meters)) throw new ValhallaMatrixShapeError();
+        return meters;
       });
     } catch (error) {
       if (controller.signal.aborted) {
         throw new Error(`Valhalla matrix timeout after ${timeoutMs}ms`);
       }
-      throw error;
+      if (error instanceof ValhallaHttpError || error instanceof ValhallaMatrixShapeError) {
+        throw error;
+      }
+      throw new Error('Valhalla matrix transport failure');
     } finally {
       clearTimeout(timer);
     }

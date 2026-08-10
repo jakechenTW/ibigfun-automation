@@ -154,7 +154,8 @@ evaluation, and writing the report.
   [--limit <1-200>]` — evaluation-only Valhalla comparison. It reads the existing
   bare daily `state/runs/<profile>/<date>/listings.json` files and
   `state/route-cache.json`, then sends coordinate-only requests sequentially to
-  the FOSSGIS fair-use demo. The limit defaults to 25 and is capped at 200.
+  the configured Valhalla endpoint (the default is the FOSSGIS fair-use demo).
+  The limit defaults to 25 and is capped at 200.
   Timestamped detailed local evidence is written under `state/route-benchmarks/`
   and may contain privacy-sensitive per-case listing IDs, coordinates, exit IDs,
   and provider distances; keep it local and never notify or commit it. Only

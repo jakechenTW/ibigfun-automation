@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Production `enrich`, `routeWalkDistances`, `withinWalk`, `regionGate`, hard exclusions, reports, notifications, schedules, profiles, and `state/route-cache.json` remain unchanged.
-- The default endpoint is `https://valhalla1.openstreetmap.de`; `VALHALLA_URL` may override it.
+- The default endpoint is `https://valhalla1.openstreetmap.de`; `VALHALLA_URL` may override it with an absolute HTTP(S) base that has no credentials, query, or fragment.
 - Requests contain coordinates only and set a stable non-personal `X-Client-Id`; no address, listing metadata, credential, API key, or source URL may leave the process.
 - Requests are sequential with at least 1,000 ms between starts; transient `429`/`5xx` responses receive at most one retry, with retry waiting capped at 10,000 ms.
 - Each request uses a 15,000 ms default timeout, `pedestrian` costing, 4.8 km/h walking speed, kilometer units, and compact matrix output.
@@ -166,8 +166,9 @@ Expected: retry and safe-validation tests FAIL because the first implementation 
 Add a private result/error type carrying only HTTP status. Retry exactly once
 when status is `429` or between `500` and `599`. Parse integer-second
 `Retry-After`; use 1,000 ms when absent or invalid; clamp to
-`options.maxRetryDelayMs ?? 10_000`. Create a fresh `AbortController` and timer
-for each attempt. Translate an aborted request to:
+the effective 1,000–10,000 ms range even when the header is zero or a caller
+supplies a sub-second cap. Create a fresh `AbortController` and timer for each
+attempt. Translate an aborted request to:
 
 ```ts
 throw new Error(`Valhalla matrix timeout after ${timeoutMs}ms`);
@@ -348,8 +349,9 @@ Expected: comparison exports or metrics FAIL.
 - [ ] **Step 7: Implement comparison and aggregate metrics**
 
 Call `pickWalk` independently for each provider. Define agreement only when
-both compared values are non-null. A boundary case is true when either selected
-distance is inclusively between 700 and 900 meters. Same-exit delta is
+both compared values are non-null, and compare the exact aligned candidate row
+rather than display fields that may be blank or non-unique. A boundary case is
+true when either selected distance is inclusively between 700 and 900 meters. Same-exit delta is
 `valhalla.distanceM - ors.distanceM`; summary means use absolute deltas and
 round to two decimals.
 
@@ -394,6 +396,7 @@ export interface RouteBenchmarkDeps {
   sleep: (ms: number) => Promise<void>;
   now: () => Date;
   progress: (message: string) => void;
+  publish: (tmpPath: string, desiredPath: string) => string;
 }
 
 export interface RouteBenchmarkArtifact {
@@ -402,7 +405,7 @@ export interface RouteBenchmarkArtifact {
   profileId: string;
   range: RunRange;
   inputDates: string[];
-  valhallaBaseUrl: string;
+  valhallaEndpoint: string; // sanitized origin identifier; never the raw override
   summary: BenchmarkSummary;
   comparisons: BenchmarkComparison[];
 }
@@ -468,8 +471,8 @@ spies. Assert:
   the final call;
 - one rejected route call becomes a failed comparison and later cases run;
 - the detailed artifact uses schema 1 and contains comparisons;
-- the file is written via a temporary sibling then atomically renamed, leaving
-  no `.tmp` sibling;
+- the file is written via a unique temporary sibling then atomically published
+  without clobbering, leaving no generated `.tmp-*` sibling;
 - route cache and input listing bytes are identical before and after;
 - captured request inputs contain coordinates only;
 - progress text contains counts but none of the fixture's ID, address, title,
@@ -504,9 +507,10 @@ for (let i = 0; i < selection.cases.length; i++) {
 }
 ```
 
-Persist pretty JSON with a newline to `artifactPath + '.tmp'`, then
-`fs.renameSync`. On a write or rename error, remove only that exact temporary
-file with `fs.rmSync(tmpPath, { force: true })` and rethrow.
+Persist pretty JSON with a newline to a unique temporary sibling created
+exclusively. Publish it with a same-filesystem no-clobber operation; when the
+timestamped target exists, try deterministic `-1`, `-2`, ... suffixes. On a
+write or publication error, remove only that exact temporary file and rethrow.
 
 - [ ] **Step 7: Run runner and all benchmark tests**
 
@@ -527,9 +531,9 @@ Create `scripts/route-benchmark.ts` that:
 
 1. resolves the explicit profile with `resolveProfileFromArgs(argv)`;
 2. resolves date/range with `resolveRange(argv, new Date())`;
-3. parses the limit;
+3. validates the strict, non-repeated CLI token grammar and parses the limit;
 4. calls `runRouteBenchmark` with `rootDir: process.cwd()`,
-   `VALHALLA_URL ?? DEFAULT_VALHALLA_URL`, and `requestDelayMs: 1000`;
+   a validated `VALHALLA_URL ?? DEFAULT_VALHALLA_URL`, and `requestDelayMs: 1000`;
 5. writes safe progress messages to stderr;
 6. writes only this JSON shape to stdout:
 
@@ -585,7 +589,7 @@ Expected: commit succeeds.
 
 **Interfaces:**
 - Consumes: the complete `npm run route-benchmark` CLI.
-- Produces: documented operator contract and local aggregate benchmark evidence; no production provider change.
+- Produces: documented operator contract, detailed local benchmark evidence, and aggregate-only console output; no production provider change.
 
 - [ ] **Step 1: Add the experimental tooling documentation**
 
@@ -593,7 +597,7 @@ Add a Tooling bullet to `AGENTS.md` stating:
 
 - exact single-date and range command shapes;
 - reads existing bare daily `listings.json` files and `state/route-cache.json`;
-- sends coordinate-only sequential requests to the FOSSGIS fair-use demo;
+- sends coordinate-only sequential requests to the configured endpoint, which defaults to the FOSSGIS fair-use demo;
 - defaults to 25 and caps at 200;
 - writes under `state/route-benchmarks/` and never affects enrich/report/notify;
 - is evaluation-only and cannot justify a provider switch without a separate

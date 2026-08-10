@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
+import { pathToFileURL } from 'node:url';
 import {
   benchmarkArtifactPath,
   inclusiveDates,
@@ -29,11 +30,42 @@ test('parseBenchmarkLimit rejects invalid or repeated limits', () => {
     ['--limit', '0'],
     ['--limit', '201'],
     ['--limit', '1.5'],
+    ['--limit', '+1'],
+    ['--limit', '1e2'],
+    ['--limit', '0x10'],
+    ['--limit', ' 1'],
     ['--limit'],
     ['--limit', '--date', '2026-08-01'],
     ['--limit', '1', '--limit=2'],
   ]) {
     assert.throws(() => parseBenchmarkLimit(argv), /--limit/);
+  }
+});
+
+test('parseBenchmarkLimit accepts only the documented benchmark CLI grammar', () => {
+  assert.equal(parseBenchmarkLimit([
+    '--profile=test-profile',
+    '--from', '2026-08-01',
+    '--to=2026-08-02',
+    '--limit', '25',
+  ]), 25);
+  assert.equal(parseBenchmarkLimit([
+    '--profile', 'test-profile',
+    '--date=2026-08-01',
+  ]), 25);
+
+  const invalid: string[][] = [
+    ['--profile', 'test-profile', '--date', '2026-08-01', '--unknown', 'x'],
+    ['--profile', 'test-profile', '--date', '2026-08-01', 'positional'],
+    ['--profile', 'a', '--profile=b', '--date', '2026-08-01'],
+    ['--profile', 'a', '--date', '2026-08-01', '--date=2026-08-02'],
+    ['--profile', 'a', '--from', '2026-08-01', '--from=2026-08-02', '--to', '2026-08-03'],
+    ['--profile', 'a', '--date', '2026-08-01', '--limit', '1', '--limit=2'],
+    ['--profile', '--date', '2026-08-01'],
+    ['--profile=', '--date', '2026-08-01'],
+  ];
+  for (const argv of invalid) {
+    assert.throws(() => parseBenchmarkLimit(argv));
   }
 });
 
@@ -150,13 +182,44 @@ function createWorkspace(t: test.TestContext, dates = ['2026-08-01', '2026-08-02
   return { rootDir, listingPaths, cachePath };
 }
 
+function createCliProfile(rootDir: string): void {
+  const profileDir = path.join(rootDir, 'profiles', 'test-profile');
+  fs.mkdirSync(profileDir, { recursive: true });
+  fs.writeFileSync(path.join(profileDir, 'profile.json'), `${JSON.stringify({
+    displayName: 'Test profile',
+    fetch: {},
+    evaluation: { maxDaysOnMarket: 30 },
+  }, null, 2)}\n`);
+  fs.writeFileSync(path.join(profileDir, 'evaluation.md'), '# Test evaluation\n');
+  fs.writeFileSync(path.join(profileDir, 'notify-template.md'), 'Test template\n');
+}
+
+function runChild(
+  command: string,
+  argv: string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, argv, { cwd, env });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => { stdout += chunk; });
+    child.stderr.on('data', (chunk: string) => { stderr += chunk; });
+    child.once('error', reject);
+    child.once('close', (status) => resolve({ status, stdout, stderr }));
+  });
+}
+
 function options(rootDir: string): RouteBenchmarkOptions {
   return {
     rootDir,
     profileId: 'test-profile',
     range: { from: '2026-08-01', to: '2026-08-02', label: '2026-08-01_2026-08-02' },
     limit: 25,
-    valhallaBaseUrl: 'https://valhalla.test',
+    valhallaBaseUrl: 'https://valhalla.test/synthetic-endpoint-secret-7f9c',
     requestDelayMs: 1000,
   };
 }
@@ -187,7 +250,7 @@ test('runRouteBenchmark loads every day, runs sequentially, continues after fail
     events.push(`route-${captured.length}`);
     await Promise.resolve();
     routeActive = false;
-    if (captured.length === 1) throw new Error('synthetic matrix failure');
+    if (captured.length === 1) throw new Error('synthetic-transport-secret-4c2e');
     return [650, 750, 850];
   };
 
@@ -205,8 +268,10 @@ test('runRouteBenchmark loads every day, runs sequentially, continues after fail
   assert.deepEqual(result.artifact.inputDates, ['2026-08-01', '2026-08-02']);
   assert.equal(result.artifact.schemaVersion, 1);
   assert.equal(result.artifact.comparisons.length, 2);
-  assert.equal(result.artifact.comparisons[0].error, 'synthetic matrix failure');
+  assert.equal(result.artifact.comparisons[0].error, 'Valhalla matrix transport failure');
   assert.equal(result.artifact.comparisons[1].error, null);
+  assert.equal(result.artifact.valhallaEndpoint, 'https://valhalla.test');
+  assert.equal(Object.hasOwn(result.artifact, 'valhallaBaseUrl'), false);
   assert.deepEqual(events, ['route-1', 'sleep', 'route-2']);
   assert.deepEqual(sleeps, [1000]);
   assert.equal(fs.existsSync(result.artifactPath), true);
@@ -223,7 +288,7 @@ test('runRouteBenchmark loads every day, runs sequentially, continues after fail
         { lat: 25.033, lng: 121.519 },
         { lat: 25.034, lng: 121.52 },
       ],
-      baseUrl: 'https://valhalla.test',
+      baseUrl: 'https://valhalla.test/synthetic-endpoint-secret-7f9c',
     },
     {
       origin: { lat: 25.0339, lng: 121.5199 },
@@ -232,10 +297,13 @@ test('runRouteBenchmark loads every day, runs sequentially, continues after fail
         { lat: 25.033, lng: 121.519 },
         { lat: 25.032, lng: 121.518 },
       ],
-      baseUrl: 'https://valhalla.test',
+      baseUrl: 'https://valhalla.test/synthetic-endpoint-secret-7f9c',
     },
   ]);
   assert.deepEqual(progressMessages, ['Valhalla benchmark 1/2', 'Valhalla benchmark 2/2']);
+  const artifactBytes = fs.readFileSync(result.artifactPath, 'utf8');
+  assert.equal(artifactBytes.includes('synthetic-endpoint-secret-7f9c'), false);
+  assert.equal(artifactBytes.includes('synthetic-transport-secret-4c2e'), false);
   const progress = progressMessages.join('\n');
   for (const secret of [
     '9123456', '9234567',
@@ -246,6 +314,67 @@ test('runRouteBenchmark loads every day, runs sequentially, continues after fail
   ]) {
     assert.equal(progress.includes(secret), false);
   }
+});
+
+test('runRouteBenchmark preserves colliding artifacts and uses a unique temporary sibling', async (t) => {
+  // Would fail if a repeated timestamp replaced an earlier artifact or reused the fixed .tmp path.
+  const workspace = createWorkspace(t);
+  const fixedNow = new Date('2026-08-10T12:34:56.789Z');
+  const basePath = benchmarkArtifactPath(
+    workspace.rootDir,
+    'test-profile',
+    '2026-08-01_2026-08-02',
+    fixedNow,
+  );
+  fs.mkdirSync(path.dirname(basePath), { recursive: true });
+  const legacyTempPath = `${basePath}.tmp`;
+  fs.writeFileSync(legacyTempPath, 'pre-existing-temp-sentinel');
+  const deps = {
+    route: async () => [650, 750, 850],
+    sleep: async () => {},
+    now: () => fixedNow,
+  };
+
+  const first = await runRouteBenchmark(options(workspace.rootDir), deps);
+  const firstBytes = fs.readFileSync(first.artifactPath);
+  const second = await runRouteBenchmark(options(workspace.rootDir), deps);
+
+  assert.equal(first.artifactPath, basePath);
+  assert.equal(second.artifactPath, basePath.replace(/\.json$/, '-1.json'));
+  assert.notEqual(first.artifactPath, second.artifactPath);
+  assert.deepEqual(fs.readFileSync(first.artifactPath), firstBytes);
+  assert.equal(fs.existsSync(second.artifactPath), true);
+  assert.equal(fs.readFileSync(legacyTempPath, 'utf8'), 'pre-existing-temp-sentinel');
+  const outputNames = fs.readdirSync(path.dirname(basePath));
+  assert.equal(outputNames.some((name) => name.includes('.tmp-')), false);
+});
+
+test('runRouteBenchmark removes its unique temporary sibling after publication failure', async (t) => {
+  // Would fail if the failure path leaked detailed temporary evidence or removed another run's file.
+  const workspace = createWorkspace(t);
+  const fixedNow = new Date('2026-08-10T12:34:56.789Z');
+  const seenTemps: string[] = [];
+  const sentinel = path.join(workspace.rootDir, 'unrelated-sentinel');
+  fs.writeFileSync(sentinel, 'keep');
+
+  await assert.rejects(
+    runRouteBenchmark(options(workspace.rootDir), {
+      route: async () => [650, 750, 850],
+      sleep: async () => {},
+      now: () => fixedNow,
+      publish: (tmpPath) => {
+        seenTemps.push(tmpPath);
+        assert.equal(fs.existsSync(tmpPath), true);
+        throw new Error('synthetic publication failure');
+      },
+    }),
+    /synthetic publication failure/,
+  );
+
+  assert.equal(seenTemps.length, 1);
+  assert.match(path.basename(seenTemps[0]), /\.json\.tmp-/);
+  assert.equal(fs.existsSync(seenTemps[0]), false);
+  assert.equal(fs.readFileSync(sentinel, 'utf8'), 'keep');
 });
 
 test('runRouteBenchmark rejects a missing daily input before routing', async (t) => {
@@ -427,53 +556,146 @@ test('runRouteBenchmark rejects a structurally invalid route cache before routin
   assert.equal(calls, 0);
 });
 
-test('runRouteBenchmark removes only its temporary sibling when final rename fails', async (t) => {
-  // Would fail if persistence wrote the final file directly, left temporary data, or removed the conflicting target.
-  const workspace = createWorkspace(t);
-  const fixedNow = new Date('2026-08-10T12:34:56.789Z');
-  const artifactPath = benchmarkArtifactPath(
-    workspace.rootDir,
-    'test-profile',
-    '2026-08-01_2026-08-02',
-    fixedNow,
-  );
-  fs.mkdirSync(artifactPath, { recursive: true });
-  const sentinel = path.join(artifactPath, 'sentinel');
-  fs.writeFileSync(sentinel, 'keep');
-
-  await assert.rejects(
-    runRouteBenchmark(options(workspace.rootDir), {
-      route: async () => [650, 750, 850],
-      sleep: async () => {},
-      now: () => fixedNow,
-    }),
-  );
-
-  assert.equal(fs.existsSync(`${artifactPath}.tmp`), false);
-  assert.equal(fs.readFileSync(sentinel, 'utf8'), 'keep');
-});
-
-test('route-benchmark CLI rejects invalid inputs with exit 2 before benchmark routing', () => {
+test('route-benchmark CLI rejects invalid inputs with exit 2 before benchmark routing', (t) => {
   // Would fail if validation happened after the runner or if user mistakes were reported as persistence failures.
-  const cwd = path.resolve(import.meta.dirname, '..', '..');
-  const cases = [
-    ['--profile', 'does-not-exist', '--date', '2026-08-01'],
-    ['--profile', 'example-investment', '--date', 'bad'],
-    ['--profile', 'example-investment', '--date', '2026-08-01', '--limit', '201'],
+  const sourceRoot = path.resolve(import.meta.dirname, '..', '..');
+  const workspace = createWorkspace(t, ['2026-08-01']);
+  createCliProfile(workspace.rootDir);
+  const script = path.join(sourceRoot, 'scripts', 'route-benchmark.ts');
+  const cases: Array<{ argv: string[]; message: RegExp }> = [
+    {
+      argv: ['--profile', 'does-not-exist', '--date', '2026-08-01'],
+      message: /unknown profile/i,
+    },
+    {
+      argv: ['--profile', 'test-profile', '--date', 'bad'],
+      message: /invalid --date/i,
+    },
+    {
+      argv: ['--profile', 'test-profile', '--date', '2026-08-01', '--limit', '201'],
+      message: /invalid --limit/i,
+    },
+    {
+      argv: ['--profile', 'test-profile', '--date', '2026-08-01', '--unknown', 'x'],
+      message: /unknown argument/i,
+    },
+    {
+      argv: ['--profile', 'test-profile', '--profile=test-profile', '--date', '2026-08-01'],
+      message: /--profile may be specified only once/i,
+    },
+    {
+      argv: ['--profile', 'test-profile', '--date', '2026-08-01', '--date=2026-08-01'],
+      message: /--date may be specified only once/i,
+    },
+    {
+      argv: ['--profile', 'test-profile', '--date', '2026-08-01', '--limit', '1e2'],
+      message: /invalid --limit/i,
+    },
   ];
-  for (const argv of cases) {
+  for (const cliCase of cases) {
     const result = spawnSync(
       process.execPath,
-      ['--import', 'tsx', 'scripts/route-benchmark.ts', ...argv],
+      ['--import', import.meta.resolve('tsx'), script, ...cliCase.argv],
       {
-        cwd,
+        cwd: workspace.rootDir,
         encoding: 'utf8',
-        env: { ...process.env, VALHALLA_URL: 'http://127.0.0.1:1/must-not-be-used' },
+        env: { ...process.env, VALHALLA_URL: 'https://user:must-not-leak@valhalla.test' },
       },
     );
-    assert.equal(result.status, 2, `${argv.join(' ')}\n${result.stderr}`);
+    assert.equal(result.status, 2, `${cliCase.argv.join(' ')}\n${result.stderr}`);
     assert.match(result.stderr, /^BAD INPUT: /);
+    assert.match(result.stderr, cliCase.message);
     assert.equal(result.stderr.includes('Valhalla benchmark'), false);
     assert.equal(result.stdout, '');
   }
+});
+
+test('route-benchmark CLI rejects an unsafe VALHALLA_URL without leaking it', (t) => {
+  // Would fail if endpoint validation happened inside per-case routing and the raw URL reached output or an artifact.
+  const sourceRoot = path.resolve(import.meta.dirname, '..', '..');
+  const workspace = createWorkspace(t, ['2026-08-01']);
+  createCliProfile(workspace.rootDir);
+  const secret = 'synthetic-cli-url-secret-19ad';
+  const result = spawnSync(
+    process.execPath,
+    [
+      '--import', import.meta.resolve('tsx'),
+      path.join(sourceRoot, 'scripts', 'route-benchmark.ts'),
+      '--profile', 'test-profile',
+      '--date', '2026-08-01',
+      '--limit', '1',
+    ],
+    {
+      cwd: workspace.rootDir,
+      encoding: 'utf8',
+      env: { ...process.env, VALHALLA_URL: `https://user:${secret}@valhalla.test` },
+    },
+  );
+
+  assert.equal(result.status, 2, result.stderr);
+  assert.match(result.stderr, /^BAD INPUT: Invalid Valhalla base URL/);
+  assert.equal(result.stdout, '');
+  assert.equal(`${result.stdout}\n${result.stderr}`.includes(secret), false);
+  assert.equal(fs.existsSync(path.join(workspace.rootDir, 'state', 'route-benchmarks')), false);
+});
+
+test('route-benchmark CLI succeeds with VALHALLA_URL override and keeps endpoint secrets out of outputs', async (t) => {
+  // Would fail if the override were ignored, successful stdout changed shape, or raw endpoint details were persisted/logged.
+  const sourceRoot = path.resolve(import.meta.dirname, '..', '..');
+  const workspace = createWorkspace(t, ['2026-08-01']);
+  createCliProfile(workspace.rootDir);
+  const secret = 'synthetic-endpoint-secret-a61b';
+  const origin = 'http://127.0.0.1:54321';
+  const capturePath = path.join(workspace.rootDir, 'fetch-capture.json');
+  const preloadPath = path.join(workspace.rootDir, 'fetch-preload.mjs');
+  fs.writeFileSync(preloadPath, [
+    "import fs from 'node:fs';",
+    'globalThis.fetch = async (input, init) => {',
+    '  const body = JSON.parse(String(init?.body));',
+    '  fs.writeFileSync(process.env.BENCHMARK_FETCH_CAPTURE, JSON.stringify({ url: String(input), body }));',
+    '  const distances = body.targets.map((_target, index) => 0.65 + index * 0.1);',
+    '  return new Response(JSON.stringify({',
+    '    sources_to_targets: { durations: [distances.map(() => 300)], distances: [distances] },',
+    "    units: 'kilometers',",
+    "    algorithm: 'costmatrix',",
+    "  }), { status: 200, headers: { 'Content-Type': 'application/json' } });",
+    '};',
+    '',
+  ].join('\n'));
+
+  const result = await runChild(
+    process.execPath,
+    [
+      '--import', import.meta.resolve('tsx'),
+      '--import', pathToFileURL(preloadPath).href,
+      path.join(sourceRoot, 'scripts', 'route-benchmark.ts'),
+      '--profile', 'test-profile',
+      '--date', '2026-08-01',
+      '--limit=1',
+    ],
+    workspace.rootDir,
+    {
+      ...process.env,
+      BENCHMARK_FETCH_CAPTURE: capturePath,
+      VALHALLA_URL: `${origin}/${secret}`,
+    },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  const capture = JSON.parse(fs.readFileSync(capturePath, 'utf8')) as { url: string };
+  assert.equal(capture.url, `${origin}/${secret}/sources_to_targets`);
+  assert.match(result.stderr, /^Valhalla benchmark 1\/1\n$/);
+  const stdout = JSON.parse(result.stdout) as {
+    artifact: string;
+    summary: { selected: number; completed: number; failed: number };
+  };
+  assert.equal(stdout.summary.selected, 1);
+  assert.equal(stdout.summary.completed, 1);
+  assert.equal(stdout.summary.failed, 0);
+  const artifactPath = path.join(workspace.rootDir, stdout.artifact);
+  const artifactBytes = fs.readFileSync(artifactPath, 'utf8');
+  const artifact = JSON.parse(artifactBytes) as Record<string, unknown>;
+  assert.equal(artifact.valhallaEndpoint, origin);
+  assert.equal(Object.hasOwn(artifact, 'valhallaBaseUrl'), false);
+  assert.equal(`${result.stdout}\n${result.stderr}\n${artifactBytes}`.includes(secret), false);
 });
