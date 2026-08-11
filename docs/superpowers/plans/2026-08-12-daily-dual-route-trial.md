@@ -439,7 +439,7 @@ Use two selected listings sharing a route key plus distinct misses and assert:
   continues the next key, is not cached, and the CLI-level run succeeds;
 - ORS records always come from enriched `walk`, never Valhalla; and
 - summary counts requested comparisons, reliable Valhalla completions,
-  cache-hit comparisons, top-level calls, and unavailable comparisons exactly.
+  unique cached route keys, top-level calls, and unavailable comparisons exactly.
 
 - [ ] **Step 6: Run routing tests and verify RED**
 
@@ -628,4 +628,3 @@ coordinates, listing IDs, titles, or detailed artifact contents into the report.
 git add AGENTS.md docs/reporting-rules.md prompts/daily-run.md scripts/lib/report-format.ts scripts/lib/report-format.test.ts
 git commit -m "docs: enable daily dual-route trial"
 ```
-
