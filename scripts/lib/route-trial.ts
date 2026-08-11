@@ -50,6 +50,14 @@ function isNullableFiniteNumber(value: unknown): boolean {
   return value === null || (typeof value === 'number' && Number.isFinite(value));
 }
 
+function isNullableBoolean(value: unknown): boolean {
+  return value === null || typeof value === 'boolean';
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
+}
+
 function isCoordinate(value: unknown): value is Coordinate | null {
   return value === null || (isRecord(value)
     && typeof value.lat === 'number' && Number.isFinite(value.lat)
@@ -97,6 +105,127 @@ function isNonNegativeSafeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
+function isWalkInfo(value: unknown): boolean {
+  return isRecord(value)
+    && typeof value.stationZh === 'string'
+    && typeof value.line === 'string'
+    && typeof value.exitId === 'string'
+    && typeof value.distanceM === 'number' && Number.isFinite(value.distanceM)
+    && typeof value.minutes === 'number' && Number.isFinite(value.minutes);
+}
+
+function isReliability(value: unknown): boolean {
+  return isRecord(value)
+    && typeof value.coordPresent === 'boolean'
+    && isNullableBoolean(value.coordConsistent)
+    && isNullableBoolean(value.routeOk)
+    && isNullableFiniteNumber(value.ratio)
+    && isNullableString(value.reason);
+}
+
+function isListingTenure(value: unknown): boolean {
+  return isRecord(value)
+    && isNullableString(value.firstListedDate)
+    && isNullableFiniteNumber(value.daysOnMarket)
+    && typeof value.recordCount === 'number' && Number.isFinite(value.recordCount)
+    && typeof value.sourceCount === 'number' && Number.isFinite(value.sourceCount)
+    && (value.priceTrend === 'flat' || value.priceTrend === 'dropped'
+      || value.priceTrend === 'raised' || value.priceTrend === 'unknown')
+    && isNullableFiniteNumber(value.firstPrice)
+    && isNullableFiniteNumber(value.latestPrice);
+}
+
+function isSourceFreshness(value: unknown): boolean {
+  return isRecord(value)
+    && isNullableString(value.transactionCheckedAt)
+    && isNullableString(value.doorplateCheckedAt)
+    && typeof value.transactionStale === 'boolean'
+    && typeof value.doorplateStale === 'boolean';
+}
+
+function isMarketEstimate(value: unknown): boolean {
+  return isRecord(value)
+    && (value.status === 'reliable' || value.status === 'review' || value.status === 'unavailable')
+    && (value.confidence === 'high' || value.confidence === 'medium' || value.confidence === 'low')
+    && (value.subjectOwnershipEvidence === 'profile-default-freehold'
+      || value.subjectOwnershipEvidence === 'title-explicit-non-freehold'
+      || value.subjectOwnershipEvidence === 'unspecified')
+    && (value.subjectLocationEvidence === null || isRecord(value.subjectLocationEvidence))
+    && isNullableFiniteNumber(value.marketUnitPriceMedian)
+    && isNullableFiniteNumber(value.marketUnitPriceP25)
+    && isNullableFiniteNumber(value.marketUnitPriceP75)
+    && isNullableFiniteNumber(value.selectedStage)
+    && isSourceFreshness(value.sourceFreshness)
+    && isStringArray(value.unavailableReasons)
+    && Array.isArray(value.comparables) && value.comparables.every(isRecord)
+    && Array.isArray(value.excludedCandidates) && value.excludedCandidates.every(isRecord);
+}
+
+function isUseScenario(value: unknown): boolean {
+  return isRecord(value)
+    && (value.primaryUse === 'commercial' || value.primaryUse === 'industrial'
+      || value.primaryUse === 'mixed-industrial' || value.primaryUse === 'mixed-residential'
+      || value.primaryUse === 'office' || value.primaryUse === 'residential')
+    && (value.role === 'primary' || value.role === 'residential-comparison' || value.role === 'unknown-use-scenario')
+    && (value.status === 'reliable' || value.status === 'review' || value.status === 'unavailable'
+      || value.status === 'diagnostic-only' || value.status === 'insufficient-sample')
+    && (value.confidence === 'high' || value.confidence === 'medium' || value.confidence === 'low')
+    && isNullableFiniteNumber(value.marketUnitPriceP25)
+    && isNullableFiniteNumber(value.marketUnitPriceMedian)
+    && isNullableFiniteNumber(value.marketUnitPriceP75)
+    && (value.bundleValue === null || isRecord(value.bundleValue))
+    && (value.parkingEstimate === null || isRecord(value.parkingEstimate))
+    && isRecord(value.gradeCounts)
+    && typeof value.gradeCounts.A === 'number' && Number.isFinite(value.gradeCounts.A)
+    && typeof value.gradeCounts.B === 'number' && Number.isFinite(value.gradeCounts.B)
+    && typeof value.gradeCounts.C === 'number' && Number.isFinite(value.gradeCounts.C)
+    && isNullableFiniteNumber(value.selectedStage)
+    && Array.isArray(value.comparables) && value.comparables.every(isRecord)
+    && Array.isArray(value.bundleComparables) && value.bundleComparables.every(isRecord)
+    && isStringArray(value.reasons);
+}
+
+function isMarketScenarios(value: unknown): boolean {
+  if (!isRecord(value) || !isRecord(value.registeredUse)) return false;
+  const use = value.registeredUse;
+  return (use.value === 'commercial' || use.value === 'industrial' || use.value === 'mixed-industrial'
+      || use.value === 'mixed-residential' || use.value === 'office' || use.value === 'residential'
+      || use.value === 'unknown')
+    && (use.source === 'official' || use.source === 'manual' || use.source === 'unknown')
+    && isNullableString(use.detail)
+    && (value.parkingFamily === 'flat' || value.parkingFamily === 'mechanical'
+      || value.parkingFamily === 'none' || value.parkingFamily === 'unknown')
+    && (value.parkingCountAssumption === 0 || value.parkingCountAssumption === 1
+      || value.parkingCountAssumption === 2 || value.parkingCountAssumption === null)
+    && isSourceFreshness(value.sourceFreshness)
+    && Array.isArray(value.scenarios) && value.scenarios.every(isUseScenario)
+    && isStringArray(value.reasons);
+}
+
+function isEnrichedListing(value: unknown): value is EnrichedListing {
+  if (!isListing(value)) return false;
+  const enriched = value as unknown as Record<string, unknown>;
+  return isNullableFiniteNumber(enriched.totalPriceWan)
+    && isNullableFiniteNumber(enriched.totalPriceNtd)
+    && isNullableFiniteNumber(enriched.totalPingNum)
+    && isNullableFiniteNumber(enriched.unitPriceWan)
+    && isNullableFiniteNumber(enriched.ageNum)
+    && isNullableFiniteNumber(enriched.monthlyMortgage)
+    && isNullableString(enriched.district)
+    && (enriched.walk === null || isWalkInfo(enriched.walk))
+    && isNullableBoolean(enriched.withinWalk)
+    && (enriched.regionGate === 'in' || enriched.regionGate === 'out-of-region'
+      || enriched.regionGate === 'in-region-too-far' || enriched.regionGate === 'review')
+    && isReliability(enriched.reliability)
+    && isRecord(enriched.signals) && typeof enriched.signals.auctionKeyword === 'boolean'
+    && isRecord(enriched.hardExclusion) && typeof enriched.hardExclusion.excluded === 'boolean'
+    && isStringArray(enriched.hardExclusion.reasons)
+    && isListingTenure(enriched.tenure)
+    && (enriched.tenureGate === 'eligible' || enriched.tenureGate === 'expired' || enriched.tenureGate === 'review')
+    && isMarketEstimate(enriched.marketEstimate)
+    && isMarketScenarios(enriched.marketScenarios);
+}
+
 function isFetchResult(value: unknown): value is FetchResult {
   return isRecord(value)
     && typeof value.from === 'string'
@@ -118,7 +247,7 @@ function isEnrichResult(value: unknown): value is EnrichResult {
     || !isNonNegativeSafeInteger(value.count)
     || !Array.isArray(value.listings)
     || value.count !== value.listings.length
-    || !value.listings.every(isListing)) return false;
+    || !value.listings.every(isEnrichedListing)) return false;
   return [
     value.withinWalkCount, value.manualReviewCount, value.hardExcludedCount,
     value.tenureEligible, value.tenureExpired, value.tenureReview,

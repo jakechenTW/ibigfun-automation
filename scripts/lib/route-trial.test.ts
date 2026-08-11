@@ -47,9 +47,26 @@ function enriched(original: Listing): EnrichedListing {
     signals: { auctionKeyword: false }, hardExclusion: { excluded: false, reasons: [] },
     tenure: { firstListedDate: null, daysOnMarket: null, recordCount: 0, sourceCount: 0, priceTrend: 'unknown', firstPrice: null, latestPrice: null },
     tenureGate: 'review',
-    marketEstimate: { status: 'unavailable', reason: 'fixture' },
-    marketScenarios: { scenarios: [] },
-  } as unknown as EnrichedListing;
+    marketEstimate: {
+      status: 'unavailable', confidence: 'low', subjectOwnershipEvidence: 'unspecified',
+      subjectLocationEvidence: null, marketUnitPriceMedian: null, marketUnitPriceP25: null,
+      marketUnitPriceP75: null, selectedStage: null,
+      sourceFreshness: {
+        transactionCheckedAt: null, doorplateCheckedAt: null,
+        transactionStale: false, doorplateStale: false,
+      },
+      unavailableReasons: ['fixture'], comparables: [], excludedCandidates: [],
+    },
+    marketScenarios: {
+      registeredUse: { value: 'unknown', source: 'unknown', detail: null },
+      parkingFamily: 'unknown', parkingCountAssumption: null,
+      sourceFreshness: {
+        transactionCheckedAt: null, doorplateCheckedAt: null,
+        transactionStale: false, doorplateStale: false,
+      },
+      scenarios: [], reasons: ['fixture'],
+    },
+  };
 }
 
 function fixtures(): { fetched: FetchResult; enriched: EnrichResult } {
@@ -169,6 +186,20 @@ test('selectRouteTrialListings rejects malformed requests and misbound results',
 
   const mismatchedArray = { ...enriched, listings: enriched.listings.slice(0, 2) };
   assert.throws(() => selectRouteTrialListings(valid, 'p', range, fetched, mismatchedArray, exits));
+
+  const malformedEnrichedFields = [
+    { walk: undefined },
+    { walk: { stationZh: '松江南京', line: '松山新店線', exitId: '4', distanceM: '720', minutes: 9 } },
+    { reliability: undefined },
+    { reliability: { coordPresent: true, coordConsistent: true, routeOk: 'true', ratio: 1.2, reason: null } },
+  ];
+  for (const malformed of malformedEnrichedFields) {
+    const malformedResult = {
+      ...enriched,
+      listings: enriched.listings.map((item, index) => index === 0 ? { ...item, ...malformed } : item),
+    };
+    assert.throws(() => selectRouteTrialListings(valid, 'p', range, fetched, malformedResult, exits));
+  }
 
   const driftedFields = [
     { id: 99999 },
