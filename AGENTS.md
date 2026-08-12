@@ -88,9 +88,12 @@ recovery action.
    `docs/reporting-rules.md` and `profiles/<profile>/evaluation.md`.
 10. After bucketing, run the report-owned dual-route trial only for every
     positive, candidate, and risk listing that will be rendered individually.
-    Write their enriched indexes to `route-trial-request.json`, invoke
-    `npm run route-trial` once with the same profile/date-or-range arguments,
-    and bind `route-trial.json` comparisons back by index and listing ID.
+    Write their enriched indexes to the exact `listingIndexes` field in
+    `route-trial-request.json`; it accepts at most 25 unique safe integer
+    indexes. Include `schemaVersion: 1`, the exact `profileId`, and the exact
+    `rangeLabel`, then invoke `npm run route-trial` once with the same
+    profile/date-or-range arguments and bind `route-trial.json` comparisons
+    back by index and listing ID.
     Excluded/count-only listings never enter the request. Trial or provider
     failure renders `Valhalla 暫無（試行）`; it never changes the ORS-owned
     bucket, order, or notification status and never by itself triggers
