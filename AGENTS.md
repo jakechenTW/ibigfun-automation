@@ -89,8 +89,9 @@ recovery action.
 10. After bucketing, run the report-owned dual-route trial only for every
     positive, candidate, and risk listing that will be rendered individually.
     Write their enriched indexes to the exact `listingIndexes` field in
-    `route-trial-request.json`; it accepts at most 25 unique safe integer
-    indexes. Include `schemaVersion: 1`, the exact `profileId`, and the exact
+    `route-trial-request.json`; it accepts at most 25 unique, non-negative safe
+    integer indexes, each less than the current `enriched.json` listings-array
+    length. Include `schemaVersion: 1`, the exact `profileId`, and the exact
     `rangeLabel`, then invoke `npm run route-trial` once with the same
     profile/date-or-range arguments and bind `route-trial.json` comparisons
     back by index and listing ID.

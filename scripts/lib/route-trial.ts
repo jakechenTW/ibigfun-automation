@@ -350,12 +350,13 @@ function trialWalk(
   exitId: string,
   distanceM: number,
 ): RouteTrialWalk {
+  const roundedDistanceM = Math.round(distanceM);
   return {
     status: 'reliable',
     stationZh,
     exitId,
-    distanceM: Math.round(distanceM),
-    minutes: Math.round(distanceM / 80),
+    distanceM: roundedDistanceM,
+    minutes: Math.round(roundedDistanceM / 80),
   };
 }
 

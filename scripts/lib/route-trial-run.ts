@@ -6,7 +6,6 @@ import type { RunRange } from './range.ts';
 import {
   reliableOrsTrialWalk,
   selectRouteTrialListings,
-  unavailableTrialWalk,
   valhallaTrialWalk,
   type RouteTrialComparison,
   type RouteTrialSelection,

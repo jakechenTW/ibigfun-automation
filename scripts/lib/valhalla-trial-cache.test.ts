@@ -104,6 +104,42 @@ test('loader rejects every malformed cache level before returning typed state', 
   assert.throws(() => loadValhallaTrialCache(rootDir), /Invalid Valhalla trial cache/);
 });
 
+test('loader rejects noncanonical, out-of-range, and prototype-like persisted route keys', (t) => {
+  // Would fail if any nonempty property name were trusted as a canonical coordinate-to-exits key.
+  const rootDir = disposableRoot(t);
+  const malformedRouteKeys = [
+    '__proto__',
+    'constructor',
+    'prototype',
+    '90.00001,121.56500|G15:4',
+    '25.03300,180.00001|G15:4',
+    '+25.03300,121.56500|G15:4',
+    '025.03300,121.56500|G15:4',
+    '25.0330,121.56500|G15:4',
+    '25.03300,121.56500|',
+    '25.03300,121.56500|G15',
+    '25.03300,121.56500|G15:4,',
+  ];
+
+  for (const malformedRouteKey of malformedRouteKeys) {
+    writeCache(rootDir, {
+      schemaVersion: 1,
+      endpoints: {
+        [endpointKey]: {
+          routes: Object.fromEntries([
+            [malformedRouteKey, { distances: [420], cachedAt }],
+          ]),
+        },
+      },
+    });
+    assert.throws(
+      () => loadValhallaTrialCache(rootDir),
+      /Invalid Valhalla trial cache/,
+      malformedRouteKey,
+    );
+  }
+});
+
 test('loader accepts valid nested cache data', (t) => {
   // Would fail if strict validation rejected zero, null, fractional distance, or a canonical timestamp.
   const rootDir = disposableRoot(t);

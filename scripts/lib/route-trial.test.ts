@@ -118,6 +118,21 @@ test('reliableOrsTrialWalk trusts only reliable ORS walk evidence and recomputes
   }), unavailableTrialWalk());
 });
 
+test('reliableOrsTrialWalk derives minutes from its stored rounded fractional distance', () => {
+  // Would fail if minutes were calculated from the provider fraction after distanceM was rounded.
+  const withBoundaryWalk = {
+    ...enriched(listing(0)),
+    walk: { stationZh: '松江南京', line: '松山新店線', exitId: '4', distanceM: 839.5, minutes: 1 },
+    reliability: { coordPresent: true, coordConsistent: true, routeOk: true, ratio: 1.2, reason: null },
+  } as EnrichedListing;
+
+  const result = reliableOrsTrialWalk(withBoundaryWalk);
+
+  assert.equal(result.distanceM, 840);
+  assert.equal(result.minutes, 11);
+  assert.equal(result.minutes, Math.round(result.distanceM! / 80));
+});
+
 test('valhallaTrialWalk selects its own plausible exit and rejects unavailable routes', () => {
   const { fetched, enriched: enrichedResult } = fixtures();
   const [selection] = selectRouteTrialListings(

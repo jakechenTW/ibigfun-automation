@@ -37,7 +37,7 @@ Trigger 也會在訊息裡告訴你要監測的區間。把它對應成 pipeline
 
    `report.md` 排除 P25–P75、raw market status/confidence/stage/dates 與完整 unavailable reasons。
 
-3. 分桶完成後執行一次 report-owned route trial，再寫報告：只把每個 positive／candidate／risk（逐筆呈現）房源在 `enriched.json` 的 index 寫進 `state/runs/<profile>/<label>/route-trial-request.json`；excluded／只計數房源一律不得進 request。request 的 index array 欄位名稱必須**精確為 `listingIndexes`**，最多 25 個互不重複的 safe integer；同時必須含正確的 `schemaVersion: 1`、`profileId` 與 `rangeLabel`。安全形狀如下（替換實際值，不得改 key）：
+3. 分桶完成後執行一次 report-owned route trial，再寫報告：只把每個 positive／candidate／risk（逐筆呈現）房源在 `enriched.json` 的 index 寫進 `state/runs/<profile>/<label>/route-trial-request.json`；excluded／只計數房源一律不得進 request。request 的 index array 欄位名稱必須**精確為 `listingIndexes`**，最多 25 個互不重複的非負 safe integer，且每個值都必須小於當前 `enriched.json` listings array 的長度（即在該 array 範圍內）；同時必須含正確的 `schemaVersion: 1`、`profileId` 與 `rangeLabel`。安全形狀如下（替換實際值，不得改 key）：
 
    ```json
    {"schemaVersion":1,"profileId":"<profile>","rangeLabel":"<label>","listingIndexes":[0,3,7]}

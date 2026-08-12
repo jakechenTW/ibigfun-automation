@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { isCanonicalRouteCacheKey } from './route-cache.ts';
 
 export const VALHALLA_TRIAL_CACHE_PATH = 'state/valhalla-trial-cache.json';
 
@@ -63,7 +64,7 @@ function isCacheEntry(value: unknown): value is ValhallaTrialCacheEntry {
 function isRoutes(value: unknown): value is Record<string, ValhallaTrialCacheEntry> {
   if (!isRecord(value)) return false;
   return Object.entries(value).every(([routeKey, entry]) =>
-    routeKey.length > 0 && isCacheEntry(entry));
+    isCanonicalRouteCacheKey(routeKey) && isCacheEntry(entry));
 }
 
 function isEndpoint(value: unknown): value is { routes: Record<string, ValhallaTrialCacheEntry> } {
@@ -125,7 +126,7 @@ export function putValhallaTrialCacheEntry(
   const entry = { distances, cachedAt };
   if (!isValhallaTrialCache(cache)
     || !ENDPOINT_KEY_PATTERN.test(endpointKey)
-    || routeKey.length === 0
+    || !isCanonicalRouteCacheKey(routeKey)
     || !isCacheEntry(entry)) throw invalidCache();
 
   cache.endpoints[endpointKey] ??= { routes: {} };
