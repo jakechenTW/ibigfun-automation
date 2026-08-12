@@ -37,6 +37,7 @@ const LISTINGS_ERROR = 'Valhalla trial listings input is missing or invalid';
 const ENRICHED_ERROR = 'Valhalla trial enriched input is missing or invalid';
 const MRT_ERROR = 'Valhalla trial MRT input is missing or invalid';
 const CACHE_ERROR = 'Valhalla trial cache is invalid';
+const MIN_REQUEST_DELAY_MS = 1000;
 export const ROUTE_TRIAL_PERSISTENCE_ERROR = 'Valhalla trial result persistence failed';
 
 export interface RouteTrialOptions {
@@ -330,6 +331,9 @@ export async function runRouteTrial(
   const progress = deps.progress ?? (() => {});
   const saveCache = deps.saveCache ?? saveValhallaTrialCacheAtomic;
   const normalizedBaseUrl = normalizeValhallaBaseUrl(options.valhallaBaseUrl);
+  const requestDelayMs = Number.isFinite(options.requestDelayMs)
+    ? Math.max(options.requestDelayMs, MIN_REQUEST_DELAY_MS)
+    : MIN_REQUEST_DELAY_MS;
   const runPath = (relative: string): string => path.join(options.rootDir, relative);
 
   const request = readJson(
@@ -398,7 +402,7 @@ export async function runRouteTrial(
 
   for (let index = 0; index < misses.length; index += 1) {
     const [routeKey, selection] = misses[index];
-    if (index > 0) await sleep(options.requestDelayMs);
+    if (index > 0) await sleep(requestDelayMs);
     let distances: (number | null)[];
     try {
       distances = await route(

@@ -511,6 +511,35 @@ test('runRouteTrial deduplicates routes, isolates unique cache hits, rate limits
   assert.deepEqual(fs.readFileSync(workspace.orsCachePath), orsBefore);
 });
 
+test('runRouteTrial enforces the 1000 ms provider-call delay for invalid and sub-minimum options', async (t) => {
+  const delayCases = [0, 999, -1, Number.NaN];
+  for (const requestDelayMs of delayCases) {
+    await t.test(String(requestDelayMs), async (subtest) => {
+      const workspace = createWorkspace(subtest, [
+        listing(745001, { lat: 25.0321, lng: 121.5181 }),
+        listing(745002, { lat: 25.0342, lng: 121.5202 }),
+      ]);
+      const sleeps: number[] = [];
+      let routeCalls = 0;
+
+      await runRouteTrial(
+        { ...options(workspace.rootDir), requestDelayMs },
+        {
+          route: async () => {
+            routeCalls += 1;
+            return routeCalls === 1 ? [20, 200, 300] : [40, 200, 300];
+          },
+          sleep: async (ms) => { sleeps.push(ms); },
+          now: () => new Date('2026-08-12T01:02:03.000Z'),
+        },
+      );
+
+      assert.equal(routeCalls, 2);
+      assert.deepEqual(sleeps, [1000]);
+    });
+  }
+});
+
 test('runRouteTrial converts every provider failure category to safe unavailable evidence and continues', async (t) => {
   const failures = [
     { thrown: new Error('Valhalla matrix HTTP 503'), expected: 'Valhalla matrix HTTP 503' },
