@@ -180,3 +180,30 @@ test('atomic save preserves prior final bytes and cleans its temp when rename fa
   assert.match(path.basename(removed[0]), /^valhalla-trial-cache\.json\.tmp-/);
   assert.deepEqual(fs.readdirSync(stateDir), ['valhalla-trial-cache.json']);
 });
+
+test('atomic save does not report failure when cleanup throws after a successful rename', (t) => {
+  // Would fail if post-publication cleanup errors were confused with failure to replace the final cache.
+  const rootDir = disposableRoot(t);
+  writeCache(rootDir, validCache());
+  const replacement: ValhallaTrialCache = { schemaVersion: 1, endpoints: {} };
+
+  assert.doesNotThrow(() => saveValhallaTrialCacheAtomic(
+    rootDir,
+    replacement,
+    {
+      writeExclusive: (file, contents) => {
+        fs.writeFileSync(file, contents, { flag: 'wx', mode: 0o600 });
+      },
+      rename: (source, destination) => fs.renameSync(source, destination),
+      remove: () => {
+        throw new Error(`synthetic cleanup failure for ${rootDir}`);
+      },
+    },
+  ));
+
+  assert.deepEqual(loadValhallaTrialCache(rootDir), replacement);
+  assert.deepEqual(
+    fs.readdirSync(path.join(rootDir, 'state')),
+    ['valhalla-trial-cache.json'],
+  );
+});

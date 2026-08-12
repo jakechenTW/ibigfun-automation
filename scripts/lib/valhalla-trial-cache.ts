@@ -145,17 +145,19 @@ export function saveValhallaTrialCacheAtomic(
   const finalPath = path.join(rootDir, VALHALLA_TRIAL_CACHE_PATH);
   const temporaryPath = `${finalPath}.tmp-${process.pid}-${randomUUID()}`;
   let failed = false;
+  let published = false;
   try {
     fs.mkdirSync(path.dirname(finalPath), { recursive: true });
     operations.writeExclusive(temporaryPath, `${JSON.stringify(cache, null, 2)}\n`);
     operations.rename(temporaryPath, finalPath);
+    published = true;
   } catch {
     failed = true;
   } finally {
     try {
       operations.remove(temporaryPath);
     } catch {
-      failed = true;
+      if (!published) failed = true;
     }
   }
   if (failed) throw new Error(PERSISTENCE_ERROR_MESSAGE);
