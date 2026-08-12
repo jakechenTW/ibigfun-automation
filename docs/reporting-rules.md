@@ -274,9 +274,11 @@ precedence over a positive or clean-data candidate bucket.
 - Put one conclusion sentence first, followed by one compact count line. Render `data_warning` only when stale, weak, missing, or inconsistent data affects safe interpretation.
 - List every positive, candidate, and risk property. Summarize excluded properties by valid hard reason and count; never list excluded properties individually.
 - Every individually rendered property shows total price, area, asking unit price, profile-relevant basics, `walk_line`, `tenure_line`, `market_summary_line`, and one bucket reason or next action.
-- Compose `walk_line` from enriched `walk` and `coordinate`, and apply it to positive, candidate, and risk buckets:
-  - Reliable `walk`: `🚶 {stationZh} {exitId} 號出口・{minutes} 分鐘（[地圖](https://www.google.com/maps?q=<lat>,<lng>)）`; omit the 出口 segment when `exitId` is absent.
-  - Unreliable `walk` with a coordinate: `🚶 約{station}・步行待確認（[地圖](https://www.google.com/maps?q=<lat>,<lng>)）`; when no station is inferred, use `🚶 步行待人工確認（[地圖](https://www.google.com/maps?q=<lat>,<lng>)）`.
+- Compose `walk_line` after bucketing from authoritative enriched ORS `walk`, the display-only `route-trial.json` comparison, and `coordinate`; apply it only to positive, candidate, and risk buckets. The Valhalla trial never changes a bucket, order, ORS decision, or notification status, and excluded/count-only listings never enter its request:
+  - Both reliable: `🚶 ORS 松江南京 4號出口・9分｜Valhalla 松江南京 3號出口・10分（試行）・[地圖](https://www.google.com/maps?q=<lat>,<lng>)`; substitute each provider's selected station, exit, and recomputed minutes, and omit either provider's exit segment when its `exitId` is absent.
+  - Valhalla unavailable: `🚶 ORS 松江南京 4號出口・9分｜Valhalla 暫無（試行）・[地圖](https://www.google.com/maps?q=<lat>,<lng>)`.
+  - ORS unavailable: `🚶 ORS 待確認｜Valhalla 松江南京 3號出口・10分（試行）・[地圖](https://www.google.com/maps?q=<lat>,<lng>)`.
+  - Both unavailable: `🚶 ORS 待確認｜Valhalla 暫無（試行）・[地圖](https://www.google.com/maps?q=<lat>,<lng>)`.
   - No coordinate: `🚶 無位置資訊` (without a map link).
 - Compose `tenure_line` from enriched `tenure`:
   - For `daysOnMarket === 0`, use `🕒 今日上架`.

@@ -15,5 +15,8 @@ export function validateNotificationReport(report: string): void {
     if (!GOOGLE_MAP_COORDINATE_LINK.test(trimmed)) {
       throw new Error(`walking line ${index + 1} must include a clickable Google Maps coordinate link`);
     }
+    if (!trimmed.includes('ORS') || !trimmed.includes('Valhalla') || !trimmed.includes('（試行）')) {
+      throw new Error(`walking line ${index + 1} must include ORS and Valhalla trial labels`);
+    }
   }
 }

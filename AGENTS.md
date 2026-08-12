@@ -86,9 +86,18 @@ recovery action.
 9. Evaluate against the selected profile criteria, shared data-quality rules,
    and sorting/notification rules, using the enriched fields plus your estimates →
    `docs/reporting-rules.md` and `profiles/<profile>/evaluation.md`.
-10. Write `state/runs/<profile>/<label>/report.md` using the profile's
+10. After bucketing, run the report-owned dual-route trial only for every
+    positive, candidate, and risk listing that will be rendered individually.
+    Write their enriched indexes to `route-trial-request.json`, invoke
+    `npm run route-trial` once with the same profile/date-or-range arguments,
+    and bind `route-trial.json` comparisons back by index and listing ID.
+    Excluded/count-only listings never enter the request. Trial or provider
+    failure renders `Valhalla 暫無（試行）`; it never changes the ORS-owned
+    bucket, order, or notification status and never by itself triggers
+    `pipeline fail`.
+11. Write `state/runs/<profile>/<label>/report.md` using the profile's
    `profiles/<profile>/notify-template.md` as the structure.
-11. Notify with the canonical command below. Any stale official market source requires notification status `warn`;
+12. Notify with the canonical command below. Any stale official market source requires notification status `warn`;
    `pipeline mark report --status ok` rejects malformed or internally inconsistent
    enriched market evidence and any stale official source. Fresh `review` or
    `unavailable` evidence affects notification status only when it leaves an
@@ -149,6 +158,16 @@ evaluation, and writing the report.
 - `npm run route -- --lat <> --lng <>` — deterministic nearest-walk exit for one
   coordinate (shared ORS cache). Used during triage (step 5) to get a trustworthy
   walking distance after re-locating a listing from its address.
+- `npm run route-trial -- --profile <profile> [--date <target> | --from <a>
+  --to <b>]` — report-owned, display-only Valhalla trial for the selected
+  positive/candidate/risk indexes in
+  `state/runs/<profile>/<label>/route-trial-request.json`. It reads the existing
+  listing/enriched artifacts, uses the isolated git-ignored
+  `state/valhalla-trial-cache.json`, and writes detailed local evidence to
+  `state/runs/<profile>/<label>/route-trial.json`. It never mutates production
+  ORS decisions or `state/route-cache.json`. Provider failures degrade per
+  listing; any command or provider failure is rendered as
+  `Valhalla 暫無（試行）` without changing notification status.
 - `npm run route-benchmark -- --profile <profile> --date <target> [--limit <1-200>]`
   or `npm run route-benchmark -- --profile <profile> --from <a> --to <b>
   [--limit <1-200>]` — evaluation-only Valhalla comparison. It reads the existing
