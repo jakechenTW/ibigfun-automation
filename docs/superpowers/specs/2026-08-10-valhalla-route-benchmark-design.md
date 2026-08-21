@@ -59,11 +59,16 @@ key, then deduplicated by route-cache key before the limit is applied. This
 makes repeated invocations over unchanged input select the same cases.
 
 The Valhalla base URL defaults to `https://valhalla1.openstreetmap.de` and may
-be overridden with `VALHALLA_URL` for a local or paid hosted deployment. The
-client sends a stable, non-personal `X-Client-Id` identifying this repository's
-benchmark command. It requires no API key for the default FOSSGIS endpoint.
-The override must be an absolute HTTP(S) base without credentials, a query, or
-a fragment; invalid values fail before routing and are never echoed.
+be configured with `VALHALLA_URL` in the project `.env` for a local or paid
+hosted deployment. Both `route-benchmark` and the report-owned `route-trial`
+load `.env` before resolving the endpoint. An already-exported environment
+variable, including a command-scoped override, takes precedence because `.env`
+never overwrites process environment. A missing or empty value selects the
+public default. The client sends a stable, non-personal `X-Client-Id`
+identifying this repository's benchmark command. It requires no API key for the
+default FOSSGIS endpoint. A non-empty override must be an absolute HTTP(S) base
+without credentials, a query, or a fragment; invalid values fail before
+routing and are never echoed.
 
 ## Components
 

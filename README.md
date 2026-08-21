@@ -22,6 +22,9 @@ you can explore the shape of the system before writing your own.
   Credentials go in `.env` (see `docs/credentials.md`).
 - **ORS API key** — free at [openrouteservice.org/dev](https://openrouteservice.org/dev/);
   used by the enrich step to compute walking distances to MRT exits.
+- **Valhalla endpoint (optional)** — set `VALHALLA_URL` in `.env` for a local or
+  hosted deployment. Leave it blank to use the public FOSSGIS demo; a
+  command-scoped value overrides `.env`.
 - **Notifier (optional)** — set `NOTIFY_CMD` in `.env` to any CLI notifier
   (default: `ai-notify`). Without a notifier the report is still written to
   `state/runs/<profile>/<label>/report.md`; only the notification is skipped.

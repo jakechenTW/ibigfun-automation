@@ -172,6 +172,10 @@ evaluation, and writing the report.
   ORS decisions or `state/route-cache.json`. Provider failures degrade per
   listing; any command or provider failure is rendered as
   `Valhalla 暫無（試行）` without changing notification status.
+  The Valhalla base URL is read from `VALHALLA_URL` in `.env`; leave it blank
+  to use the default FOSSGIS demo. An already-exported `VALHALLA_URL` (including
+  a command-scoped override) takes precedence over `.env`. Non-empty overrides
+  must be absolute HTTP(S) base URLs without credentials, query, or fragment.
 - `npm run route-benchmark -- --profile <profile> --date <target> [--limit <1-200>]`
   or `npm run route-benchmark -- --profile <profile> --from <a> --to <b>
   [--limit <1-200>]` — evaluation-only Valhalla comparison. It reads the existing

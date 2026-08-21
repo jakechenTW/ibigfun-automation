@@ -845,6 +845,89 @@ test('route-benchmark CLI maps artifact directory creation failure without leaki
   assert.equal(result.stderr.includes(blocker), false);
 });
 
+test('route-benchmark CLI reads VALHALLA_URL from the project .env file', async (t) => {
+  // Would fail if the CLI only consulted the parent process environment.
+  const sourceRoot = path.resolve(import.meta.dirname, '..', '..');
+  const workspace = createWorkspace(t, ['2026-08-01']);
+  createCliProfile(workspace.rootDir);
+  const endpoint = 'https://env-file.valhalla.test';
+  const capturePath = path.join(workspace.rootDir, 'fetch-capture.json');
+  const preloadPath = path.join(workspace.rootDir, 'fetch-preload.mjs');
+  fs.writeFileSync(path.join(workspace.rootDir, '.env'), `VALHALLA_URL=${endpoint}\n`);
+  fs.writeFileSync(preloadPath, [
+    "import fs from 'node:fs';",
+    'globalThis.fetch = async (input, init) => {',
+    '  fs.writeFileSync(process.env.BENCHMARK_FETCH_CAPTURE, JSON.stringify({ url: String(input) }));',
+    '  const body = JSON.parse(String(init?.body));',
+    '  return new Response(JSON.stringify({ sources_to_targets: {',
+    '    distances: [body.targets.map(() => 0.65)],',
+    '  } }), { status: 200, headers: { "Content-Type": "application/json" } });',
+    '};',
+    '',
+  ].join('\n'));
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, BENCHMARK_FETCH_CAPTURE: capturePath };
+  delete childEnv.VALHALLA_URL;
+
+  const result = await runChild(
+    process.execPath,
+    [
+      '--import', import.meta.resolve('tsx'),
+      '--import', pathToFileURL(preloadPath).href,
+      path.join(sourceRoot, 'scripts', 'route-benchmark.ts'),
+      '--profile', 'test-profile',
+      '--date', '2026-08-01',
+      '--limit', '1',
+    ],
+    workspace.rootDir,
+    childEnv,
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  const capture = JSON.parse(fs.readFileSync(capturePath, 'utf8')) as { url: string };
+  assert.equal(capture.url, `${endpoint}/sources_to_targets`);
+});
+
+test('route-benchmark CLI treats a blank .env VALHALLA_URL as the public default', async (t) => {
+  // Would fail if the documented blank placeholder were validated as an explicit URL.
+  const sourceRoot = path.resolve(import.meta.dirname, '..', '..');
+  const workspace = createWorkspace(t, ['2026-08-01']);
+  createCliProfile(workspace.rootDir);
+  const capturePath = path.join(workspace.rootDir, 'fetch-capture.json');
+  const preloadPath = path.join(workspace.rootDir, 'fetch-preload.mjs');
+  fs.writeFileSync(path.join(workspace.rootDir, '.env'), 'VALHALLA_URL=\n');
+  fs.writeFileSync(preloadPath, [
+    "import fs from 'node:fs';",
+    'globalThis.fetch = async (input, init) => {',
+    '  fs.writeFileSync(process.env.BENCHMARK_FETCH_CAPTURE, JSON.stringify({ url: String(input) }));',
+    '  const body = JSON.parse(String(init?.body));',
+    '  return new Response(JSON.stringify({ sources_to_targets: {',
+    '    distances: [body.targets.map(() => 0.65)],',
+    '  } }), { status: 200, headers: { "Content-Type": "application/json" } });',
+    '};',
+    '',
+  ].join('\n'));
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, BENCHMARK_FETCH_CAPTURE: capturePath };
+  delete childEnv.VALHALLA_URL;
+
+  const result = await runChild(
+    process.execPath,
+    [
+      '--import', import.meta.resolve('tsx'),
+      '--import', pathToFileURL(preloadPath).href,
+      path.join(sourceRoot, 'scripts', 'route-benchmark.ts'),
+      '--profile', 'test-profile',
+      '--date', '2026-08-01',
+      '--limit', '1',
+    ],
+    workspace.rootDir,
+    childEnv,
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  const capture = JSON.parse(fs.readFileSync(capturePath, 'utf8')) as { url: string };
+  assert.equal(capture.url, 'https://valhalla1.openstreetmap.de/sources_to_targets');
+});
+
 test('route-benchmark CLI succeeds with VALHALLA_URL override and keeps endpoint secrets out of outputs', async (t) => {
   // Would fail if the override were ignored, successful stdout changed shape, or raw endpoint details were persisted/logged.
   const sourceRoot = path.resolve(import.meta.dirname, '..', '..');
@@ -854,6 +937,10 @@ test('route-benchmark CLI succeeds with VALHALLA_URL override and keeps endpoint
   const origin = 'http://127.0.0.1:54321';
   const capturePath = path.join(workspace.rootDir, 'fetch-capture.json');
   const preloadPath = path.join(workspace.rootDir, 'fetch-preload.mjs');
+  fs.writeFileSync(
+    path.join(workspace.rootDir, '.env'),
+    'VALHALLA_URL=https://env-file-should-not-win.valhalla.test\n',
+  );
   fs.writeFileSync(preloadPath, [
     "import fs from 'node:fs';",
     'globalThis.fetch = async (input, init) => {',

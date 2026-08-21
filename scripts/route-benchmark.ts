@@ -22,6 +22,8 @@ function writeFailure(prefix: 'BAD INPUT' | 'ERROR', error: unknown, exitCode: 1
 }
 
 async function main(argv: string[]): Promise<void> {
+  try { process.loadEnvFile('.env'); } catch { /* environment may already be exported */ }
+
   let options: RouteBenchmarkOptions;
   try {
     const limit = parseBenchmarkLimit(argv);
@@ -33,7 +35,7 @@ async function main(argv: string[]): Promise<void> {
       range,
       limit,
       valhallaBaseUrl: normalizeValhallaBaseUrl(
-        process.env.VALHALLA_URL ?? DEFAULT_VALHALLA_URL,
+        process.env.VALHALLA_URL || DEFAULT_VALHALLA_URL,
       ),
       requestDelayMs: 1000,
     };

@@ -42,6 +42,8 @@ function validateGrammar(argv: string[]): void {
 }
 
 async function main(argv: string[]): Promise<void> {
+  try { process.loadEnvFile('.env'); } catch { /* environment may already be exported */ }
+
   try {
     validateGrammar(argv);
   } catch {
@@ -68,7 +70,7 @@ async function main(argv: string[]): Promise<void> {
   let valhallaBaseUrl: string;
   try {
     valhallaBaseUrl = normalizeValhallaBaseUrl(
-      process.env.VALHALLA_URL ?? DEFAULT_VALHALLA_URL,
+      process.env.VALHALLA_URL || DEFAULT_VALHALLA_URL,
     );
   } catch {
     fail(

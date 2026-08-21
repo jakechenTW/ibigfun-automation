@@ -762,6 +762,57 @@ test('route-trial CLI succeeds when the real provider stack returns invalid evid
   assert.equal(artifactBytes.includes('invalid-response-secret'), false);
 });
 
+test('route-trial CLI reads VALHALLA_URL from the project .env file', async (t) => {
+  // Would fail if the CLI only consulted the parent process environment.
+  const sourceRoot = path.resolve(import.meta.dirname, '..', '..');
+  const workspace = createWorkspace(t, [listing(785001, { lat: 25.0321, lng: 121.5181 })]);
+  createCliProfile(workspace.rootDir);
+  const preloadPath = writeFetchPreload(workspace.rootDir);
+  const capturePath = path.join(workspace.rootDir, 'fetch-capture.txt');
+  const endpoint = 'https://env-file.valhalla.test';
+  fs.writeFileSync(path.join(workspace.rootDir, '.env'), `VALHALLA_URL=${endpoint}\n`);
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, TRIAL_FETCH_CAPTURE: capturePath };
+  delete childEnv.VALHALLA_URL;
+
+  const result = await runChild(
+    process.execPath,
+    cliCommand(sourceRoot, preloadPath, ['--profile', profileId, '--date', range.from]),
+    workspace.rootDir,
+    childEnv,
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    fs.readFileSync(capturePath, 'utf8').trim(),
+    `${endpoint}/sources_to_targets`,
+  );
+});
+
+test('route-trial CLI treats a blank .env VALHALLA_URL as the public default', async (t) => {
+  // Would fail if the documented blank placeholder were validated as an explicit URL.
+  const sourceRoot = path.resolve(import.meta.dirname, '..', '..');
+  const workspace = createWorkspace(t, [listing(785002, { lat: 25.0321, lng: 121.5181 })]);
+  createCliProfile(workspace.rootDir);
+  const preloadPath = writeFetchPreload(workspace.rootDir);
+  const capturePath = path.join(workspace.rootDir, 'fetch-capture.txt');
+  fs.writeFileSync(path.join(workspace.rootDir, '.env'), 'VALHALLA_URL=\n');
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, TRIAL_FETCH_CAPTURE: capturePath };
+  delete childEnv.VALHALLA_URL;
+
+  const result = await runChild(
+    process.execPath,
+    cliCommand(sourceRoot, preloadPath, ['--profile', profileId, '--date', range.from]),
+    workspace.rootDir,
+    childEnv,
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    fs.readFileSync(capturePath, 'utf8').trim(),
+    'https://valhalla1.openstreetmap.de/sources_to_targets',
+  );
+});
+
 test('route-trial CLI emits only aggregate JSON/progress and isolates VALHALLA_URL paths in cache', async (t) => {
   const sourceRoot = path.resolve(import.meta.dirname, '..', '..');
   const workspace = createWorkspace(t, [listing(790001, { lat: 25.0321, lng: 121.5181 })]);
@@ -770,6 +821,10 @@ test('route-trial CLI emits only aggregate JSON/progress and isolates VALHALLA_U
   const capturePath = path.join(workspace.rootDir, 'fetch-capture.txt');
   const secrets = ['first-endpoint-secret', 'second-endpoint-secret'];
   const outputs: Array<{ stdout: string; stderr: string }> = [];
+  fs.writeFileSync(
+    path.join(workspace.rootDir, '.env'),
+    'VALHALLA_URL=https://env-file-should-not-win.valhalla.test\n',
+  );
 
   for (const secret of secrets) {
     const result = await runChild(
