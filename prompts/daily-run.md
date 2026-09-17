@@ -43,13 +43,13 @@ Trigger 也會在訊息裡告訴你要監測的區間。把它對應成 pipeline
    {"schemaVersion":1,"profileId":"<profile>","rangeLabel":"<label>","listingIndexes":[0,3,7]}
    ```
 
-   接著只執行一次：
+   執行前確認 route trial 的 `VALHALLA_URL`。已匯出的環境變數優先於專案 `.env`；兩者都沒有非空值時，使用程式預設的 FOSSGIS endpoint。不要在命令前臨時設定 `VALHALLA_URL`，也不要使用 `http://127.0.0.1:9` 或其他刻意無法連線的測試 endpoint。接著只執行一次：
 
    ```
    npm run route-trial -- [profile 參數] [範圍參數]
    ```
 
-   逐筆以 index 與 listing ID 同時核對 `route-trial.json`，再依 `docs/reporting-rules.md`、profile 規則檔與 profile 模板寫出**一份**合併報告到 orchestrator 指定的 `state/runs/<profile>/<label>/report.md`。任何 command/provider failure 都要保留 ORS 原判斷並明示 `Valhalla 暫無（試行）`；不得因此改 bucket、排序或第 2 步已決定的 `--status-notify`，也不得只因 Valhalla trial evidence 呼叫 `pipeline fail`。
+   先核對 `route-trial.json.valhallaEndpoint`。若 `.env` 的 `VALHALLA_URL` 為空，且沒有已匯出的覆蓋值，端點必須是 `https://valhalla1.openstreetmap.de`。若端點是 `http://127.0.0.1:9` 或其他非預期值，這是設定錯誤，不可把全部房源寫成服務故障；先找出臨時環境變數並修正，再執行正確設定的 trial。逐筆以 index 與 listing ID 同時核對 `route-trial.json`，再依 `docs/reporting-rules.md`、profile 規則檔與 profile 模板寫出**一份**合併報告到 orchestrator 指定的 `state/runs/<profile>/<label>/report.md`。真正的 command/provider failure 要保留 ORS 原判斷並明示 `Valhalla 暫無（試行）`；不得因此改 bucket、排序或第 2 步已決定的 `--status-notify`，也不得只因 Valhalla trial evidence 呼叫 `pipeline fail`。
 
    送出格式契約：`--title` 是通知中唯一的摘要標題，`report.md` 不得再放 Markdown 標題，第一個內容直接寫結論。有座標的每個 `walk_line` 都必須同時包含 `ORS`、`Valhalla`、`（試行）` 與 `[地圖](https://www.google.com/maps?q=<lat>,<lng>)` 可點連結；只有沒有座標時使用 `🚶 無位置資訊`。
 
