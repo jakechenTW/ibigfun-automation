@@ -65,7 +65,7 @@ export async function withOrsLimitRetry<T>(
 }
 const LISTING_LOCATION_ACCEPT_M = 100;
 const LISTING_LOCATION_TOLERANCE_M = 300;
-const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const delay = (ms: number): Promise<void> => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 const NO_ACTIVE_MARKET_FRESHNESS: SourceFreshness = {
   transactionCheckedAt: null,
