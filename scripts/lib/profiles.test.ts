@@ -39,6 +39,26 @@ test('parseProfile rejects invalid maxDaysOnMarket', () => {
   assert.throws(() => parseProfile('x', { ...base, evaluation: { maxDaysOnMarket: '365' } }), /non-negative integer/);
 });
 
+test('parseProfile accepts the investment resolved-region requirement', () => {
+  const base = { displayName: 'x', fetch: {} };
+  const p = parseProfile('x', {
+    ...base,
+    evaluation: { maxDaysOnMarket: 365, requireResolvedRegionGate: true },
+  });
+  assert.equal(p.evaluation.requireResolvedRegionGate, true);
+});
+
+test('parseProfile rejects a non-boolean resolved-region requirement', () => {
+  const base = { displayName: 'x', fetch: {} };
+  assert.throws(
+    () => parseProfile('x', {
+      ...base,
+      evaluation: { maxDaysOnMarket: 365, requireResolvedRegionGate: 'true' },
+    }),
+    /requireResolvedRegionGate must be a boolean/,
+  );
+});
+
 test('fetch overrides preserve evaluation policy', () => {
   const p = resolveProfileFromArgs(['--profile', 'example-investment', '--set', 'fetch.city=2']);
   assert.equal(p.fetch.city, '2');

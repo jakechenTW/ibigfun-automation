@@ -41,7 +41,28 @@ import { haversineMeters } from './geo.ts';
 
 const MRT_CSV = 'data/taipei_mrt_exits.csv';
 const ORS_DELAY_MS = 1600;        // ORS free tier ~40 req/min
-const ORS_RETRY_WAIT_MS = 65_000; // wait out the per-minute window once
+const ORS_RETRY_WAIT_MS = 60_000; // wait out the per-minute window once
+
+export function isRetryableOrsLimitError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('ORS matrix HTTP 429')
+    || (message.includes('ORS matrix HTTP 403') && /quota exceeded/i.test(message));
+}
+
+export async function withOrsLimitRetry<T>(
+  operation: () => Promise<T>,
+  sleep: (ms: number) => Promise<void> = delay,
+  onRetry: () => void = () => {},
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!isRetryableOrsLimitError(error)) throw error;
+    onRetry();
+    await sleep(ORS_RETRY_WAIT_MS);
+    return operation();
+  }
+}
 const LISTING_LOCATION_ACCEPT_M = 100;
 const LISTING_LOCATION_TOLERANCE_M = 300;
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -473,6 +494,7 @@ export async function enrichStep(ctx: RunContext, logger: Logger): Promise<StepO
   const offline = input.listings.map((l) => enrichOffline(l, exits));
   const enriched: PreMarketEnrichedListing[] = [];
   let apiCalls = 0, cacheHits = 0, routeErrors = 0;
+  let orsLimitBlocked = false;
 
   for (const o of offline) {
     let routed: (number | null)[] | null = null;
@@ -482,25 +504,22 @@ export async function enrichStep(ctx: RunContext, logger: Logger): Promise<StepO
       if (cache[key]) {
         routed = cache[key];
         cacheHits++;
-      } else if (apiKey) {
+      } else if (apiKey && !orsLimitBlocked) {
         const dests = o.candidates.map((c) => ({ lat: c.exit.lat, lng: c.exit.lng }));
         try {
-          try {
-            routed = await routeWalkDistances(o.coordinate!, dests, apiKey);
-          } catch (err) {
-            if ((err as Error).message.includes('429')) {
-              logger.event('warn', 'ors.rate-limited', 'rate-limited; waiting 65s then retrying once');
-              await delay(ORS_RETRY_WAIT_MS);
-              routed = await routeWalkDistances(o.coordinate!, dests, apiKey);
-            } else {
-              throw err;
-            }
-          }
+          routed = await withOrsLimitRetry(
+            () => routeWalkDistances(o.coordinate!, dests, apiKey),
+            delay,
+            () => {
+              logger.event('warn', 'ors.rate-limited', 'ORS limit reached; waiting 60s then retrying once');
+            },
+          );
           cache[key] = routed;
           saveCache(cache);
           apiCalls++;
           await delay(ORS_DELAY_MS);
         } catch (err) {
+          if (isRetryableOrsLimitError(err)) orsLimitBlocked = true;
           routeErrors++;
           logger.event('error', 'route.error',
             `route error (${o.district ?? '?'}): ${(err as Error).message}`,

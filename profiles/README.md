@@ -50,7 +50,7 @@ The three files:
 ```json
 {
   "displayName": "iBigFun 台北投資房源監測（範例）",
-  "evaluation": { "maxDaysOnMarket": 365 },
+  "evaluation": { "maxDaysOnMarket": 365, "requireResolvedRegionGate": true },
   "fetch": {
     "city": "1",
     "price_segment": { "max": 3000 },
@@ -65,13 +65,14 @@ The three files:
 | `displayName` | string | yes      | The single human-readable label. Used for the console run hint **and** as the notification `ai-notify --task` label. |
 | `evaluation` | object | yes | Structured evaluation policy. |
 | `evaluation.maxDaysOnMarket` | non-negative integer | yes | Inclusive maximum listing age in days: a listing is within policy when its age is ≤ this value. |
+| `evaluation.requireResolvedRegionGate` | boolean | no | Reject a completed report that still contains `ORS 待確認`. Use this for a hard region gate. |
 | `fetch`       | object | yes      | Generic filter map → `/api/search/list` body params (see below). |
 
 There is **no `id` field** — the id is the folder name. There is no
 `notifyTask`, `ruleDocPath`, `templatePath`, `fetchFilters`, `hardCriteria`, or
 `requiresFilterVerification`; those were removed. Conditions have three homes:
-`fetch` (objective API filter), `evaluation.maxDaysOnMarket` (structured
-listing-age policy), and `evaluation.md` (agent judgment).
+`fetch` (objective API filter), `evaluation` (structured policy), and
+`evaluation.md` (agent judgment).
 
 ## The `fetch` encoding
 

@@ -4,8 +4,46 @@ import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { test } from 'node:test';
 import type { Logger } from './journal.ts';
-import { enrichStep } from './steps.ts';
+import { enrichStep, isRetryableOrsLimitError, withOrsLimitRetry } from './steps.ts';
 import { enrichedPath, listingsPath, runDir } from './runpaths.ts';
+
+test('ORS limit detection retries rate limits and quota exhaustion', () => {
+  assert.equal(isRetryableOrsLimitError(new Error('ORS matrix HTTP 429: slow down')), true);
+  assert.equal(isRetryableOrsLimitError(new Error('ORS matrix HTTP 403: {"error":"Quota exceeded"}')), true);
+  assert.equal(isRetryableOrsLimitError(new Error('ORS matrix HTTP 403: forbidden')), false);
+  assert.equal(isRetryableOrsLimitError(new Error('ORS matrix HTTP 500: unavailable')), false);
+});
+
+test('ORS limit retry waits once and returns the second result', async () => {
+  let calls = 0;
+  const waits: number[] = [];
+  const value = await withOrsLimitRetry(
+    async () => {
+      calls += 1;
+      if (calls === 1) throw new Error('ORS matrix HTTP 403: Quota exceeded');
+      return ['ok'];
+    },
+    async (ms) => { waits.push(ms); },
+  );
+  assert.deepEqual(value, ['ok']);
+  assert.equal(calls, 2);
+  assert.deepEqual(waits, [60_000]);
+});
+
+test('ORS limit retry gives up after the second limited response', async () => {
+  let calls = 0;
+  await assert.rejects(
+    withOrsLimitRetry(
+      async () => {
+        calls += 1;
+        throw new Error('ORS matrix HTTP 429: slow down');
+      },
+      async () => {},
+    ),
+    /HTTP 429/,
+  );
+  assert.equal(calls, 2);
+});
 
 test('enrich performs no market refresh or ORS work for an empty listing run', async (t) => {
   const originalCwd = process.cwd();

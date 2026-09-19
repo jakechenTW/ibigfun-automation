@@ -31,7 +31,7 @@ import { fetchStep, enrichStep } from './lib/steps.ts';
 import { resolveRange, rangeFlags, type RunRange } from './lib/range.ts';
 import { runDir, reportPath, enrichedPath, valuationReviewPath } from './lib/runpaths.ts';
 import { resolveProfileFromArgs, profileFlags, type Profile } from './lib/profiles.ts';
-import { validateReportEvidence } from './lib/report-notify.ts';
+import { assertReportHasResolvedRegionTriage, validateReportEvidence } from './lib/report-notify.ts';
 import { validateNotificationReport } from './lib/report-format.ts';
 
 const now = () => new Date().toISOString();
@@ -177,7 +177,11 @@ function cmdMark(argv: string[]): void {
     if (!artifact) fail('marking report ok requires --artifact <report.md>.');
     if (!fs.existsSync(artifact)) fail(`cannot mark report ok: report artifact ${artifact} is missing.`);
     try {
-      validateNotificationReport(fs.readFileSync(artifact, 'utf8'));
+      const report = fs.readFileSync(artifact, 'utf8');
+      validateNotificationReport(report);
+      if (profile.evaluation.requireResolvedRegionGate) {
+        assertReportHasResolvedRegionTriage(report);
+      }
     } catch (error) {
       fail(`cannot mark report ok: ${(error as Error).message}`);
     }

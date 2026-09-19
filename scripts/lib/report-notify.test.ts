@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { assertNotificationStatusAllowsMarketData, validateReportEvidence } from './report-notify.ts';
+import {
+  assertNotificationStatusAllowsMarketData,
+  assertReportHasResolvedRegionTriage,
+  validateReportEvidence,
+} from './report-notify.ts';
 
 const freshEnrichment = {
   tenureEligible: 1,
@@ -20,6 +24,19 @@ const matchedLocationEvidence = {
   verdict: 'matched',
   reasons: ['listing-coordinate-near-doorplate'],
 };
+
+test('resolved-region reports reject an unresolved ORS walk line', () => {
+  assert.throws(
+    () => assertReportHasResolvedRegionTriage('🚶 ORS 待確認｜Valhalla 中山 1號出口・5分（試行）'),
+    /unresolved ORS region triage/,
+  );
+});
+
+test('resolved-region reports allow a labelled triage verdict', () => {
+  assert.doesNotThrow(() => assertReportHasResolvedRegionTriage(
+    '🚶 ORS triage：重新定位至後山埤站 2 號出口，約 6 分鐘，likely-within',
+  ));
+});
 
 test('all report statuses reject legacy enrichment without tenureGate', () => {
   const legacy = {

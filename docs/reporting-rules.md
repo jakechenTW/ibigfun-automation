@@ -51,6 +51,9 @@ exclusion.
 `out-of-region` 與 `in-region-too-far` 的物件不逐筆列出。若 `進入評估` 異常為 0，
 將白名單／資料異常警訊寫入 `data_warning`，不要增加另一條稽核摘要。
 
+若 profile 設定 `evaluation.requireResolvedRegionGate: true`，報告不得包含 `ORS 待確認`。
+先完成 triage，再標記 report。若無法完成，使用 `pipeline fail`，不得發送一般候選報告。
+
 ## Calculations
 
 - Monthly mortgage payment must use total price, 80% loan-to-value, 2.6% annual interest, and 30-year principal and interest repayment. It is workflow/local data only and never appears in `report.md`.
@@ -196,6 +199,8 @@ By reason:
   (river/lake/hillside). Cross-check `nearbyStation`; you may accept "near but
   awkward walk" with low confidence, or defer.
 - `routing unavailable`: not a data problem — re-run enrich later (transient).
+  Enrich waits 60 seconds and retries once for ORS 429 or quota-exhausted 403
+  responses. If the retry fails, enrich stops further ORS calls for that run.
 
 Output a three-state verdict, recorded in the report with rationale, confidence,
 and the location source: `likely-within`, `likely-far`, or `unknown` (→ human).

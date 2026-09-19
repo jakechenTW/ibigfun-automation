@@ -2,6 +2,13 @@ import { validateValuationReview, validateValuationReviewAgainstEnriched } from 
 
 export type NotificationStatus = 'ok' | 'warn' | 'fail';
 
+/** A resolved-region profile cannot publish a listing whose ORS triage is still pending. */
+export function assertReportHasResolvedRegionTriage(report: string): void {
+  if (/ORS\s*(?:：|:)?\s*待確認/u.test(report)) {
+    throw new Error('unresolved ORS region triage cannot appear in this profile report');
+  }
+}
+
 const LOCATION_REASON_BY_VERDICT = {
   matched: new Set(['listing-coordinate-near-doorplate']),
   uncertain: new Set([

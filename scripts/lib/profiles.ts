@@ -12,6 +12,7 @@ export interface Profile {
 
 export interface ProfileEvaluation {
   maxDaysOnMarket: number;
+  requireResolvedRegionGate?: boolean;
 }
 
 export interface RunContext {
@@ -111,7 +112,11 @@ function assertEvaluation(value: unknown): ProfileEvaluation {
   if (typeof maxDaysOnMarket !== 'number' || !Number.isSafeInteger(maxDaysOnMarket) || maxDaysOnMarket < 0) {
     throw new Error('invalid profile: evaluation.maxDaysOnMarket must be a non-negative integer');
   }
-  return { maxDaysOnMarket };
+  const requireResolvedRegionGate = (value as Record<string, unknown>).requireResolvedRegionGate;
+  if (requireResolvedRegionGate !== undefined && typeof requireResolvedRegionGate !== 'boolean') {
+    throw new Error('invalid profile: evaluation.requireResolvedRegionGate must be a boolean');
+  }
+  return { maxDaysOnMarket, requireResolvedRegionGate };
 }
 
 export function parseProfile(id: string, parsed: unknown): Profile {

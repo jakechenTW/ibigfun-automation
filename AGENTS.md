@@ -67,6 +67,11 @@ recovery action.
    address + `nearbyStation`, use `npm run route -- --lat <> --lng <>` for a
    deterministic walk, and give a labelled verdict (likely-within / likely-far /
    unknown→human) → `docs/reporting-rules.md` (Walking-Distance Triage).
+   If the profile sets `evaluation.requireResolvedRegionGate: true`, resolve all
+   region decisions before report completion. `pipeline mark report` rejects
+   `ORS 待確認`. Use `pipeline fail` when the headless run cannot resolve it.
+   Enrich waits 60 seconds and retries once for ORS 429 or quota-exhausted 403
+   responses. It stops further ORS calls when that retry also fails.
 6. Deduplicate by stable listing ID → `docs/automation-state.md`.
 7. Apply the profile's `evaluation.maxDaysOnMarket` through each listing's
    enriched `tenureGate` before considering a recommendation: `expired` is

@@ -33,6 +33,10 @@ Trigger 也會在訊息裡告訴你要監測的區間。把它對應成 pipeline
 
    它會跑 fetch + enrich，然後**停在 agent `report` 步**並印出需求；已經 ok 的步會被 skip（重跑＝自動續跑）。若它印出 `report` 步的需求，繼續第 2 步；若它以非 0 結束（fetch/enrich 失敗），跳到「Headless 失敗政策」。
 
+若 profile 設定 `evaluation.requireResolvedRegionGate: true`，先解決每筆區域判定。報告不得包含 `ORS 待確認`。
+Enrich 會在 ORS 429 或 quota-exhausted 403 後等待 60 秒，然後重試一次。
+若重試後仍無法完成，使用「Headless 失敗政策」。不得標記 report 或發送一般候選報告。
+
 2. 親手完成 `report` 步的分析與分桶：對 `state/runs/<profile>/<label>/enriched.json` 做 `withinWalk:null` 三角定位、估價/評估、跨日彙整。**先完成所有 positive／candidate／risk／excluded 分桶與原本的 `--status-notify` 決定，再做 route trial；此時先不要寫最終 `report.md`。**先依 profile 的 `evaluation.maxDaysOnMarket` 與 enriched `tenureGate` 判斷刊登年限；`expired` 排除，`review` 不得自動推薦。官方行情保留為成交證據與可靠性閘門，不再比較開價與官方行情來決定划算程度。行情一律先讀 `marketEstimate`：完整 status、官方中位與 P25–P75、信心、可比筆數、選用階段及資料日期／新鮮度只保留在 git-ignored 的 `enriched.json` 與本地 evidence；`report.md` 每筆只呈現人類可讀的 `market_summary_line`：When `marketUnitPriceMedian` is non-null, render `官方成交中位約 {median rounded to 1 decimal} 萬/坪（{comparables.length} 筆可比{review limitation, when applicable}）`. A `review` value retains exactly one concise human-readable limitation and never becomes recommendation-eligible merely because a value exists. When the median is null, render only a concise unavailable reason. 資料過期時標示偏舊但不印來源日期。Policy-8 `marketScenarios` 是已核准的用途／車位情境證據，但不得取代 `marketEstimate` 或資料品質限制。`review`/`unavailable`、low 信心、資料過期或未獲核准的車位情境不得自動推薦。只在低信心/review/unavailable 的少數邊界物件做外部覆核，絕不可靜默覆寫官方值；若覆核改變 bucket，於同一 run 寫 `valuation-review.json`（來源 URL、查核時間、外部回傳值或 `null`、官方 status/unavailable reasons 與可用區間、`(外部單價−官方中位)/官方中位*100` 差異、理由、結果 bucket 完整記錄）。官方欄位必須逐欄複製同一 listing 的 `marketEstimate`，不可自行填補；未取得外部價格時必須 `accepted: false`；官方 unavailable/review 不得因外部值升為推薦。通知只放一行精簡覆核結論，不貼完整可比或外部原始資料。
 
    `report.md` 排除 P25–P75、raw market status/confidence/stage/dates 與完整 unavailable reasons。
@@ -77,7 +81,8 @@ Trigger 也會在訊息裡告訴你要監測的區間。把它對應成 pipeline
 - 任何 fetch / enrich 不可恢復的錯誤（pipeline 以非 0 結束）：走失敗逃生口，不要無限重試。
 - Profile worker 絕不把 `market-data update` 當作復原動作；市場資料更新屬於獨立的每日 writer job。
 - 依 journal 最後完成的元件邊界判斷卡住位置：尚未出現 `market-data.ready` 時，只能描述為市場資料載入／驗證；ORS 必須在 `market-data.ready` 之後才會開始，只有 readiness 已記錄且當前邊界確為路由處理時，才能標為 ORS 卡住。
-- **部分失敗不是 fail**：例如 ORS 路由全掛時，受影響物件標記為 manual-review、照常出 `warn`，不要當成 fail（`AGENTS.md`：走路距離不可靠者永不自動排除）。
+- **部分失敗不是 fail**：一般 profile 的 ORS 失敗仍標記為 manual-review，並照常出 `warn`。
+- 若 profile 設定 `evaluation.requireResolvedRegionGate: true`，先使用 enrich 的一次延遲重試。重試後仍有 `ORS 待確認` 時才走失敗逃生口。
 - 失敗逃生口（唯一一條）：
 
   ```
