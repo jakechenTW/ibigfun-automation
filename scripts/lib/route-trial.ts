@@ -378,17 +378,31 @@ export function valhallaTrialWalk(
   return trialWalk(picked.walk.stationZh, picked.walk.exitId, picked.walk.distanceM);
 }
 
-function providerLabel(name: 'ORS' | 'Valhalla', walk: RouteTrialWalk): string {
-  if (walk.status === 'unavailable') return name === 'ORS' ? 'ORS 待確認' : 'Valhalla 暫無（試行）';
-  const exit = walk.exitId ? ` ${walk.exitId}號出口` : '';
-  const trial = name === 'Valhalla' ? '（試行）' : '';
-  return `${name} ${walk.stationZh}${exit}・${walk.minutes}分${trial}`;
+function hasDisplayableWalk(walk: RouteTrialWalk): walk is RouteTrialWalk & { stationZh: string; minutes: number } {
+  return walk.status === 'reliable' && typeof walk.stationZh === 'string' && walk.stationZh.trim().length > 0 &&
+    typeof walk.minutes === 'number' && Number.isFinite(walk.minutes) && walk.minutes >= 0;
 }
 
+function stationLabel(walk: RouteTrialWalk & { stationZh: string }): string {
+  const station = walk.stationZh.endsWith('站') ? walk.stationZh : `${walk.stationZh}站`;
+  return station + (walk.exitId ? ` ${walk.exitId}號出口` : '');
+}
+
+/** Display-only summary. ORS remains authoritative even when trial routes differ. */
 export function formatDualRouteWalkLine(
   comparison: RouteTrialComparison,
   coordinate: Coordinate | null,
 ): string {
   if (coordinate === null) return '🚶 無位置資訊';
-  return `🚶 ${providerLabel('ORS', comparison.ors)}｜${providerLabel('Valhalla', comparison.valhalla)}・[地圖](https://www.google.com/maps?q=${coordinate.lat},${coordinate.lng})`;
+  const map = `[地圖](https://www.google.com/maps?q=${coordinate.lat},${coordinate.lng})`;
+  const { ors, valhalla } = comparison;
+  if (!hasDisplayableWalk(ors)) return `🚶 步行時間待確認｜${map}`;
+  const primary = `🚶 步行約 ${ors.minutes} 分鐘｜${stationLabel(ors)}｜${map}`;
+  const differs = hasDisplayableWalk(valhalla) && (
+    Math.abs(ors.minutes - valhalla.minutes) >= 3 ||
+    ors.stationZh !== valhalla.stationZh ||
+    (ors.minutes <= 10) !== (valhalla.minutes <= 10)
+  );
+  if (!differs) return primary;
+  return `${primary}；另一條路線約 ${valhalla.minutes} 分鐘（${stationLabel(valhalla)}），建議確認實際走法`;
 }

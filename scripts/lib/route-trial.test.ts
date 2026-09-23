@@ -160,7 +160,7 @@ test('formatDualRouteWalkLine renders only trial-facing walk evidence', () => {
 
   assert.equal(
     formatDualRouteWalkLine(comparison, { lat: 25.1, lng: 121.5 }),
-    '🚶 ORS 松江南京 4號出口・9分｜Valhalla 松江南京 3號出口・10分（試行）・[地圖](https://www.google.com/maps?q=25.1,121.5)',
+    '🚶 步行約 9 分鐘｜松江南京站 4號出口｜[地圖](https://www.google.com/maps?q=25.1,121.5)',
   );
   assert.equal(formatDualRouteWalkLine(comparison, null), '🚶 無位置資訊');
 
@@ -169,7 +169,7 @@ test('formatDualRouteWalkLine renders only trial-facing walk evidence', () => {
     ors: unavailableTrialWalk(),
     valhalla: { ...comparison.valhalla, exitId: '' },
   }, { lat: 25.1, lng: 121.5 });
-  assert.equal(blankExit, '🚶 ORS 待確認｜Valhalla 松江南京・10分（試行）・[地圖](https://www.google.com/maps?q=25.1,121.5)');
+  assert.equal(blankExit, '🚶 步行時間待確認｜[地圖](https://www.google.com/maps?q=25.1,121.5)');
   assert.doesNotMatch(blankExit, /720|780|10000|transport|reliable|unavailable/);
 });
 
@@ -229,4 +229,34 @@ test('selectRouteTrialListings rejects malformed requests and misbound results',
     };
     assert.throws(() => selectRouteTrialListings(valid, 'p', range, fetched, identityDrift, exits));
   }
+});
+
+
+test('walk summary surfaces material differences without changing the primary route', () => {
+  const ors = { status: 'reliable', stationZh: '中山', exitId: '2', distanceM: 480, minutes: 6 } as const;
+  const coordinate = { lat: 25.1, lng: 121.5 };
+  for (const other of [
+    { ...ors, minutes: 9, distanceM: 720 },
+    { ...ors, stationZh: '雙連' },
+  ]) {
+    const text = formatDualRouteWalkLine({ listingIndex: 0, listingId: 1, ors, valhalla: other, error: null }, coordinate);
+    assert.match(text, /步行約 6 分鐘/);
+    assert.match(text, /另一條路線約/);
+    assert.doesNotMatch(text, /ORS|Valhalla/);
+  }
+  const crossing = formatDualRouteWalkLine({ listingIndex: 0, listingId: 1, ors: { ...ors, minutes: 10 }, valhalla: { ...ors, minutes: 11 }, error: null }, coordinate);
+  assert.match(crossing, /另一條路線約 11 分鐘/);
+  const unavailable = formatDualRouteWalkLine({ listingIndex: 0, listingId: 1, ors, valhalla: unavailableTrialWalk(), error: 'private error' }, coordinate);
+  assert.doesNotMatch(unavailable, /另一條|private|暫無|Valhalla/);
+  assert.match(unavailable, /步行約 6 分鐘/);
+});
+
+test('incomplete primary evidence stays pending instead of displaying a trial estimate', () => {
+  const comparison = {
+    listingIndex: 0, listingId: 1,
+    ors: { status: 'reliable', stationZh: null, exitId: null, distanceM: null, minutes: null },
+    valhalla: { status: 'reliable', stationZh: '中山', exitId: '2', distanceM: 480, minutes: 6 },
+    error: null,
+  } as const;
+  assert.match(formatDualRouteWalkLine(comparison, { lat: 25, lng: 121 }), /步行時間待確認/);
 });

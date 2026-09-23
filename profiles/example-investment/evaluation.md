@@ -23,7 +23,7 @@ Use this profile for rental-yield-oriented investment screening.
   只在「排除摘要」依原因分開計數（見 `docs/reporting-rules.md` Region Gate 與
   `data/region-allowlist.md`）。`regionGate === 'review'`（`withinWalk === null`）不排除，
   送 triage／人工。完成 triage 前不得標記 report。若無法完成，使用 `pipeline fail`。
-  `pipeline mark report` 會依 `evaluation.requireResolvedRegionGate` 拒絕含 `ORS 待確認` 的報告。
+  `pipeline mark report` 會依 `evaluation.requireResolvedRegionGate` 拒絕含 `步行時間待確認` 的報告。
   若 `進入評估` 異常為 0，將警訊寫入 `data_warning`。
 - 租金覆蓋率與現金流僅供 workflow/local 參考，不參與分桶或排序，也不出現在通知。
 

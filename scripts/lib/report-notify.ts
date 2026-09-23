@@ -4,7 +4,7 @@ export type NotificationStatus = 'ok' | 'warn' | 'fail';
 
 /** A resolved-region profile cannot publish a listing whose ORS triage is still pending. */
 export function assertReportHasResolvedRegionTriage(report: string): void {
-  if (/ORS\s*(?:：|:)?\s*待確認/u.test(report)) {
+  if (/(?:ORS\s*(?:：|:)?\s*待確認|步行時間待確認)/u.test(report)) {
     throw new Error('unresolved ORS region triage cannot appear in this profile report');
   }
 }

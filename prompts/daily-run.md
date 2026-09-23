@@ -33,7 +33,7 @@ Trigger 也會在訊息裡告訴你要監測的區間。把它對應成 pipeline
 
    它會跑 fetch + enrich，然後**停在 agent `report` 步**並印出需求；已經 ok 的步會被 skip（重跑＝自動續跑）。若它印出 `report` 步的需求，繼續第 2 步；若它以非 0 結束（fetch/enrich 失敗），跳到「Headless 失敗政策」。
 
-若 profile 設定 `evaluation.requireResolvedRegionGate: true`，先解決每筆區域判定。報告不得包含 `ORS 待確認`。
+若 profile 設定 `evaluation.requireResolvedRegionGate: true`，先解決每筆區域判定。報告不得包含 `步行時間待確認`。
 Enrich 會在 ORS 429 或 quota-exhausted 403 後等待 60 秒，然後重試一次。
 若重試後仍無法完成，使用「Headless 失敗政策」。不得標記 report 或發送一般候選報告。
 
@@ -53,9 +53,25 @@ Enrich 會在 ORS 429 或 quota-exhausted 403 後等待 60 秒，然後重試一
    npm run route-trial -- [profile 參數] [範圍參數]
    ```
 
-   先核對 `route-trial.json.valhallaEndpoint`。若 `.env` 的 `VALHALLA_URL` 為空，且沒有已匯出的覆蓋值，端點必須是 `https://valhalla1.openstreetmap.de`。若端點是 `http://127.0.0.1:9` 或其他非預期值，這是設定錯誤，不可把全部房源寫成服務故障；先找出臨時環境變數並修正，再執行正確設定的 trial。逐筆以 index 與 listing ID 同時核對 `route-trial.json`，再依 `docs/reporting-rules.md`、profile 規則檔與 profile 模板寫出**一份**合併報告到 orchestrator 指定的 `state/runs/<profile>/<label>/report.md`。真正的 command/provider failure 要保留 ORS 原判斷並明示 `Valhalla 暫無（試行）`；不得因此改 bucket、排序或第 2 步已決定的 `--status-notify`，也不得只因 Valhalla trial evidence 呼叫 `pipeline fail`。
+   先核對 `route-trial.json.valhallaEndpoint`。若 `.env` 的 `VALHALLA_URL` 為空，且沒有已匯出的覆蓋值，端點必須是 `https://valhalla1.openstreetmap.de`。若端點是 `http://127.0.0.1:9` 或其他非預期值，這是設定錯誤，不可把全部房源寫成服務故障；先找出臨時環境變數並修正，再執行正確設定的 trial。逐筆以 index 與 listing ID 同時核對 `route-trial.json`，再依 `docs/reporting-rules.md`、profile 規則檔與 profile 模板寫出**一份**合併報告到 orchestrator 指定的 `state/runs/<profile>/<label>/report.md`。真正的 command/provider failure 要保留 ORS 原判斷，依共享規則只顯示可用的主要路線或「步行時間待確認」；不得因此改 bucket、排序或第 2 步已決定的 `--status-notify`，也不得只因 Valhalla trial evidence 呼叫 `pipeline fail`。
 
-   送出格式契約：`--title` 是通知中唯一的摘要標題，`report.md` 不得再放 Markdown 標題，第一個內容直接寫結論。有座標的每個 `walk_line` 都必須同時包含 `ORS`、`Valhalla`、`（試行）` 與 `[地圖](https://www.google.com/maps?q=<lat>,<lng>)` 可點連結；只有沒有座標時使用 `🚶 無位置資訊`。
+   送出格式契約：`--title` 是通知中唯一的摘要標題，`report.md` 不得再放 Markdown 標題，第一個內容直接寫結論。有座標的每個 `walk_line` 都必須包含人類可讀的步行時間與 `[地圖](https://www.google.com/maps?q=<lat>,<lng>)` 可點連結；只有沒有座標時使用 `🚶 無位置資訊`。
+
+   閱讀順序：結論與最優先的下一步 → 完整分類計數 → 必要資料警訊 → 有內容的分類。隱藏空分類及其標題；排除為零時隱藏排除摘要。每筆物件先寫具體推薦理由、待確認動作或風險，再列基本資料與必要證據。結論區分「本期無房源」「全數硬性排除」與「資料不足待確認」。標題使用目標日期或完整區間，依 `docs/notifications.md` 的標題格式撰寫；通用內文使用「本期」。
+
+   送出前核對計數：`fetched_listing_count` 等於本次 `enriched.json.listings.length`，顯示「本次取得」，不得稱為「新案」。每筆只屬於一個最終分類。排除原因依共享規則的優先順序，每筆只計入一項；禁止直接複製 enriched 的重疊訊號總數。分類加總等於本次取得，排除原因加總等於排除筆數。
+
+   內容核對：推薦理由須有物件本身的已知特色；候選須說明缺少什麼及具體處理方式。系統缺乏官方證據時，不得只要求使用者「確認行情」。移除行情狀態計數、英文信心代碼、成交四分位區間、路線服務網址與試行完成筆數。保留必要資料限制、官方中位數與可比筆數，以及主要步行路線與地圖欄位；另一條路線僅在共享規則定義的明顯差異時顯示。
+
+   每次生成報告都重新讀取目前 profile 的 `notify-template.md`。範本是寫作指引，程式不會自動套版；不得直接沿用上一期報告的空分類或技術統計。
+
+   標記前先執行不會發送通知的格式檢查：
+
+   ```
+   npm run report:check -- state/runs/<profile>/<label>/report.md state/runs/<profile>/<label>/enriched.json
+   ```
+
+   若格式檢查失敗，依錯誤修正報告後重新檢查，不要直接將格式錯誤當成資料抓取失敗。不可為了通過檢查移除必要警訊、物件或更改分桶。另須逐筆人工核對理由是否具體且有證據；程式只能識別部分空泛用語。檢查通過後才標記完成。若仍無法完成，依既有失敗政策回報真實原因。
 
 4. 標記完成（會自動觸發 notify，idempotent）：
 
@@ -65,7 +81,7 @@ Enrich 會在 ORS 429 或 quota-exhausted 403 後等待 60 秒，然後重試一
    npm run pipeline -- run [profile 參數] [範圍參數]
    ```
 
-   在第一行標記前先確認本文沒有重複標題，且所有有座標的 `walk_line` 都有 ORS 與 Valhalla trial labels 及 Google Maps 座標連結；`pipeline mark report` 也會強制檢查。第二行重跑會把 `notify` 步送出。完成。
+   在第一行標記前先確認本文沒有重複標題，且所有有座標的 `walk_line` 都有步行時間或待確認標示及 Google Maps 座標連結；`pipeline mark report` 也會強制檢查。第二行重跑會把 `notify` 步送出。完成。
 
 ## status 對應
 
@@ -82,7 +98,7 @@ Enrich 會在 ORS 429 或 quota-exhausted 403 後等待 60 秒，然後重試一
 - Profile worker 絕不把 `market-data update` 當作復原動作；市場資料更新屬於獨立的每日 writer job。
 - 依 journal 最後完成的元件邊界判斷卡住位置：尚未出現 `market-data.ready` 時，只能描述為市場資料載入／驗證；ORS 必須在 `market-data.ready` 之後才會開始，只有 readiness 已記錄且當前邊界確為路由處理時，才能標為 ORS 卡住。
 - **部分失敗不是 fail**：一般 profile 的 ORS 失敗仍標記為 manual-review，並照常出 `warn`。
-- 若 profile 設定 `evaluation.requireResolvedRegionGate: true`，先使用 enrich 的一次延遲重試。重試後仍有 `ORS 待確認` 時才走失敗逃生口。
+- 若 profile 設定 `evaluation.requireResolvedRegionGate: true`，先使用 enrich 的一次延遲重試。重試後仍有 `步行時間待確認` 時才走失敗逃生口。
 - 失敗逃生口（唯一一條）：
 
   ```

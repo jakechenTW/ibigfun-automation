@@ -32,7 +32,7 @@ import { resolveRange, rangeFlags, type RunRange } from './lib/range.ts';
 import { runDir, reportPath, enrichedPath, valuationReviewPath } from './lib/runpaths.ts';
 import { resolveProfileFromArgs, profileFlags, type Profile } from './lib/profiles.ts';
 import { assertReportHasResolvedRegionTriage, validateReportEvidence } from './lib/report-notify.ts';
-import { validateNotificationReport } from './lib/report-format.ts';
+import { validateNotificationCounts, validateNotificationReport } from './lib/report-format.ts';
 
 const now = () => new Date().toISOString();
 
@@ -207,6 +207,10 @@ function cmdMark(argv: string[]): void {
     }
     try {
       validateReportEvidence(sNotify, enriched, valuationReview);
+      validateNotificationCounts(
+        fs.readFileSync(artifact, 'utf8'),
+        (enriched as { listings: unknown[] }).listings.length,
+      );
     } catch (error) {
       fail(`cannot mark report ok: ${(error as Error).message}`);
     }

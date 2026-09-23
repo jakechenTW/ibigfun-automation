@@ -244,3 +244,7 @@ test('warn status cannot bypass valuation review binding', () => {
   };
   assert.throws(() => validateReportEvidence('warn', enriched, fabricatedReview), /officialUnavailableReasons/);
 });
+
+ test('resolved-region reports also reject plain-language pending walking time', () => {
+  assert.throws(() => assertReportHasResolvedRegionTriage('🚶 步行時間待確認｜[地圖](https://www.google.com/maps?q=25,121)'), /unresolved ORS region triage/);
+});

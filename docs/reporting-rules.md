@@ -46,12 +46,12 @@ exclusion.
 - `review`：`withinWalk === null`（座標/路線不可靠）→ 不排除，送既有人工 triage。
 
 `enriched.json` 彙總 `outOfRegionCount` 與 `inRegionTooFarCount`。投資報告在「排除摘要」
-將兩個區域排除原因分開計數：`目標捷運站外 {outOfRegionCount} 筆` 與
-`站內走路過遠 {inRegionTooFarCount} 筆`；各 reason 為 0 時隱藏該列。
+將兩個區域排除原因分開計數；各 reason 為 0 時隱藏該列。
+報告採下方「Notification Counts」的主要原因順序，不能直接複製 enriched 的重疊訊號計數。
 `out-of-region` 與 `in-region-too-far` 的物件不逐筆列出。若 `進入評估` 異常為 0，
 將白名單／資料異常警訊寫入 `data_warning`，不要增加另一條稽核摘要。
 
-若 profile 設定 `evaluation.requireResolvedRegionGate: true`，報告不得包含 `ORS 待確認`。
+若 profile 設定 `evaluation.requireResolvedRegionGate: true`，報告不得包含 `步行時間待確認`。
 先完成 triage，再標記 report。若無法完成，使用 `pipeline fail`，不得發送一般候選報告。
 
 ## Calculations
@@ -269,6 +269,55 @@ when other criteria pass or data also needs review, route them to
 `風險物件／待查` with the reason noted; the verified risk verdict takes
 precedence over a positive or clean-data candidate bucket.
 
+## Notification Counts
+
+`fetched_listing_count` is the current `enriched.json.listings.length`.
+Render it as `本次取得`, not `新案`.
+The count describes this query, not first discovery or publication date.
+Keep cross-run discovery evidence under the rules in `docs/automation-state.md`.
+
+Assign every fetched listing exactly one final bucket.
+Make sure that positive + candidate + risk + excluded equals `fetched_listing_count`.
+For exclusion counts, assign one primary reason in this order:
+
+1. Count `tenureGate === 'expired'` as `tenure_expired_count`.
+2. For profiles with a hard region rule, count remaining `out-of-region` listings as `out_of_region_count`.
+3. For those profiles, count remaining `in-region-too-far` listings as `in_region_too_far_count`.
+4. Count remaining confirmed self-use criteria failures as `hard_criteria_excluded_count`, where applicable.
+5. Count remaining confirmed hard failures as `other_hard_exclusion_count`.
+
+Use resolved triage evidence for region decisions.
+Do not apply investment region exclusions to a profile without that hard rule.
+Do not count weak market evidence as a hard failure by itself.
+Keep secondary exclusion signals in local evidence.
+Make sure that the primary reason counts sum to `excluded_count`.
+Do not copy overlapping enriched signal totals into the exclusion summary.
+
+Render each nonzero reason as `- <reason>：<count> 筆` under `### 排除摘要`.
+Keep any explanation on the optional `主要原因` row, without additional counts.
+Name the configured tenure limit there when tenure exclusions exist.
+Hide the whole section when no listing is excluded.
+
+## Decision Wording
+
+`推薦` and `符合` describe successful profile screening, not verified purchase suitability.
+Use one supported property-specific feature in `recommendation_reason` or `strengths`.
+Do not repeat `條件通過` as the only reason across listings.
+Do not infer a bargain or rental return from screening results.
+
+For a candidate, state the blocker and a concrete next action in `manual_checks`.
+Distinguish information that an agent can supply from missing official evidence.
+For example, use `車位價坪未拆分；向仲介索取獨立價格與坪數` when that is the actual blocker.
+If official evidence remains insufficient, state `成交證據不足，暫留候選，待可比資料補足後重評`.
+Do not imply that a broker response alone makes weak official evidence reliable.
+For a risk, state the observed evidence, confidence, and whether the detail page was inspected.
+
+Write `data_warning` as the affected scope and its effect on the decision.
+Do not include raw market-status totals, routing service URLs, or trial completion counts.
+Keep required source-staleness warnings visible even when all listings are excluded.
+If many candidates share a limitation, explain it once at the top and keep each property action short.
+Retain each property's required market limitation and every positive, candidate, and risk listing.
+
 ## Notification Format
 
 - `report.md` is the exact user-facing Markdown body sent to `ai-notify`; do not create a second notification artifact. Its first content line is the conclusion, never a Markdown heading.
@@ -277,14 +326,25 @@ precedence over a positive or clean-data candidate bucket.
 - `warn` means candidates, risks, unresolved actionable manual review, stale sources, unverified mappings, or other weak evidence affects safe interpretation.
 - A fresh market review/unavailable result on a confirmed hard exclusion does not force `warn`.
 - Put one conclusion sentence first, followed by one compact count line. Render `data_warning` only when stale, weak, missing, or inconsistent data affects safe interpretation.
+- Write the conclusion as a result plus the most useful next action. Distinguish no fetched listings from fetched listings that all fail hard criteria. If evidence blocks a recommendation, name the unresolved fact instead of calling the result a clean no-match.
+- Hide empty positive, candidate, and risk sections, including their headings. Hide the exclusion section when `excluded_count` is zero. Keep all bucket counts in the count line, including zeros.
+- Place the listing-specific reason or next action directly below each property link, before its facts. Write actions as concrete questions or requests, such as `向仲介索取車位獨立價格與坪數`. Avoid generic instructions such as `請自行確認`.
+- Keep required limitations visible. Omit an optional caution only when no supported listing-specific caution exists. Do not invent a concern to fill a template field.
+- Use the target date or inclusive range in the title. Use `本期` in prose that applies to either a day or a range. Keep tenure wording tied to the enriched evidence.
 - List every positive, candidate, and risk property. Summarize excluded properties by valid hard reason and count; never list excluded properties individually.
 - Every individually rendered property shows total price, area, asking unit price, profile-relevant basics, `walk_line`, `tenure_line`, `market_summary_line`, and one bucket reason or next action.
 - Compose `walk_line` after bucketing from authoritative enriched ORS `walk`, the display-only `route-trial.json` comparison, and `coordinate`; apply it only to positive, candidate, and risk buckets. The Valhalla trial never changes a bucket, order, ORS decision, or notification status, and excluded/count-only listings never enter its request. `route-trial-request.json` must name the selected enriched-index array exactly `listingIndexes`, with at most 25 unique, non-negative safe integer entries; every entry must be less than the current `enriched.json` listings-array length:
-  - Both reliable: `🚶 ORS 松江南京 4號出口・9分｜Valhalla 松江南京 3號出口・10分（試行）・[地圖](https://www.google.com/maps?q=<lat>,<lng>)`; substitute each provider's selected station, exit, and recomputed minutes, and omit either provider's exit segment when its `exitId` is absent.
-  - Valhalla unavailable: `🚶 ORS 松江南京 4號出口・9分｜Valhalla 暫無（試行）・[地圖](https://www.google.com/maps?q=<lat>,<lng>)`.
-  - ORS unavailable: `🚶 ORS 待確認｜Valhalla 松江南京 3號出口・10分（試行）・[地圖](https://www.google.com/maps?q=<lat>,<lng>)`.
-  - Both unavailable: `🚶 ORS 待確認｜Valhalla 暫無（試行）・[地圖](https://www.google.com/maps?q=<lat>,<lng>)`.
+  - Use `formatDualRouteWalkLine` from `scripts/lib/route-trial.ts` for the display text.
+  - Primary route reliable: `🚶 步行約 9 分鐘｜松江南京站 4號出口｜[地圖](https://www.google.com/maps?q=<lat>,<lng>)`.
+  - Show the comparison only when rounded times differ by at least 3 minutes, stations differ, or times fall on opposite sides of 10 minutes.
+  - Append `；另一條路線約 12 分鐘（松江南京站 3號出口），建議確認實際走法` for such differences.
+  - Different exits alone do not require a comparison when the station and walking times are close.
+  - If the primary route is unavailable, use `🚶 步行時間待確認｜[地圖](https://www.google.com/maps?q=<lat>,<lng>)`.
+  - Never substitute trial evidence for an unavailable primary route.
+  - If only the trial is unavailable, show the reliable primary route without a service-failure note.
   - No coordinate: `🚶 無位置資訊` (without a map link).
+  - Keep ORS, Valhalla, trial status, and provider errors in local evidence, not notification text.
+  - These display thresholds never change walking gates, buckets, sorting, or notification status.
 - Compose `tenure_line` from enriched `tenure`:
   - For `daysOnMarket === 0`, use `🕒 今日上架`.
   - For known positive days with flat, dropped, or raised price trend, use `🕒 已刊登 {daysOnMarket} 天` plus `・未降價`, `・曾降價 {firstPrice}→{latestPrice}萬`, or `・曾調漲 {firstPrice}→{latestPrice}萬` for the known price history.

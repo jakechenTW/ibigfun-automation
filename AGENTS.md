@@ -69,7 +69,7 @@ recovery action.
    unknown→human) → `docs/reporting-rules.md` (Walking-Distance Triage).
    If the profile sets `evaluation.requireResolvedRegionGate: true`, resolve all
    region decisions before report completion. `pipeline mark report` rejects
-   `ORS 待確認`. Use `pipeline fail` when the headless run cannot resolve it.
+   `步行時間待確認`. Use `pipeline fail` when the headless run cannot resolve it.
    Enrich waits 60 seconds and retries once for ORS 429 or quota-exhausted 403
    responses. It stops further ORS calls when that retry also fails.
 6. Deduplicate by stable listing ID → `docs/automation-state.md`.
@@ -101,7 +101,7 @@ recovery action.
     profile/date-or-range arguments and bind `route-trial.json` comparisons
     back by index and listing ID.
     Excluded/count-only listings never enter the request. Trial or provider
-    failure renders `Valhalla 暫無（試行）`; it never changes the ORS-owned
+    failure keeps the available primary route visible and omits the trial result; it never changes the ORS-owned
     bucket, order, or notification status and never by itself triggers
     `pipeline fail`.
 11. Write `state/runs/<profile>/<label>/report.md` using the profile's
@@ -175,8 +175,8 @@ evaluation, and writing the report.
   `state/valhalla-trial-cache.json`, and writes detailed local evidence to
   `state/runs/<profile>/<label>/route-trial.json`. It never mutates production
   ORS decisions or `state/route-cache.json`. Provider failures degrade per
-  listing; any command or provider failure is rendered as
-  `Valhalla 暫無（試行）` without changing notification status.
+  listing. Show the reliable primary route alone, or `步行時間待確認` when it is unavailable.
+  Trial failures do not change notification status.
   The Valhalla base URL is read from `VALHALLA_URL` in `.env`; leave it blank
   to use the default FOSSGIS demo. An already-exported `VALHALLA_URL` (including
   a command-scoped override) takes precedence over `.env`. Non-empty overrides

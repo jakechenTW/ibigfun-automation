@@ -18,6 +18,7 @@
     "route-trial": "tsx scripts/route-trial.ts",
     "market-data": "tsx scripts/market-data.ts",
     "test": "node --import tsx --test scripts/lib/*.test.ts scripts/lib/market-data/*.test.ts",
+    "report:check": "node --import tsx scripts/report-check.ts",
     "pipeline": "tsx scripts/pipeline.ts"
   },
   "devDependencies": {
