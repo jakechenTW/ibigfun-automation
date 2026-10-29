@@ -10,6 +10,14 @@ Use the public operation that exposes the defect.
 Record the failing assertion or error and the passing result in the review evidence.
 If reproducing the original failure is impractical, state that limitation explicitly.
 
+## Behavior-preserving refactors
+
+Run the same public-contract tests against the baseline and the refactored implementation.
+Record both results and identify any contract that the tests do not cover.
+Separate this compatibility evidence from defect-regression evidence in the review.
+A missing module or method proves that an interface is absent, not that a test detects incorrect behavior.
+If the refactor also fixes a defect, apply the regression-test requirements to that fix separately.
+
 ## Persisted state
 
 For changes that read persisted state, trace reading, validation, migration, use, and recovery across callers.
