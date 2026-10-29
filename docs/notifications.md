@@ -25,13 +25,21 @@ A notifier should exit `0` on success and non-zero on failure.
 
 ## No notifier installed
 
-If `NOTIFY_CMD` is unset and `ai-notify` is not on `PATH`, the run does **not**
-fail. The report is still written to `state/runs/<profile>/<label>/report.md`
-and a `notification skipped` notice is printed. Set `NOTIFY_CMD` to wire your
-own notifier (Slack, email, a shell script, etc.).
+If `NOTIFY_CMD` is unset and `ai-notify` is not on `PATH`, the report remains
+at `state/runs/<profile>/<label>/report.md`
+and a `notification skipped` notice is printed. The pipeline records delivery
+as failed, keeping it in the recovery queue until a notifier is available.
+Set `NOTIFY_CMD` to wire your own notifier (Slack, email, a shell script, etc.).
 
 If `NOTIFY_CMD` **is** set but the command is missing or exits non-zero, that is
 treated as a real error.
+
+The daily worker runs `pipeline recover` before the current run to resume
+unfinished historical runs and send their completed reports. Recovery titles
+retain the original date/range and append `（補送）`. A successful failure alert
+is tracked separately and never suppresses the later report notification.
+Notifications are retried on later worker invocations, without an infinite
+retry loop. An acknowledged successful report is not sent again during recovery.
 
 ## Message body
 

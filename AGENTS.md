@@ -50,6 +50,13 @@ recovery action.
    Compute the target date: the previous calendar day
    in `Asia/Taipei` unless the user supplied a range/date. A default run on
    `2026-06-27` targets `2026-06-26`.
+   Before the current run, execute `npm run pipeline -- recover --profile
+   <profile> [the same date/range flags] --tool <codex|claude>`. It retries
+   recorded unfinished older runs sequentially and returns a JSON work list.
+   Complete every `outcome: report` item with its own original range using
+   steps 5–12 below, then run that range's pipeline to deliver it. Record
+   failures with `pipeline fail` and continue with the other backlog items
+   and the current run. Never recursively recover or retry indefinitely.
 3. Fetch the target date's listings → `docs/fetching.md`
    (`npm run fetch -- --profile <profile> --date <target>` writes
    `state/runs/<profile>/<label>/listings.json`).
@@ -208,6 +215,15 @@ evaluation, and writing the report.
   (`add_date`/`add_date_max`), deduped by listing id, and emitted as **one**
   merged report + **one** notification. Already-ok steps are skipped, so
   re-running resumes.
+  - `npm run pipeline -- recover --profile <profile> [--date <target> | --from
+    <a> --to <b>] --tool <codex|claude> [--dry-run]` — retry the recorded
+    unfinished backlog through the target end date, excluding the target run
+    itself. Successful report delivery is skipped. Script steps resume and
+    stop at the agent report boundary; stdout JSON lists `report`, `complete`,
+    or `failed` outcomes. A failed item does not block later items. Daily
+    workers must finish the returned report work list before the current run.
+    Failure alerts are separate from report delivery; a sent failure alert
+    never completes a run. Recovered report titles include `補送`.
   - `npm run pipeline -- status --profile <profile> [--date <target> | --from
     <a> --to <b>]` —
     per-step status, timing, summary, last error, and the journal tail.

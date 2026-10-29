@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import {
   createManifest, setStep, writeManifest, readManifest, STEP_ORDER, STEP_KIND, planNextSteps,
-  clearFailure,
+  clearFailure, invalidateAfter,
 } from './manifest.ts';
 import { runDir } from './runpaths.ts';
 
@@ -36,7 +36,21 @@ test('clearFailure removes a prior escape-hatch failure after a successful resum
   const m = createManifest('investment', '2026-06-26', '2026-06-26', 'now');
   m.failure = { reason: 'temporary route stall', where: 'pipeline fail' };
   clearFailure(m);
+  assert.notEqual(m.failure, null);
+  for (const step of STEP_ORDER) setStep(m, step, { status: 'ok' });
+  clearFailure(m);
   assert.equal(m.failure, null);
+});
+
+test('retrying enrichment invalidates the old report and delivery but retains fetched data', () => {
+  const m = createManifest('investment', '2026-06-26', '2026-06-26', 'now');
+  for (const step of STEP_ORDER) setStep(m, step, { status: 'ok' });
+  m.notify = { tool: 'codex', status: 'ok', title: 'old report' };
+  invalidateAfter(m, 'enrich');
+  assert.equal(m.steps.fetch.status, 'ok');
+  assert.equal(m.steps.report.status, 'pending');
+  assert.equal(m.steps.notify.status, 'pending');
+  assert.equal(m.notify, null);
 });
 
 test('planNextSteps: fresh manifest runs every step in order', () => {

@@ -93,4 +93,7 @@ iBigFun 是**單一共享登入**——同一帳號同時 fetch 會互踢登入 
 trigger 不需處理失敗——`prompts/daily-run.md` 內建唯一逃生口
 （`npm run pipeline -- fail ...`）：登入被 CAPTCHA/2FA/風控擋住或
 fetch/enrich 不可恢復時，記錄 run-level 失敗並送出**一則** `status=fail`
-通知後停止，絕不繞過登入控制、不無限重試。
+通知後結束該筆嘗試，絕不繞過登入控制、不無限重試。
+每次 reader 依 `daily-run.md` 先執行 `pipeline recover`，補跑該 profile
+之前未完成的日期／區間，完成回傳的報告工作再跑本期。成功的正式報告通知
+不會重送；失敗通知不算正式報告送達。某筆持續失敗不阻擋其他舊任務或本期。

@@ -25,6 +25,24 @@ Trigger 也會在訊息裡告訴你要監測的區間。把它對應成 pipeline
 
 ## 執行流程（指令照抄）
 
+0. 先補跑已記錄但尚未完成的舊任務：
+
+   ```
+   npm run pipeline -- recover [profile 參數] [範圍參數] [tool 參數]
+   ```
+
+   它依日期從舊到新、循序重試每個舊 run 一次；只差通知的直接補送。
+   stdout 的 JSON `runs` 是後續工作清單，`outcome: report` 表示資料已備妥，
+   需要你以該筆 `from` / `to` 執行下方第 2–4 步。分析時使用該 run
+   `manifest.json.profileSnapshot` 的原始 fetch／evaluation；文字規則與模板仍讀
+   目前 profile 檔案，所有既有品質閘門仍適用。原始查詢日期不代表房源在補查時
+   仍完整可見；延後查詢可能漏掉已下架物件，必要時在報告註明此限制。
+   不要重新觸發 recover，也不要把舊 run 改用本期日期或合併到本期計數。
+   `complete` 無須處理；`failed` 依失敗政策回報該筆的原日期，留待下次排程。
+   即使 recover 回傳非 0，也要讀取 JSON，完成其他可補跑的報告，再繼續本期。
+   `errors` 中的損壞紀錄必須回報、保留原檔，不得刪掉或當成完成。
+   每個舊 run 每次排程最多補跑一次，且不得因補跑失敗跳過本期。
+
 1. 跑 orchestrator：
 
    ```
@@ -73,7 +91,7 @@ Enrich 會在 ORS 429 或 quota-exhausted 403 後等待 60 秒，然後重試一
 
    若格式檢查失敗，依錯誤修正報告後重新檢查，不要直接將格式錯誤當成資料抓取失敗。不可為了通過檢查移除必要警訊、物件或更改分桶。另須逐筆人工核對理由是否具體且有證據；程式只能識別部分空泛用語。檢查通過後才標記完成。若仍無法完成，依既有失敗政策回報真實原因。
 
-4. 標記完成（會自動觸發 notify，idempotent）：
+4. 標記完成，再執行 pipeline 發送通知（已成功送出的通知會略過）：
 
    ```
    npm run pipeline -- mark report [profile 參數] [範圍參數] --status ok --artifact state/runs/<profile>/<label>/report.md \
@@ -105,11 +123,13 @@ Enrich 會在 ORS 429 或 quota-exhausted 403 後等待 60 秒，然後重試一
   npm run pipeline -- fail [profile 參數] [範圍參數] --reason "<短原因>" [tool 參數]
   ```
 
-  它會記錄 run-level 失敗、建立精簡的使用者 failure details（profile/range、可讀的中斷步驟、已遮蔽的操作原因與安全的下一步），完整 journal 保留於本機，送出**一則** `status=fail` 通知，然後停。送出前可先加 `--dry-run` 檢查要送的內容。
+   它會記錄 run-level 失敗、建立精簡的使用者 failure details（profile/range、可讀的中斷步驟、已遮蔽的操作原因與安全的下一步），完整 journal 保留於本機，送出**一則** `status=fail` 通知。失敗通知另行記錄，不會把正式報告通知標為完成；送出失敗則下次仍可重試。該筆停下，其他補跑項目及本期仍繼續。送出前可先加 `--dry-run` 檢查要送的內容。
 
 ## 完成判準
 
-報告已寫且 `notify` 記為 `ok`，**或**失敗逃生口已送出 `fail`。事後都可用 `npm run pipeline -- status [profile 參數] [範圍參數]` 與 journal 檢視——不會有靜默失敗。
+報告已寫且 fetch／enrich／report／notify 四步均為 `ok` 才算該 run 完成。
+失敗逃生口只結束本次嘗試；該 run 保留在待補跑清單，下次排程再試。
+事後可用 `npm run pipeline -- status [profile 參數] [範圍參數]` 與 journal 檢視。
 
 ## 安全（完整清單見 `AGENTS.md`）
 

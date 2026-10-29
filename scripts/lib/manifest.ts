@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import { manifestPath, runDir } from './runpaths.ts';
 import { rangeLabel } from './date.ts';
+import type { Profile } from './profiles.ts';
 
 export type StepName = 'fetch' | 'enrich' | 'report' | 'notify';
 export type StepStatus = 'pending' | 'running' | 'ok' | 'failed' | 'skipped';
@@ -30,6 +31,9 @@ export interface NotifyParams {
 }
 
 export interface Manifest {
+  profileSnapshot?: Profile;
+  failureNotification?: { sentAt: string };
+  recovery?: { startedAt: string };
   profileId: string;
   from: string;
   to: string;
@@ -60,7 +64,13 @@ export function createManifest(profileId: string, from: string, to: string, now:
 export function readManifest(profileId: string, label: string): Manifest | null {
   const p = manifestPath(profileId, label);
   if (!fs.existsSync(p)) return null;
-  return JSON.parse(fs.readFileSync(p, 'utf8')) as Manifest;
+  const m = JSON.parse(fs.readFileSync(p, 'utf8')) as Manifest;
+  // Older versions used the report delivery slot for the failure alert.
+  if (m.failure && m.steps.notify.status === 'ok' && !m.failureNotification) {
+    m.failureNotification = { sentAt: m.steps.notify.endedAt ?? m.updatedAt };
+    setStep(m, 'notify', { status: 'pending', endedAt: null, summary: null });
+  }
+  return m;
 }
 
 export function writeManifest(m: Manifest, now: string): void {
@@ -83,7 +93,19 @@ export function setStep(m: Manifest, name: StepName, patch: Partial<StepState>):
 
 /** Clear a prior headless failure once a later resumed run completes. */
 export function clearFailure(m: Manifest): void {
-  m.failure = null;
+  if (isRunComplete(m)) m.failure = null;
+}
+
+export function isRunComplete(m: Manifest): boolean {
+  return STEP_ORDER.every((step) => m.steps[step].status === 'ok');
+}
+
+/** Any changed upstream artifact requires a new report and delivery. */
+export function invalidateAfter(m: Manifest, step: StepName): void {
+  for (const name of STEP_ORDER.slice(STEP_ORDER.indexOf(step) + 1)) {
+    m.steps[name] = emptyStep(STEP_KIND[name]);
+  }
+  if (step === 'fetch' || step === 'enrich') m.notify = null;
 }
 
 export interface PlanOpts {
