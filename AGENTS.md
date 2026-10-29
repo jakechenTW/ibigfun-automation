@@ -312,3 +312,17 @@ ai-notify --tool <codex|claude> --status <ok|warn|fail> \
   runs.
 - Automation memory: recent run summaries and short-lived notes only. When a
   decision becomes durable, promote it into the relevant doc above.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live in GitHub Issues. Before working with tickets, read `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the five default triage labels. Before labeling issues, read `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Use a single-context layout. Before exploring the codebase, read `docs/agents/domain.md`.
