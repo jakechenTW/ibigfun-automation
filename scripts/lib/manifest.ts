@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import { manifestPath, runDir } from './runpaths.ts';
 import { rangeLabel } from './date.ts';
 import type { Profile } from './profiles.ts';
+import type { ReportApproval } from './report-delivery.ts';
 
 export type StepName = 'fetch' | 'enrich' | 'report' | 'notify';
 export type StepStatus = 'pending' | 'running' | 'ok' | 'failed' | 'skipped';
@@ -31,6 +32,7 @@ export interface NotifyParams {
 }
 
 export interface Manifest {
+  reportApproval?: ReportApproval;
   profileSnapshot?: Profile;
   failureNotification?: { sentAt: string };
   recovery?: { startedAt: string };
@@ -105,6 +107,7 @@ export function invalidateAfter(m: Manifest, step: StepName): void {
   for (const name of STEP_ORDER.slice(STEP_ORDER.indexOf(step) + 1)) {
     m.steps[name] = emptyStep(STEP_KIND[name]);
   }
+  if (step === 'fetch' || step === 'enrich' || step === 'report') delete m.reportApproval;
   if (step === 'fetch' || step === 'enrich') m.notify = null;
 }
 

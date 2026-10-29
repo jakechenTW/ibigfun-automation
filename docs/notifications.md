@@ -12,14 +12,14 @@ spaces and are shell-quoted only for display):
 ```
 <NOTIFY_CMD> --tool <codex|claude> --status <ok|warn|fail> \
   --task "<profile displayName>" --title "<short title>" \
-  --details-file <path to report.md>
+  --details-file <approved report copy path>
 ```
 
-- `--tool`: which agent produced the report (`codex` or `claude`).
+- `--tool`: the agent performing this delivery (`codex` or `claude`).
 - `--status`: `ok` means the run completed without unresolved actionable warnings; fully supported recommendations or matches may use `ok`. `warn` means candidates, risks, unresolved actionable manual review, stale sources, unverified mappings, or other weak evidence affects safe interpretation. A fresh market review/unavailable result on a confirmed hard exclusion does not force `warn`. `fail` means the run could not complete.
 - `--task`: the selected profile's `displayName`.
 - `--title`: the sole user-facing notification title; include the concise status/date/outcome wording here and do not repeat it in the details body.
-- `--details-file`: path to the Markdown report; the notifier reads the body from here.
+- `--details-file`: path to the approved Markdown copy. The notifier reads its body from this file.
 
 A notifier should exit `0` on success and non-zero on failure.
 
@@ -40,6 +40,35 @@ retain the original date/range and append `（補送）`. A successful failure a
 is tracked separately and never suppresses the later report notification.
 Notifications are retried on later worker invocations, without an infinite
 retry loop. An acknowledged successful report is not sent again during recovery.
+
+## Report approval
+
+Use `pipeline mark report` to approve the canonical `report.md` after fetch and enrich complete.
+Use `pipeline run` to deliver the approved report.
+Direct notifier calls bypass approval and are outside this workflow.
+`report:check` remains a format and count preview, not an approval.
+
+The report delivery module records `reportApproval` in the run manifest.
+Its version-1 record binds the report, enriched evidence, optional valuation review, profile snapshot, date range, status, and original title.
+SHA-256 fingerprints bind file bytes, including whitespace.
+A missing valuation review is recorded explicitly, so adding or removing it requires renewed approval.
+The current delivery agent and the standard recovery title suffix can change without renewed approval.
+
+Approval publishes `approved-report-<sha256>.md` in the run directory before committing the manifest.
+The copy contains the exact approved report bytes.
+The pipeline retains copies after delivery and failure.
+Authors edit only `report.md` and never edit delivery copies.
+
+Before sending, the pipeline compares current inputs and notification conditions with the approval and makes sure that the copy matches.
+Changed or missing inputs, damaged copies, and missing or unsupported approval records return the run to the report step.
+The journal records the reason, and recovery returns `outcome: report`.
+If a copy is damaged, restore its original bytes or remove that damaged copy before approving the canonical report again.
+A notifier failure retains approval and retries delivery on the next invocation.
+
+Delivery preserves the original assessment date, without refreshing market data or routing because time passed.
+Historical reports do not describe current availability.
+A custom notifier must read the provided file and acknowledge delivery through its exit code.
+The existing duplicate-delivery limitation still applies.
 
 ## Message body
 

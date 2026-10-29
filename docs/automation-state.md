@@ -68,3 +68,26 @@ message but before the manifest is saved can cause a duplicate on retry;
 exactly-once delivery requires provider-side idempotency, which the notifier
 contract does not currently expose. Do not run two workers for the same profile
 concurrently.
+
+## Approval recovery
+
+Pending report deliveries require a supported `reportApproval` record.
+Legacy failure-alert migration runs before completion detection.
+Completed runs stay complete, even without approval records, and recovery does not resend them.
+Unfinished legacy reports return to the agent report step with their original files, profile, and range retained.
+The agent reviews those files and runs `pipeline mark report` again.
+Recovery never creates approval by hashing legacy files alone.
+
+Changed report inputs or approval conditions reset report and notify to pending and remove the active approval.
+The report error and journal retain the invalidation reason.
+Forcing report or rerunning fetch/enrich also removes approval.
+No automatic fetch or market-data refresh follows an approval failure alone.
+Dry runs describe the resulting work without changing manifests, copies, or journals.
+
+A delivery copy alone is not approval.
+Only a successful manifest commit records approval and report completion together.
+An interruption before that commit can leave an unused copy, which recovery never treats as approval.
+The next approval can reuse an intact copy with identical bytes.
+The commit protocol handles process interruption and uses the existing manifest rename convention.
+It does not add power-loss durability or concurrent-worker support.
+See [notifications.md](notifications.md#report-approval) for the approval record and delivery contract.

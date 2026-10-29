@@ -113,7 +113,7 @@ recovery action.
     `pipeline fail`.
 11. Write `state/runs/<profile>/<label>/report.md` using the profile's
    `profiles/<profile>/notify-template.md` as the structure.
-12. Notify with the canonical command below. Any stale official market source requires notification status `warn`;
+12. Approve with `pipeline mark report`, then deliver with `pipeline run`. Any stale official market source requires notification status `warn`;
    `pipeline mark report --status ok` rejects malformed or internally inconsistent
    enriched market evidence and any stale official source. Fresh `review` or
    `unavailable` evidence affects notification status only when it leaves an
@@ -230,8 +230,10 @@ evaluation, and writing the report.
   - `npm run pipeline -- mark report --profile <profile> [--date <target> |
     --from <a> --to <b>] --status ok --artifact
     state/runs/<profile>/<label>/report.md --status-notify <ok|warn|fail>
-    --title "<short>" --tool <codex|claude>` — mark the agent report step done
-    and record the notify parameters.
+    --title "<short>" --tool <codex|claude>` — approve the canonical report version
+    and its evidence, publish its delivery copy, and record the notify parameters.
+    Changed inputs or missing approval return unfinished runs to the report step.
+    Review the original files before reapproval. Never create approval from hashes alone.
   - `npm run pipeline -- fail --profile <profile> [--date <d> | --from <a>
     --to <b>] --reason "<short>" --tool <codex|claude> [--dry-run]` —
     headless failure escape hatch: marks the run failed, writes a safe details
@@ -255,12 +257,16 @@ a same-day/intraday check, and mark such output as incomplete/intraday.
 
 ## Canonical Notification Command
 
-Send the finished report only after it is written. The notifier command is `NOTIFY_CMD` (default `ai-notify`); see `docs/notifications.md`. Use this exact command shape:
+Approve the canonical report with `pipeline mark report`, then deliver it with `pipeline run`.
+The pipeline uses `NOTIFY_CMD` (default `ai-notify`) with this command shape.
+The details file is its program-managed approved copy, not the editable report.
+See [docs/notifications.md](docs/notifications.md#report-approval) for the contract.
+Do not bypass the pipeline with a direct notifier call for report delivery.
 
 ```bash
 ai-notify --tool <codex|claude> --status <ok|warn|fail> \
   --task "<profile displayName>" --title "<short title>" \
-  --details-file state/runs/<profile>/<label>/report.md
+  --details-file state/runs/<profile>/<label>/approved-report-<sha256>.md
 ```
 
 - `--tool`: the agent actually running (`codex` or `claude`).

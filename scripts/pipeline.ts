@@ -23,18 +23,18 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   loadOrCreateManifest, readManifest, writeManifest, setStep, planNextSteps,
-  clearFailure, invalidateAfter, isRunComplete, STEP_ORDER, type StepName, type NotifyParams,
+  clearFailure, invalidateAfter, isRunComplete, STEP_ORDER, type StepName, type NotifyParams, type Manifest,
 } from './lib/manifest.ts';
 import { readJournal, journalLogger } from './lib/journal.ts';
 import { runStep } from './lib/run.ts';
 import { composeNotifyCommand, defaultFailTitle, runNotify, renderFailDetails } from './lib/notify.ts';
 import { fetchStep, enrichStep } from './lib/steps.ts';
 import { resolveRange, rangeFlags, type RunRange } from './lib/range.ts';
-import { runDir, reportPath, enrichedPath, valuationReviewPath, effectiveProfilePath } from './lib/runpaths.ts';
+import { runDir, reportPath, valuationReviewPath, effectiveProfilePath } from './lib/runpaths.ts';
 import { resolveProfileFromArgs, profileFlags, parseProfile, type Profile } from './lib/profiles.ts';
-import { assertReportHasResolvedRegionTriage, validateReportEvidence } from './lib/report-notify.ts';
-import { validateNotificationCounts, validateNotificationReport } from './lib/report-format.ts';
+import { approveReport, prepareReportDelivery } from './lib/report-delivery.ts';
 import { recoveryBacklog } from './lib/recovery.ts';
+import { rangeLabel } from './lib/date.ts';
 
 const now = () => new Date().toISOString();
 
@@ -76,26 +76,49 @@ function requiredTool(argv: string[]): 'codex' | 'claude' {
   return tool;
 }
 
+/** Older successful fetches saved effective filters outside the manifest. */
+function runProfile(m: Manifest, requested: Profile): Profile {
+  if (m.profileSnapshot) {
+    if (m.profileSnapshot.id !== m.profileId) throw new Error('saved profile identity does not match run');
+    parseProfile(m.profileId, m.profileSnapshot);
+    return m.profileSnapshot;
+  }
+  const file = effectiveProfilePath(m.profileId, rangeLabel(m.from, m.to));
+  return fs.existsSync(file)
+    ? parseProfile(m.profileId, { ...requested, ...JSON.parse(fs.readFileSync(file, 'utf8')) })
+    : requested;
+}
+
+function returnToReport(m: Manifest, error: unknown, dryRun: boolean): void {
+  const reason = (error as Error).message;
+  setStep(m, 'report', { status: 'pending', error: { message: reason, where: 'report approval' } });
+  invalidateAfter(m, 'report');
+  console.error(`Report requires approval: ${reason}`);
+  if (!dryRun) {
+    writeManifest(m, now());
+    journalLogger(m.profileId, rangeLabel(m.from, m.to), 'report', now)
+      .event('warn', 'report.approval-invalidated', reason);
+  }
+}
+
 async function cmdRun(argv: string[]): Promise<'complete' | 'report' | 'failed' | 'partial'> {
   const requestedProfile = resolveProfileOrExit(argv);
   const range = resolveRangeOrExit(argv);
   const dryRun = has(argv, '--dry-run');
   const m = loadOrCreateManifest(requestedProfile.id, range.from, range.to, now());
-  // Older successful fetches saved the effective filters outside the manifest.
-  const effectiveFile = effectiveProfilePath(requestedProfile.id, range.label);
-  if (!m.profileSnapshot && fs.existsSync(effectiveFile)) {
-    m.profileSnapshot = parseProfile(requestedProfile.id, {
-      ...requestedProfile, ...JSON.parse(fs.readFileSync(effectiveFile, 'utf8')),
-    });
-  }
-  const profile = m.profileSnapshot ?? requestedProfile;
-  m.profileSnapshot ??= profile;
-  if (m.steps.report.status === 'ok' && m.steps.notify.status !== 'ok'
-    && !fs.existsSync(reportPath(profile.id, range.label))) {
-    setStep(m, 'report', { status: 'pending' });
-    invalidateAfter(m, 'report');
-  }
   if (has(argv, '--recovery')) m.recovery ??= { startedAt: now() };
+  const approvalMissingProfile = !!m.reportApproval && !m.profileSnapshot;
+  let profile = requestedProfile;
+  try {
+    if (!approvalMissingProfile) profile = runProfile(m, requestedProfile);
+  } catch (error) {
+    if (!isRunComplete(m) && m.steps.fetch.status === 'ok' && m.steps.enrich.status === 'ok') {
+      returnToReport(m, new Error('saved profile is invalid; repair it before report approval'), dryRun);
+      return 'report';
+    }
+    throw error;
+  }
+  if (!approvalMissingProfile) m.profileSnapshot ??= profile;
   if (m.notify && flag(argv, '--tool')) m.notify.tool = requiredTool(argv);
   const forced = asStep(flag(argv, '--force'), '--force');
   const only = asStep(flag(argv, '--only'), '--only');
@@ -106,7 +129,16 @@ async function cmdRun(argv: string[]): Promise<'complete' | 'report' | 'failed' 
   const firstScript = (['fetch', 'enrich'] as const).find((step) =>
     (!only || only === step) && (m.steps[step].status !== 'ok' || forced === step));
   if (firstScript) invalidateAfter(m, firstScript);
+  let needsApproval = false;
+  if (m.steps.report.status === 'ok' && !isRunComplete(m)) {
+    try { prepareReportDelivery(m, profile); }
+    catch (error) {
+      returnToReport(m, error, dryRun);
+      needsApproval = true;
+    }
+  }
   if (!dryRun) writeManifest(m, now());
+  if (needsApproval && only === 'notify') return 'report';
   const plan = planNextSteps(m, {
     only,
     force: forced ? [forced] : [],
@@ -134,16 +166,16 @@ async function cmdRun(argv: string[]): Promise<'complete' | 'report' | 'failed' 
       if (!m.notify || !['fetch', 'enrich', 'report'].every((s) => m.steps[s as StepName].status === 'ok')) {
         throw new Error('notify requires completed fetch, enrich, and report steps.');
       }
-      const params = { ...m.notify,
-        title: m.recovery && !m.notify.title.includes('補送') ? `${m.notify.title}（補送）` : m.notify.title };
+      let delivery: ReturnType<typeof prepareReportDelivery>;
+      try { delivery = prepareReportDelivery(m, profile); }
+      catch (error) { returnToReport(m, error, dryRun); return 'report'; }
+      const { params, task, detailsFile } = delivery;
       if (dryRun) {
-        console.error(`[dry-run] would send:\n  ${composeNotifyCommand(params, profile.displayName, reportPath(profile.id, range.label))}`);
+        console.error(`[dry-run] would send:\n  ${composeNotifyCommand(params, task, detailsFile)}`);
         continue;
       }
       const status = await runStep(m, 'notify', async (logger) => {
-        const detailsFile = reportPath(profile.id, range.label);
-        if (!fs.existsSync(detailsFile)) throw new Error(`report artifact missing: ${detailsFile}`);
-        const { exitCode, stderr, command, skipped } = runNotify(params, profile.displayName, detailsFile);
+        const { exitCode, stderr, command, skipped } = runNotify(params, task, detailsFile);
         logger.event(exitCode === 0 ? 'info' : 'error', 'notify.sent',
           `${command} exited ${exitCode}`, { exitCode, stderr });
         if (exitCode !== 0) throw new Error(`${command} exited ${exitCode}: ${stderr.trim()}`);
@@ -226,7 +258,8 @@ function cmdMark(argv: string[]): void {
   let profile = resolveProfileOrExit(argv);
   const range = resolveRangeOrExit(argv);
   const m = readManifest(profile.id, range.label) ?? loadOrCreateManifest(profile.id, range.from, range.to, now());
-  profile = m.profileSnapshot ?? profile;
+  try { profile = runProfile(m, profile); }
+  catch { fail('saved profile is invalid; repair it before report approval'); }
   const status = flag(argv, '--status');
   if (status !== 'ok' && status !== 'failed') fail('--status must be ok|failed.');
   if (step === 'report' && status === 'ok' && isRunComplete(m)) {
@@ -244,46 +277,13 @@ function cmdMark(argv: string[]): void {
     }
     if (!title) fail('marking report ok requires --title "<short>".');
     if (!artifact) fail('marking report ok requires --artifact <report.md>.');
-    if (!fs.existsSync(artifact)) fail(`cannot mark report ok: report artifact ${artifact} is missing.`);
     try {
-      const report = fs.readFileSync(artifact, 'utf8');
-      validateNotificationReport(report);
-      if (profile.evaluation.requireResolvedRegionGate) {
-        assertReportHasResolvedRegionTriage(report);
-      }
+      approveReport(m, profile, artifact, { tool, status: sNotify, title }, now());
     } catch (error) {
       fail(`cannot mark report ok: ${(error as Error).message}`);
     }
-    const enrichedFile = enrichedPath(profile.id, range.label);
-    const reviewPath = valuationReviewPath(profile.id, range.label);
-    const hasValuationReview = fs.existsSync(reviewPath);
-    let enriched: unknown;
-    if (!fs.existsSync(enrichedFile)) {
-      fail(`cannot mark report ok: required enriched artifact ${enrichedFile} is missing.`);
-    }
-    try {
-      enriched = JSON.parse(fs.readFileSync(enrichedFile, 'utf8'));
-    } catch (error) {
-      fail(`cannot mark report ok: malformed enriched artifact ${enrichedFile}: ${(error as Error).message}`);
-    }
-    let valuationReview: unknown;
-    if (hasValuationReview) {
-      try {
-        valuationReview = JSON.parse(fs.readFileSync(reviewPath, 'utf8'));
-      } catch (error) {
-        fail(`cannot mark report ok: malformed ${reviewPath}: ${(error as Error).message}`);
-      }
-    }
-    try {
-      validateReportEvidence(sNotify, enriched, valuationReview);
-      validateNotificationCounts(
-        fs.readFileSync(artifact, 'utf8'),
-        (enriched as { listings: unknown[] }).listings.length,
-      );
-    } catch (error) {
-      fail(`cannot mark report ok: ${(error as Error).message}`);
-    }
-    m.notify = { tool, status: sNotify, title } as NotifyParams;
+    console.error(`✓ marked report ok for ${profile.id}/${range.label}.`);
+    return;
   }
 
   invalidateAfter(m, step);

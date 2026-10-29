@@ -320,7 +320,7 @@ Retain each property's required market limitation and every positive, candidate,
 
 ## Notification Format
 
-- `report.md` is the exact user-facing Markdown body sent to `ai-notify`; do not create a second notification artifact. Its first content line is the conclusion, never a Markdown heading.
+- Authors write one user-facing body in `report.md`. The pipeline delivers an exact approved copy under the [report approval contract](notifications.md#report-approval). Its first content line is the conclusion, never a Markdown heading.
 - Use `✅` for `ok`, `⚠️` for `warn`, and `❌` for `fail`. The `pipeline mark report --title` value is the sole notification title and contains the status icon, date/range, profile purpose, and primary outcome; do not repeat it in `report.md`.
 - `ok` means the run completed without unresolved actionable warnings; it may contain fully supported recommendations or matches.
 - `warn` means candidates, risks, unresolved actionable manual review, stale sources, unverified mappings, or other weak evidence affects safe interpretation.

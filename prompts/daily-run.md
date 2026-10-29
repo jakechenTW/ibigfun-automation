@@ -134,3 +134,14 @@ Enrich 會在 ORS 429 或 quota-exhausted 403 後等待 60 秒，然後重試一
 ## 安全（完整清單見 `AGENTS.md`）
 
 不印 `IBIGFUN_ACCOUNT` / `IBIGFUN_PASSWORD`；不 commit `state/`（含 `state/runs/<profile>/<label>/`）；不繞過登入控制。
+
+## Report approval and recovery
+
+Write and approve only the canonical `report.md` for the selected profile and range.
+After approval, use `pipeline run` to deliver the program-managed copy.
+Do not edit `approved-report-<sha256>.md` or invoke the notifier directly for report delivery.
+If recovery returns report work because approval is missing or invalid, review the original report and evidence before marking it again.
+Keep the original range and profile snapshot.
+Repair missing inputs explicitly when needed, without an inline market-data refresh.
+A notifier failure alone needs only a delivery retry.
+See `docs/notifications.md` for the approval contract.

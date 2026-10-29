@@ -17,6 +17,7 @@ function fixture(fn: (f: {
   seed: (date: string, modify?: (m: Manifest) => void, to?: string) => string;
   read: (label: string) => Manifest;
   sent: () => string[][];
+  bodies: () => string[];
 }) => void) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ibigfun-recovery-'));
   const profile = { displayName: 'Test profile', fetch: {}, evaluation: { maxDaysOnMarket: 30 } };
@@ -25,16 +26,19 @@ function fixture(fn: (f: {
   fs.writeFileSync(path.join(dir, 'profile.json'), JSON.stringify(profile));
   for (const file of ['evaluation.md', 'notify-template.md']) fs.writeFileSync(path.join(dir, file), 'test');
   const deliveries = path.join(root, 'deliveries.jsonl');
+  const bodies = path.join(root, 'bodies.jsonl');
   const notifier = path.join(root, 'notify.mjs');
   fs.writeFileSync(notifier, '#!/usr/bin/env node\n' +
-    'import fs from "node:fs"; fs.appendFileSync(process.env.DELIVERIES, JSON.stringify(process.argv.slice(2))+"\\n");\n');
+    'import fs from "node:fs"; fs.appendFileSync(process.env.DELIVERIES, JSON.stringify(process.argv.slice(2))+"\\n");\n' +
+    'fs.appendFileSync(process.env.BODIES, JSON.stringify(fs.readFileSync(process.argv[process.argv.indexOf("--details-file")+1], "utf8"))+"\\n");\n');
   fs.chmodSync(notifier, 0o755);
+  const run = (...args: string[]) => spawnSync(process.execPath, ['--import', loader, cli, ...args, '--profile', profileId], {
+    cwd: root, encoding: 'utf8', env: { ...process.env, NOTIFY_CMD: notifier, DELIVERIES: deliveries, BODIES: bodies },
+  });
   const read = (label: string) => JSON.parse(fs.readFileSync(path.join(root, 'state/runs', profileId, label, 'manifest.json'), 'utf8')) as Manifest;
   try {
     fn({ root, read,
-      run: (...args) => spawnSync(process.execPath, ['--import', loader, cli, ...args, '--profile', profileId], {
-        cwd: root, encoding: 'utf8', env: { ...process.env, NOTIFY_CMD: notifier, DELIVERIES: deliveries },
-      }),
+      run,
       seed: (date, modify = () => {}, to = date) => {
         const m = createManifest(profileId, date, to, '2026-10-27T00:00:00Z');
         m.profileSnapshot = { ...profile, id: profileId };
@@ -43,9 +47,23 @@ function fixture(fn: (f: {
         const runDir = path.join(root, 'state/runs', profileId, label);
         fs.mkdirSync(runDir, { recursive: true });
         fs.writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify(m));
-        fs.writeFileSync(path.join(runDir, 'report.md'), 'original report');
+        fs.writeFileSync(path.join(runDir, 'report.md'), 'No listings.\n本次取得 0｜推薦 0｜候選 0｜風險 0｜排除 0\n');
+        fs.writeFileSync(path.join(runDir, 'enriched.json'), JSON.stringify({
+          listings: [], tenureEligible: 0, tenureExpired: 0, tenureReview: 0,
+          marketReliable: 0, marketReview: 0, marketUnavailable: 0, marketDataStale: 0,
+        }));
+        if (m.steps.report.status === 'ok' && m.steps.notify.status !== 'ok' && m.profileSnapshot) {
+          const result = run('mark', 'report', '--from', date, '--to', to, '--status', 'ok',
+            '--artifact', path.join(runDir, 'report.md'), '--tool', m.notify!.tool,
+            '--status-notify', m.notify!.status, '--title', m.notify!.title);
+          assert.equal(result.status, 0, String(result.stderr));
+          const approved = read(label);
+          approved.steps.notify = m.steps.notify;
+          fs.writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify(approved));
+        }
         return label;
       },
+      bodies: () => fs.existsSync(bodies) ? fs.readFileSync(bodies, 'utf8').trim().split('\n').map((s) => JSON.parse(s)) : [],
       sent: () => fs.existsSync(deliveries) ? fs.readFileSync(deliveries, 'utf8').trim().split('\n').map((s) => JSON.parse(s)) : [],
     });
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
@@ -159,6 +177,12 @@ test('a completed report mark is idempotent, and a legacy effective profile is r
     JSON.stringify({ displayName: 'Original profile', fetch: { price_segment: { max: '1234' } } }));
   assert.equal(f.run('recover', '--date', '2026-10-26', '--tool', 'codex').status, 0);
   assert.deepEqual(f.read('2026-10-22').profileSnapshot?.fetch, { price_segment: { max: '1234' } });
+  assert.equal(f.sent().length, 0);
+  assert.equal(f.read('2026-10-22').steps.report.status, 'pending');
+  assert.equal(f.run('mark', 'report', '--date', '2026-10-22', '--status', 'ok',
+    '--artifact', path.join(f.root, 'state/runs', profileId, '2026-10-22/report.md'),
+    '--tool', 'codex', '--status-notify', 'ok', '--title', 'Original report').status, 0);
+  assert.equal(f.run('run', '--date', '2026-10-22').status, 0);
   assert.equal(f.sent()[0][5], 'Original profile');
 }));
 
@@ -185,4 +209,108 @@ test('forcing a report requires a new report approval before any delivery', () =
   assert.equal(f.run('run', '--date', '2026-10-21').status, 0);
   assert.equal(f.sent().length, 0);
   assert.equal(f.read('2026-10-21').steps.report.status, 'pending');
+}));
+
+test('legacy report approval returns to report work without sending or changing files in dry-run', () => fixture((f) => {
+  f.seed('2026-10-21', ready);
+  const file = path.join(f.root, 'state/runs', profileId, '2026-10-21', 'manifest.json');
+  const legacy = f.read('2026-10-21');
+  delete legacy.reportApproval;
+  fs.writeFileSync(file, JSON.stringify(legacy));
+  const before = fs.readFileSync(file, 'utf8');
+  const preview = f.run('recover', '--date', '2026-10-26', '--tool', 'codex', '--dry-run');
+  assert.equal(JSON.parse(String(preview.stdout)).runs[0].outcome, 'report');
+  assert.equal(fs.readFileSync(file, 'utf8'), before);
+  const result = f.run('recover', '--date', '2026-10-26', '--tool', 'codex');
+  assert.equal(JSON.parse(String(result.stdout)).runs[0].outcome, 'report');
+  assert.equal(f.read('2026-10-21').steps.report.status, 'pending');
+  assert.equal(f.sent().length, 0);
+}));
+
+test('CLI approval rejects another artifact and changed approved content returns to report work', () => fixture((f) => {
+  f.seed('2026-10-21', ready);
+  const dir = path.join(f.root, 'state/runs', profileId, '2026-10-21');
+  fs.copyFileSync(path.join(dir, 'report.md'), path.join(f.root, 'other.md'));
+  const mark = (artifact: string) => f.run('mark', 'report', '--date', '2026-10-21', '--status', 'ok',
+    '--artifact', artifact, '--tool', 'codex', '--status-notify', 'ok', '--title', 'Approved report');
+  assert.equal(mark(path.join(f.root, 'other.md')).status, 2);
+  fs.appendFileSync(path.join(dir, 'report.md'), 'Changed conclusion.\n');
+  const result = f.run('recover', '--date', '2026-10-26', '--tool', 'codex');
+  assert.equal(JSON.parse(String(result.stdout)).runs[0].outcome, 'report');
+  assert.equal(f.read('2026-10-21').reportApproval, undefined);
+  assert.equal(f.sent().length, 0);
+  assert.equal(mark(path.join(dir, 'report.md')).status, 0);
+  assert.equal(f.run('run', '--date', '2026-10-21').status, 0);
+  assert.deepEqual(f.bodies(), [fs.readFileSync(path.join(dir, 'report.md'), 'utf8')]);
+  assert.match(f.sent()[0][9], /approved-report-[a-f0-9]{64}\.md$/);
+}));
+
+for (const missing of [false, true]) {
+  test(`a ${missing ? 'missing' : 'damaged'} delivery copy returns to report work even with only notify`, () => fixture((f) => {
+    f.seed('2026-10-21', ready);
+    const dir = path.join(f.root, 'state/runs', profileId, '2026-10-21');
+    const copy = path.join(dir, fs.readdirSync(dir).find((name) => name.startsWith('approved-report-'))!);
+    if (missing) fs.unlinkSync(copy);
+    else fs.writeFileSync(copy, 'unapproved content');
+    const result = f.run('run', '--date', '2026-10-21', '--only', 'notify');
+    assert.equal(result.status, 0, String(result.stderr));
+    assert.equal(f.read('2026-10-21').steps.report.status, 'pending');
+    assert.equal(f.read('2026-10-21').steps.notify.status, 'pending');
+    assert.equal(f.read('2026-10-21').reportApproval, undefined);
+    assert.equal(f.sent().length, 0);
+    assert.match(fs.readFileSync(path.join(dir, 'journal.jsonl'), 'utf8'), /approval-invalidated/);
+  }));
+}
+
+test('an approved run with a missing profile snapshot requires reapproval before any reconstruction', () => fixture((f) => {
+  f.seed('2026-10-21', (m) => { ready(m); m.profileSnapshot!.evaluation.requireResolvedRegionGate = false; });
+  fs.writeFileSync(path.join(f.root, 'profiles', profileId, 'profile.json'), JSON.stringify({
+    displayName: 'Test profile', fetch: {}, evaluation: { maxDaysOnMarket: 30, requireResolvedRegionGate: false },
+  }));
+  const dir = path.join(f.root, 'state/runs', profileId, '2026-10-21');
+  const m = f.read('2026-10-21');
+  delete m.profileSnapshot;
+  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(m));
+  const result = f.run('recover', '--date', '2026-10-26', '--tool', 'codex');
+  assert.equal(JSON.parse(String(result.stdout)).runs[0].outcome, 'report');
+  assert.equal(f.read('2026-10-21').reportApproval, undefined);
+  assert.equal(f.sent().length, 0);
+}));
+
+test('a legacy report with a malformed effective profile returns report work and retains its files', () => fixture((f) => {
+  f.seed('2026-10-21', (m) => { ready(m); delete m.profileSnapshot; });
+  const dir = path.join(f.root, 'state/runs', profileId, '2026-10-21');
+  fs.writeFileSync(path.join(dir, 'effective-profile.json'), '{broken');
+  const result = f.run('recover', '--date', '2026-10-26', '--tool', 'codex');
+  assert.equal(JSON.parse(String(result.stdout)).runs[0].outcome, 'report');
+  assert.equal(f.read('2026-10-21').steps.report.status, 'pending');
+  assert.equal(fs.readFileSync(path.join(dir, 'effective-profile.json'), 'utf8'), '{broken');
+  assert.equal(f.run('mark', 'report', '--date', '2026-10-21', '--status', 'ok',
+    '--artifact', path.join(dir, 'report.md'), '--tool', 'codex', '--status-notify', 'ok', '--title', 'Report').status, 2);
+  assert.equal(f.sent().length, 0);
+}));
+
+test('forcing report or enrichment removes an existing approval', () => fixture((f) => {
+  for (const [date, step] of [['2026-10-20', 'report'], ['2026-10-21', 'enrich']]) {
+    f.seed(date, ready);
+    assert.ok(f.read(date).reportApproval);
+    const result = f.run('run', '--date', date, '--force', step, '--only', step);
+    assert.equal(result.status, step === 'report' ? 0 : 1);
+    assert.equal(f.read(date).reportApproval, undefined);
+    assert.equal(f.read(date).steps.report.status, 'pending');
+    assert.equal(f.read(date).steps.notify.status, 'pending');
+  }
+  assert.equal(f.sent().length, 0);
+}));
+
+test('a damaged saved profile returns report work without trying to render its invalid identity', () => fixture((f) => {
+  f.seed('2026-10-21', ready);
+  const file = path.join(f.root, 'state/runs', profileId, '2026-10-21/manifest.json');
+  const m = f.read('2026-10-21');
+  Object.assign(m, { profileSnapshot: {} });
+  fs.writeFileSync(file, JSON.stringify(m));
+  const result = f.run('recover', '--date', '2026-10-26', '--tool', 'codex');
+  assert.equal(JSON.parse(String(result.stdout)).runs[0].outcome, 'report');
+  assert.equal(f.read('2026-10-21').reportApproval, undefined);
+  assert.equal(f.sent().length, 0);
 }));
