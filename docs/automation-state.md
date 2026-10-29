@@ -91,3 +91,5 @@ The next approval can reuse an intact copy with identical bytes.
 The commit protocol handles process interruption and uses the existing manifest rename convention.
 It does not add power-loss durability or concurrent-worker support.
 See [notifications.md](notifications.md#report-approval) for the approval record and delivery contract.
+
+See [run-lifecycle.md](run-lifecycle.md) for module responsibilities and preserved compatibility differences.

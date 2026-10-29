@@ -19,24 +19,15 @@
  * Default (no date flags): yesterday in Taipei time (single-day run).
  * Exit codes: 0 ok / stopped-at-agent · 1 a step failed · 2 bad input.
  */
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import {
-  loadOrCreateManifest, readManifest, writeManifest, setStep, planNextSteps,
-  clearFailure, invalidateAfter, isRunComplete, STEP_ORDER, type StepName, type NotifyParams, type Manifest,
-} from './lib/manifest.ts';
-import { readJournal, journalLogger } from './lib/journal.ts';
-import { runStep } from './lib/run.ts';
-import { composeNotifyCommand, defaultFailTitle, runNotify, renderFailDetails } from './lib/notify.ts';
+import { readManifest, STEP_ORDER, type StepName } from './lib/manifest.ts';
+import { readJournal } from './lib/journal.ts';
+import { composeNotifyCommand, runNotify } from './lib/notify.ts';
 import { fetchStep, enrichStep } from './lib/steps.ts';
 import { resolveRange, rangeFlags, type RunRange } from './lib/range.ts';
-import { runDir, reportPath, valuationReviewPath, effectiveProfilePath } from './lib/runpaths.ts';
-import { resolveProfileFromArgs, profileFlags, parseProfile, type Profile } from './lib/profiles.ts';
-import { approveReport, prepareReportDelivery } from './lib/report-delivery.ts';
+import { reportPath } from './lib/runpaths.ts';
+import { resolveProfileFromArgs, profileFlags, type Profile } from './lib/profiles.ts';
 import { recoveryBacklog } from './lib/recovery.ts';
-import { rangeLabel } from './lib/date.ts';
-
-const now = () => new Date().toISOString();
+import { createRunLifecycle, LifecycleInputError, type LifecycleEvent } from './lib/run-lifecycle.ts';
 
 function fail(msg: string): never {
   console.error(`BAD INPUT: ${msg}`);
@@ -76,80 +67,12 @@ function requiredTool(argv: string[]): 'codex' | 'claude' {
   return tool;
 }
 
-/** Older successful fetches saved effective filters outside the manifest. */
-function runProfile(m: Manifest, requested: Profile): Profile {
-  if (m.profileSnapshot) {
-    if (m.profileSnapshot.id !== m.profileId) throw new Error('saved profile identity does not match run');
-    parseProfile(m.profileId, m.profileSnapshot);
-    return m.profileSnapshot;
-  }
-  const file = effectiveProfilePath(m.profileId, rangeLabel(m.from, m.to));
-  return fs.existsSync(file)
-    ? parseProfile(m.profileId, { ...requested, ...JSON.parse(fs.readFileSync(file, 'utf8')) })
-    : requested;
-}
-
-function returnToReport(m: Manifest, error: unknown, dryRun: boolean): void {
-  const reason = (error as Error).message;
-  setStep(m, 'report', { status: 'pending', error: { message: reason, where: 'report approval' } });
-  invalidateAfter(m, 'report');
-  console.error(`Report requires approval: ${reason}`);
-  if (!dryRun) {
-    writeManifest(m, now());
-    journalLogger(m.profileId, rangeLabel(m.from, m.to), 'report', now)
-      .event('warn', 'report.approval-invalidated', reason);
-  }
-}
-
-async function cmdRun(argv: string[]): Promise<'complete' | 'report' | 'failed' | 'partial'> {
-  const requestedProfile = resolveProfileOrExit(argv);
-  const range = resolveRangeOrExit(argv);
-  const dryRun = has(argv, '--dry-run');
-  const m = loadOrCreateManifest(requestedProfile.id, range.from, range.to, now());
-  if (has(argv, '--recovery')) m.recovery ??= { startedAt: now() };
-  const approvalMissingProfile = !!m.reportApproval && !m.profileSnapshot;
-  let profile = requestedProfile;
-  try {
-    if (!approvalMissingProfile) profile = runProfile(m, requestedProfile);
-  } catch (error) {
-    if (!isRunComplete(m) && m.steps.fetch.status === 'ok' && m.steps.enrich.status === 'ok') {
-      returnToReport(m, new Error('saved profile is invalid; repair it before report approval'), dryRun);
-      return 'report';
-    }
-    throw error;
-  }
-  if (!approvalMissingProfile) m.profileSnapshot ??= profile;
-  if (m.notify && flag(argv, '--tool')) m.notify.tool = requiredTool(argv);
-  const forced = asStep(flag(argv, '--force'), '--force');
-  const only = asStep(flag(argv, '--only'), '--only');
-  if (forced) {
-    setStep(m, forced, { status: 'pending' });
-    invalidateAfter(m, forced);
-  }
-  const firstScript = (['fetch', 'enrich'] as const).find((step) =>
-    (!only || only === step) && (m.steps[step].status !== 'ok' || forced === step));
-  if (firstScript) invalidateAfter(m, firstScript);
-  let needsApproval = false;
-  if (m.steps.report.status === 'ok' && !isRunComplete(m)) {
-    try { prepareReportDelivery(m, profile); }
-    catch (error) {
-      returnToReport(m, error, dryRun);
-      needsApproval = true;
-    }
-  }
-  if (!dryRun) writeManifest(m, now());
-  if (needsApproval && only === 'notify') return 'report';
-  const plan = planNextSteps(m, {
-    only,
-    force: forced ? [forced] : [],
-  });
-
-  for (const item of plan) {
-    if (item.action === 'skip') {
-      console.error(`· ${item.step}: skip (${item.reason})`);
-      continue;
-    }
-    if (item.step === 'report') {
+function renderLifecycleEvent(event: LifecycleEvent): void {
+  switch (event.type) {
+    case 'approval-invalidated': console.error(`Report requires approval: ${event.reason}`); break;
+    case 'skip': console.error(`· ${event.step}: skip (${event.reason})`); break;
+    case 'report': {
+      const { profile, range } = event;
       console.error(
         `\n■ report is an agent step — it cannot be auto-run.\n` +
         `  Profile: ${profile.id} (${profile.displayName})\n` +
@@ -160,49 +83,39 @@ async function cmdRun(argv: string[]): Promise<'complete' | 'report' | 'failed' 
         `    npm run pipeline -- mark report ${profileFlags(profile)} ${rangeFlags(range)} --status ok --artifact ${reportPath(profile.id, range.label)} \\\n` +
         `      --status-notify <ok|warn|fail> --title "<short>" --tool <codex|claude>\n` +
         `  Then re-run: npm run pipeline -- run ${profileFlags(profile)} ${rangeFlags(range)}\n`);
-      return 'report';
+      break;
     }
-    if (item.step === 'notify') {
-      if (!m.notify || !['fetch', 'enrich', 'report'].every((s) => m.steps[s as StepName].status === 'ok')) {
-        throw new Error('notify requires completed fetch, enrich, and report steps.');
-      }
-      let delivery: ReturnType<typeof prepareReportDelivery>;
-      try { delivery = prepareReportDelivery(m, profile); }
-      catch (error) { returnToReport(m, error, dryRun); return 'report'; }
-      const { params, task, detailsFile } = delivery;
-      if (dryRun) {
-        console.error(`[dry-run] would send:\n  ${composeNotifyCommand(params, task, detailsFile)}`);
-        continue;
-      }
-      const status = await runStep(m, 'notify', async (logger) => {
-        const { exitCode, stderr, command, skipped } = runNotify(params, task, detailsFile);
-        logger.event(exitCode === 0 ? 'info' : 'error', 'notify.sent',
-          `${command} exited ${exitCode}`, { exitCode, stderr });
-        if (exitCode !== 0) throw new Error(`${command} exited ${exitCode}: ${stderr.trim()}`);
-        if (skipped) throw new Error('notification not delivered: no notifier installed; retained for recovery');
-        return { summary: { exitCode, status: m.notify!.status } };
-      }, now);
-      if (status === 'failed') { console.error('✗ notify failed; see status.'); return 'failed'; }
-      console.error(`✓ notify sent (${m.notify.status})`);
-      continue;
-    }
-    // script steps: fetch / enrich
-    if (dryRun) {
-      console.error(`[dry-run] would run ${item.step} for ${profile.id}/${range.label}`);
-      continue;
-    }
-    const fn = item.step === 'fetch' ? fetchStep : enrichStep;
-    const status = await runStep(m, item.step, (logger) => fn({ profile, range }, logger), now);
-    if (status === 'failed') {
-      console.error(`✗ ${item.step} failed — run "npm run pipeline -- status ${profileFlags(profile)} ${rangeFlags(range)}" for the error + journal.`);
-      return 'failed';
-    }
-    console.error(`✓ ${item.step} ok`);
+    case 'preview-notify':
+      console.error(`[dry-run] ${event.failure ? `wrote ${event.detailsFile}; would send` : 'would send'}:\n  ${composeNotifyCommand(event.params, event.task, event.detailsFile)}`);
+      break;
+    case 'step-failed':
+      console.error(event.step === 'notify' ? '✗ notify failed; see status.'
+        : `✗ ${event.step} failed — run "npm run pipeline -- status ${profileFlags(event.profile)} ${rangeFlags(event.range)}" for the error + journal.`);
+      break;
+    case 'delivered': console.error(`✓ notify sent (${event.status})`); break;
+    case 'preview-step': console.error(`[dry-run] would run ${event.step} for ${event.profile.id}/${event.range.label}`); break;
+    case 'step-ok': console.error(`✓ ${event.step} ok`); break;
+    case 'end': console.error(`\nRun ${event.profile.id}/${event.range.label} reached the end of the plan.`); break;
+    case 'marked': console.error(`✓ marked ${event.step} ${event.status} for ${event.profile.id}/${event.range.label}.`); break;
+    case 'report-already-delivered': console.error('report already delivered; use run --force report to explicitly replace it.'); break;
+    case 'failure-already-delivered': console.error('notify already sent for this run; not sending a fail notification.'); break;
+    case 'failure-already-alerted': console.error('failure alert already sent; run remains pending for recovery.'); break;
+    case 'failure-alert-failed': console.error(`✗ fail notification failed: ${event.stderr.trim()}`); break;
+    case 'failure-alert-sent': console.error(`✓ fail notification sent for ${event.profile.id}/${event.range.label} (${event.reason}).`); break;
   }
-  clearFailure(m);
-  if (!dryRun) writeManifest(m, now());
-  console.error(`\nRun ${profile.id}/${range.label} reached the end of the plan.`);
-  return isRunComplete(m) ? 'complete' : 'partial';
+}
+
+const lifecycle = createRunLifecycle({
+  now: () => new Date().toISOString(), fetch: fetchStep, enrich: enrichStep,
+  notify: runNotify, emit: renderLifecycleEvent,
+});
+
+async function cmdRun(argv: string[]) {
+  return lifecycle.resume({
+    profile: resolveProfileOrExit(argv), range: resolveRangeOrExit(argv),
+    dryRun: has(argv, '--dry-run'), recovery: has(argv, '--recovery'),
+    tool: flag(argv, '--tool'), force: flag(argv, '--force'), only: flag(argv, '--only'),
+  });
 }
 
 async function cmdRecover(argv: string[]): Promise<void> {
@@ -215,8 +128,10 @@ async function cmdRecover(argv: string[]): Promise<void> {
     const range = { from: m.from, to: m.to, label: m.from === m.to ? m.from : `${m.from}_${m.to}` };
     let outcome: string;
     try {
-      outcome = await cmdRun(['--profile', profile.id, '--from', m.from, '--to', m.to,
-        '--tool', tool, '--recovery', ...(has(argv, '--dry-run') ? ['--dry-run'] : [])]);
+      outcome = await lifecycle.resume({
+        profile: resolveProfileOrExit(['--profile', profile.id]), range,
+        tool, recovery: true, dryRun: has(argv, '--dry-run'),
+      });
     } catch (error) {
       console.error(`Recovery ${profile.id}/${range.label}: ${(error as Error).message}`);
       outcome = 'failed';
@@ -255,102 +170,20 @@ function cmdStatus(argv: string[]): void {
 function cmdMark(argv: string[]): void {
   const step = asStep(argv[0], 'step');
   if (!step) fail('usage: pipeline mark <step> --status <ok|failed> [...]');
-  let profile = resolveProfileOrExit(argv);
-  const range = resolveRangeOrExit(argv);
-  const m = readManifest(profile.id, range.label) ?? loadOrCreateManifest(profile.id, range.from, range.to, now());
-  try { profile = runProfile(m, profile); }
-  catch { fail('saved profile is invalid; repair it before report approval'); }
-  const status = flag(argv, '--status');
-  if (status !== 'ok' && status !== 'failed') fail('--status must be ok|failed.');
-  if (step === 'report' && status === 'ok' && isRunComplete(m)) {
-    console.error('report already delivered; use run --force report to explicitly replace it.');
-    return;
-  }
-  const artifact = flag(argv, '--artifact');
-
-  if (step === 'report' && status === 'ok') {
-    const sNotify = flag(argv, '--status-notify');
-    const title = flag(argv, '--title');
-    const tool = requiredTool(argv);
-    if (sNotify !== 'ok' && sNotify !== 'warn' && sNotify !== 'fail') {
-      fail('marking report ok requires --status-notify <ok|warn|fail>.');
-    }
-    if (!title) fail('marking report ok requires --title "<short>".');
-    if (!artifact) fail('marking report ok requires --artifact <report.md>.');
-    try {
-      approveReport(m, profile, artifact, { tool, status: sNotify, title }, now());
-    } catch (error) {
-      fail(`cannot mark report ok: ${(error as Error).message}`);
-    }
-    console.error(`✓ marked report ok for ${profile.id}/${range.label}.`);
-    return;
-  }
-
-  invalidateAfter(m, step);
-  setStep(m, step, {
-    status, endedAt: now(),
-    artifacts: artifact
-      ? [artifact, ...(step === 'report' && fs.existsSync(valuationReviewPath(profile.id, range.label))
-        ? [valuationReviewPath(profile.id, range.label)] : [])]
-      : m.steps[step].artifacts,
+  lifecycle.mark({
+    profile: resolveProfileOrExit(argv), range: resolveRangeOrExit(argv), step,
+    status: flag(argv, '--status'), artifact: flag(argv, '--artifact'),
+    notificationStatus: flag(argv, '--status-notify'), title: flag(argv, '--title'), tool: flag(argv, '--tool'),
   });
-  writeManifest(m, now());
-  journalLogger(profile.id, range.label, step, now).event('info', 'step.mark', `marked ${step} ${status}`,
-    { artifact, notify: step === 'report' ? m.notify : undefined });
-  console.error(`✓ marked ${step} ${status} for ${profile.id}/${range.label}.`);
 }
 
 async function cmdFail(argv: string[]): Promise<void> {
-  let profile = resolveProfileOrExit(argv);
-  const range = resolveRangeOrExit(argv);
-  const reason = flag(argv, '--reason');
-  if (!reason || reason.startsWith('--')) fail('fail requires --reason "<short>".');
-  const tool = requiredTool(argv);
-  const title = flag(argv, '--title') ?? defaultFailTitle(profile.displayName, range);
-  const dryRun = has(argv, '--dry-run');
-
-  const m = readManifest(profile.id, range.label) ?? loadOrCreateManifest(profile.id, range.from, range.to, now());
-  profile = m.profileSnapshot ?? profile;
-  if (isRunComplete(m)) {
-    console.error('notify already sent for this run; not sending a fail notification.');
-    process.exit(0);
-  }
-
-  const tail = readJournal(profile.id, range.label).slice(-20);
-  const detailsFile = path.join(runDir(profile.id, range.label), 'fail-details.md');
-  fs.mkdirSync(runDir(profile.id, range.label), { recursive: true });
-  fs.writeFileSync(detailsFile, renderFailDetails(profile.displayName, range, reason, tail));
-
-  const params: NotifyParams = { tool, status: 'fail', title };
-  if (dryRun) {
-    console.error(`[dry-run] wrote ${detailsFile}; would send:\n  ${composeNotifyCommand(params, profile.displayName, detailsFile)}`);
-    process.exit(0);
-  }
-  m.failure = { reason, where: 'pipeline fail' };
-  // A region-gated report may have stopped because enrichment degraded without
-  // throwing. Recompute primary routes on the next run, using the original fetch.
-  if (profile.evaluation.requireResolvedRegionGate && Number(m.steps.enrich.summary?.routeErrors) > 0
-    && m.steps.report.status !== 'ok') {
-    setStep(m, 'enrich', { status: 'failed' });
-    invalidateAfter(m, 'enrich');
-  }
-  writeManifest(m, now());
-  if (m.failureNotification) {
-    console.error('failure alert already sent; run remains pending for recovery.');
-    return;
-  }
-  journalLogger(profile.id, range.label, 'notify', now).event('error', 'run.fail', `run failed: ${reason}`, { reason });
-  const { exitCode, stderr, command, skipped } = runNotify(params, profile.displayName, detailsFile);
-  journalLogger(profile.id, range.label, 'notify', now).event(exitCode === 0 ? 'info' : 'error', 'notify.sent',
-    `fail notification ${command} exited ${exitCode}`, { exitCode, stderr });
-  if (exitCode !== 0 || skipped) {
-    writeManifest(m, now());
-    console.error(`✗ fail notification failed: ${stderr.trim()}`);
-    process.exit(1);
-  }
-  m.failureNotification = { sentAt: now() };
-  writeManifest(m, now());
-  console.error(`✓ fail notification sent for ${profile.id}/${range.label} (${reason}).`);
+  const result = await lifecycle.fail({
+    profile: resolveProfileOrExit(argv), range: resolveRangeOrExit(argv),
+    reason: flag(argv, '--reason'), tool: flag(argv, '--tool'), title: flag(argv, '--title'),
+    dryRun: has(argv, '--dry-run'),
+  });
+  if (result === 'failed') process.exitCode = 1;
 }
 
 async function main(): Promise<void> {
@@ -366,4 +199,8 @@ async function main(): Promise<void> {
   fail(`unknown command "${cmd ?? ''}"; expected run|recover|status|mark|fail.`);
 }
 
-main().catch((err) => { console.error(err); process.exit(1); });
+main().catch((err) => {
+  if (err instanceof LifecycleInputError) fail(err.message);
+  console.error(err);
+  process.exit(1);
+});

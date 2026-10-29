@@ -314,3 +314,38 @@ test('a damaged saved profile returns report work without trying to render its i
   assert.equal(f.read('2026-10-21').reportApproval, undefined);
   assert.equal(f.sent().length, 0);
 }));
+
+test('CLI keeps partial exit success, bad-input exit codes, and failure-preview writes', () => fixture((f) => {
+  f.seed('2026-10-21', (m) => { m.steps.fetch.status = 'ok'; });
+  const partial = f.run('run', '--date', '2026-10-21', '--only', 'fetch');
+  assert.equal(partial.status, 0, String(partial.stderr));
+  assert.equal(f.read('2026-10-21').steps.enrich.status, 'pending');
+  assert.equal(f.run('run', '--date', '2026-10-21', '--only', 'unknown').status, 2);
+  assert.equal(f.run('mark', 'report', '--date', '2026-10-21', '--status', 'unknown').status, 2);
+  assert.equal(f.run('fail', '--date', '2026-10-21', '--reason', 'outage', '--tool', 'unknown').status, 2);
+  const before = f.read('2026-10-21');
+  const preview = f.run('fail', '--date', '2026-10-21', '--reason', 'outage', '--tool', 'codex', '--dry-run');
+  assert.equal(preview.status, 0, String(preview.stderr));
+  assert.deepEqual(f.read('2026-10-21'), before);
+  assert.ok(fs.existsSync(path.join(f.root, 'state/runs', profileId, '2026-10-21/fail-details.md')));
+  assert.equal(f.sent().length, 0);
+}));
+
+test('recover reports corrupt state and a failed delivery while continuing later runs', () => fixture((f) => {
+  const corrupt = f.seed('2026-10-19');
+  fs.writeFileSync(path.join(f.root, 'state/runs', profileId, corrupt, 'manifest.json'), '{');
+  f.seed('2026-10-20', ready);
+  f.seed('2026-10-21', (m) => { m.steps.fetch.status = 'ok'; m.steps.enrich.status = 'ok'; });
+  fs.writeFileSync(path.join(f.root, 'notify.mjs'), '#!/usr/bin/env node\nprocess.exit(1);\n');
+  const result = f.run('recover', '--date', '2026-10-26', '--tool', 'codex');
+  assert.equal(result.status, 1, String(result.stderr));
+  const work = JSON.parse(String(result.stdout));
+  assert.deepEqual(work.runs, [
+    { from: '2026-10-20', to: '2026-10-20', label: '2026-10-20', outcome: 'failed' },
+    { from: '2026-10-21', to: '2026-10-21', label: '2026-10-21', outcome: 'report' },
+  ]);
+  assert.equal(work.errors.length, 1);
+  assert.match(work.errors[0], /2026-10-19/);
+  assert.equal(f.read('2026-10-20').steps.notify.attempt, 1);
+  assert.equal(f.read('2026-10-21').steps.report.status, 'pending');
+}));

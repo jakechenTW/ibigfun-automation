@@ -126,7 +126,7 @@ export interface PlanItem {
  * Pure resume logic: given a manifest and options, decide which steps to run.
  * Skips already-ok steps (resume picks up at the first non-ok step); honors
  * --only / --from / --force. Execution-time control (stop at first failure,
- * halt at agent steps) lives in pipeline.ts, not here.
+ * halt at agent steps) lives in run-lifecycle.ts, not here.
  */
 export function planNextSteps(m: Manifest, opts: PlanOpts = {}): PlanItem[] {
   const force = new Set(opts.force ?? []);
