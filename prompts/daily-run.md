@@ -19,7 +19,7 @@ Trigger 也會在訊息裡告訴你要監測的區間。把它對應成 pipeline
 
 ## 動手前先讀
 
-`AGENTS.md`、`docs/reporting-rules.md`、`docs/credentials.md`、`docs/automation-state.md`、`profiles/<profile>/profile.json`，以及該 profile folder 的 `evaluation.md` 規則檔與 `notify-template.md` 模板——估價、評估、走路距離三角定位、可疑物件判斷都以它們為準。
+`AGENTS.md`、`docs/running.md`、`docs/routing.md`、`docs/reporting-rules.md`、`docs/credentials.md`、`docs/automation-state.md`、`profiles/<profile>/profile.json`，以及該 profile folder 的 `evaluation.md` 規則檔與 `notify-template.md` 模板——估價、評估、走路距離三角定位、可疑物件判斷都以它們為準。
 
 本 prompt 只負責 profile reader；排程應已先完成獨立的每日 market-data writer。本 worker 不更新市場資料。
 

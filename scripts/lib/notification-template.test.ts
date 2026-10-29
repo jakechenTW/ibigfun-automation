@@ -26,6 +26,10 @@ const agentsInstructions = readFileSync(
   new URL('../../AGENTS.md', import.meta.url),
   'utf8',
 );
+const runbook = readFileSync(
+  new URL('../../docs/running.md', import.meta.url),
+  'utf8',
+);
 const notificationRules = readFileSync(
   new URL('../../docs/notifications.md', import.meta.url),
   'utf8',
@@ -205,20 +209,20 @@ test('region exclusions, anomalies, and stale evidence use the concise summary c
   assert.match(investmentRules, /進入評估[\s\S]{0,100}?0[\s\S]{0,100}?data_warning/);
 });
 
+test('agent entrypoint requires the runbook and notification policy after rule relocation', () => {
+  assert.match(agentsInstructions, /Before generating a report[^\n]*\[docs\/running\.md\]\(docs\/running\.md\) in full/);
+  assert.match(agentsInstructions, /Before approving or delivering reports[^\n]*\[docs\/notifications\.md\]\(docs\/notifications\.md\)/);
+  assert.match(runbook, /Fresh `review` or\s+`unavailable` evidence affects notification status only when it leaves an\s+actionable candidate or risk item after hard exclusions/i);
+  assert.doesNotMatch(runbook, legacyResultPresenceWarning);
+});
+
 test('each active notification policy separates result presence from warning conditions', () => {
   const policySources = [
     {
-      name: 'AGENTS.md',
-      text: agentsInstructions,
-      supportedResults: /fully supported recommendations\/matches may use `ok`/i,
-      actionableWarnings: /`--status warn`: candidates, risk listings, unresolved actionable manual review,\s+stale/i,
-      hardExclusion: /Fresh `review` or\s+`unavailable` evidence affects notification status only when it leaves an\s+actionable candidate or risk item after hard exclusions/i,
-    },
-    {
       name: 'docs/notifications.md',
       text: notificationRules,
-      supportedResults: /fully supported recommendations or matches may use `ok`/i,
-      actionableWarnings: /`warn` means candidates, risks, unresolved actionable manual review, stale sources/i,
+      supportedResults: /fully supported recommendations\/matches may use `ok`/i,
+      actionableWarnings: /`--status warn`: candidates, risk listings, unresolved actionable manual review,\s+stale/i,
       hardExclusion: /hard exclusion does not force `warn`/i,
     },
     {

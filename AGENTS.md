@@ -1,283 +1,44 @@
 # Agent Instructions (iBigFun Automation)
 
-This repository monitors iBigFun property listings through explicit profiles,
-prepares a profile-specific Markdown report, and sends a concise notification.
-It is the shared entrypoint for Codex and Claude Code. Read it top-to-bottom
-before operating; follow the linked docs only when you need rule detail.
+This is the shared entrypoint for Codex and Claude Code.
+Read this file before operating in the repository.
+The monitor fetches iBigFun sale listings for an explicit profile, prepares a Markdown report, and delivers a notification.
+iBigFun aggregates other sites, so canonical listing URLs often point to the originating source.
 
-## What This Is & The Source Model
+## Required reading
 
-iBigFun aggregates sale listings that originate on other sites (591, 樂居,
-rakuya, etc.). A listing's canonical URL therefore often points to the
-originating source rather than `ibigfun.com` — that is expected, not a bug. The
-daily job reads iBigFun's latest-sale view for the selected profile and target
-date using the profile's `fetch` filter map (`profiles/<id>/profile.json`,
-walked generically by `buildSearchBody`). That same file carries the profile's
-`displayName` and structured `evaluation` policy. The job evaluates each
-fetched listing against `docs/reporting-rules.md` plus the profile's
-`evaluation.md`, writes a report, and notifies. A profile is a self-contained
-folder; see `profiles/README.md` to add or change one.
+- Before exploring the codebase, read [docs/agents/domain.md](docs/agents/domain.md).
+  It defines the single-context layout and when to read the glossary and architecture decisions.
+- Before generating a report or changing monitor behavior, read [docs/running.md](docs/running.md) in full.
+  Also read [reporting rules](docs/reporting-rules.md), [credentials](docs/credentials.md), and [automation state](docs/automation-state.md).
+  The runbook owns first-run prerequisites, profile/date selection, recovery order, evaluation steps, and pipeline commands.
+- Before a profile run, read its `profile.json`, `evaluation.md`, and `notify-template.md` under `profiles/<profile>/`.
+  Select the profile explicitly. Never infer it.
+  Use [profiles/README.md](profiles/README.md) before creating profiles or applying fetch overrides.
+- Before fetching listings, read [docs/fetching.md](docs/fetching.md).
+- Before enrichment, walking triage, route trials, or benchmarks, read [docs/routing.md](docs/routing.md).
+  Keep report decisions under the shared reporting rules and the selected profile's evaluation policy.
+- Before operating or changing market-data updates, candidate evaluation, backtests, acceptance, or storage, read [docs/market-data.md](docs/market-data.md).
+- Before approving or delivering reports, read [docs/notifications.md](docs/notifications.md).
+  Approve the canonical report through `pipeline mark report`, then deliver through `pipeline run`.
+  Never bypass approval with a direct notifier call for report delivery.
+- For headless runs, also follow [prompts/daily-run.md](prompts/daily-run.md).
+  Before scheduling, read [prompts/schedule-triggers.md](prompts/schedule-triggers.md).
+- Before reviewing changes, read [CODING_STANDARDS.md](CODING_STANDARDS.md).
+  Use `npm run check` for the shared local and CI validation command.
 
-## First Run — Prerequisites
+## Operational boundaries
 
-Do these once before the first run; stop and ask the user if any fails:
+The independent market-data writer runs once per Taipei calendar day and finishes before profile pipelines start.
+Profile enrichment reads only the validated active build/acceptance pair.
+Profile workers never refresh, rebuild, backtest, or publish market data as inline recovery.
+A failed writer retains last-known-good data, subject to freshness warnings and fail-closed recommendation rules.
 
-- [ ] `ai-notify` is on PATH (`which ai-notify`). If missing, stop and ask.
-- [ ] `.env` exists and is filled (`cp .env.example .env`): `IBIGFUN_ACCOUNT`/
-  `IBIGFUN_PASSWORD` (see `docs/credentials.md`) and `ORS_API_KEY` for the
-  enrich step's walking distances (free key at openrouteservice.org/dev).
-- [ ] Toolchain installed: `npm install`.
+Complete the recorded recovery work list before the current run, using each item's original range.
+Record failures and continue with other backlog items and the current run.
+Never recursively recover or retry indefinitely.
 
-## Scheduled Market-Data Writer
-
-The scheduled market-data writer is independent from profile runs. Run
-`npm run market-data -- update --city taipei` once per Taipei calendar day and
-wait for it to finish before starting profile pipelines. Profile `enrich` is a
-read-only consumer: it never refreshes, rebuilds, backtests, or publishes market
-data. A failed writer retains last-known-good; profile runs may use only the
-validated active pair and remain subject to freshness warnings and fail-closed
-recommendation rules. Profile workers must not invoke an inline refresh as a
-recovery action.
-
-## Daily Run Sequence
-
-1. Read this file, `docs/reporting-rules.md`, `docs/credentials.md`, and
-   `docs/automation-state.md` before generating a report or changing behavior.
-2. Identify the target profile explicitly (`example-investment` or
-   `example-owner-occupied`). Do not infer a profile. Ad-hoc one-off conditions
-   can be layered on with `--set fetch.<key>=<val>` / `--unset fetch.<path>`
-   (see `profiles/README.md`); natural-language tweaks map to the same flags.
-   Compute the target date: the previous calendar day
-   in `Asia/Taipei` unless the user supplied a range/date. A default run on
-   `2026-06-27` targets `2026-06-26`.
-   Before the current run, execute `npm run pipeline -- recover --profile
-   <profile> [the same date/range flags] --tool <codex|claude>`. It retries
-   recorded unfinished older runs sequentially and returns a JSON work list.
-   Complete every `outcome: report` item with its own original range using
-   steps 5–12 below, then run that range's pipeline to deliver it. Record
-   failures with `pipeline fail` and continue with the other backlog items
-   and the current run. Never recursively recover or retry indefinitely.
-3. Fetch the target date's listings → `docs/fetching.md`
-   (`npm run fetch -- --profile <profile> --date <target>` writes
-   `state/runs/<profile>/<label>/listings.json`).
-4. Enrich deterministically (`npm run enrich -- --profile <profile> --date
-   <target>` writes `state/runs/<profile>/<label>/enriched.json`): nearest MRT
-   exit by **walking distance** (OpenRouteService foot routing over OSM),
-   monthly mortgage, parsed numbers, reusable walk signals (`withinWalk`),
-   reliability flags, official `marketEstimate` evidence loaded read-only from
-   the active validated market-data pair, and an advisory `signals.auctionKeyword` flag
-   the agent weighs (no longer an auto-exclusion — see Quality /
-   Suspicious-Listing Judgment in docs/reporting-rules.md). Listings with an
-   unreliable coordinate/route are marked `withinWalk: null` for manual review,
-   never auto-excluded. See "Tooling" below.
-5. Triage unreliable walking distances (`withinWalk: null`): re-locate from the
-   address + `nearbyStation`, use `npm run route -- --lat <> --lng <>` for a
-   deterministic walk, and give a labelled verdict (likely-within / likely-far /
-   unknown→human) → `docs/reporting-rules.md` (Walking-Distance Triage).
-   If the profile sets `evaluation.requireResolvedRegionGate: true`, resolve all
-   region decisions before report completion. `pipeline mark report` rejects
-   `步行時間待確認`. Use `pipeline fail` when the headless run cannot resolve it.
-   Enrich waits 60 seconds and retries once for ORS 429 or quota-exhausted 403
-   responses. It stops further ORS calls when that retry also fails.
-6. Deduplicate by stable listing ID → `docs/automation-state.md`.
-7. Apply the profile's `evaluation.maxDaysOnMarket` through each listing's
-   enriched `tenureGate` before considering a recommendation: `expired` is
-   exclusion-only, while `review` is candidate/risk-only and never an automatic
-   recommendation. Then read the deterministic `marketEstimate`: retain the
-   official median, P25–P75, confidence, comparable count, selected stage, and
-   source freshness as transaction context and reliability gates. Do not compare
-   the asking price with official values to decide whether a listing is a deal.
-   `review`, `unavailable`, low confidence, stale sources, and inseparable
-   parking are never auto-recommended. A bounded external valuation may review
-   a boundary case but never silently overwrites official values; write
-   `valuation-review.json` when it affects a bucket →
-   `docs/reporting-rules.md` and `profiles/<profile>/evaluation.md`.
-8. Estimate the remaining profile-specific fields (for investment: rent; for
-   self-use: fit, risks, and missing confirmations) →
-   `docs/reporting-rules.md` and `profiles/<profile>/evaluation.md`.
-9. Evaluate against the selected profile criteria, shared data-quality rules,
-   and sorting/notification rules, using the enriched fields plus your estimates →
-   `docs/reporting-rules.md` and `profiles/<profile>/evaluation.md`.
-10. After bucketing, run the report-owned dual-route trial only for every
-    positive, candidate, and risk listing that will be rendered individually.
-    Write their enriched indexes to the exact `listingIndexes` field in
-    `route-trial-request.json`; it accepts at most 25 unique, non-negative safe
-    integer indexes, each less than the current `enriched.json` listings-array
-    length. Include `schemaVersion: 1`, the exact `profileId`, and the exact
-    `rangeLabel`, then invoke `npm run route-trial` once with the same
-    profile/date-or-range arguments and bind `route-trial.json` comparisons
-    back by index and listing ID.
-    Excluded/count-only listings never enter the request. Trial or provider
-    failure keeps the available primary route visible and omits the trial result; it never changes the ORS-owned
-    bucket, order, or notification status and never by itself triggers
-    `pipeline fail`.
-11. Write `state/runs/<profile>/<label>/report.md` using the profile's
-   `profiles/<profile>/notify-template.md` as the structure.
-12. Approve with `pipeline mark report`, then deliver with `pipeline run`. Any stale official market source requires notification status `warn`;
-   `pipeline mark report --status ok` rejects malformed or internally inconsistent
-   enriched market evidence and any stale official source. Fresh `review` or
-   `unavailable` evidence affects notification status only when it leaves an
-   actionable candidate or risk item after hard exclusions.
-
-### Tooling
-
-Two committed scripts cover the deterministic steps; the agent does estimation,
-evaluation, and writing the report.
-
-- `npm run fetch -- --profile <profile> --date <target>` — Browserless fetch.
-  Logs in from `.env` via a form POST, calls iBigFun's JSON APIs
-  (`/api/search/list` + `on-market/o2o-same`), paginates by `total_records`,
-  writes normalized listings to `state/runs/<profile>/<label>/listings.json`.
-  Details: `docs/fetching.md`.
-- `npm run enrich -- --profile <profile> --date <target>` — reads that file and
-  adds walking distance to the nearest MRT exit (needs `ORS_API_KEY` in `.env`;
-  results cached in `state/route-cache.json`), mortgage, parsed numbers, a
-  reliability gate for walking distance, read-only estimates from the active
-  validated market-data pair, and the advisory auction-keyword
-  signal → `state/runs/<profile>/<label>/enriched.json`. Profile-specific
-  estimation and final include/exclude judgment stay with the agent. The walk
-  decision is `withinWalk` (true ≤10-min walk / false too far / null
-  unreliable→manual). This command never refreshes official sources, rebuilds
-  indexes, runs a full backtest, or publishes market data.
-- `npm run market-data -- update --city taipei` — refreshes, validates, fully
-  backtests, and atomically publishes a schema-5 / policy-8 build with its
-  matching aggregate schema-3 acceptance. Every global, residential-use,
-  Grade-B, and family-specific parking gate must pass; otherwise the previous
-  accepted pair is retained.
-- `npm run market-data -- candidate --city taipei --policy
-  <baseline|48-month|1000-meter>` — builds and backtests a fresh candidate
-  without publishing it. Standard output is aggregate-only and omits held-out
-  cases, rows, IDs, and addresses.
-  Evaluation is isolated in a disposable schema-5 / policy-8 staging directory
-  and can never publish production state. Evaluate `baseline` first. Try
-  `48-month` only when baseline misses the 70%
-  eligible-coverage target and has no accuracy/calibration failure; try
-  `1000-meter` only under the same condition after the 48-month policy. A
-  fallback still requires every gate to pass plus an explicit production
-  policy change; the candidate command itself can never publish.
-- `npm run market-data -- backtest --city taipei [--as-of YYYY-MM-DD] [--no-gate]`
-  — evaluates the active local build without refreshing it. Both stdout and
-  stderr are aggregate-only; held-out cases are omitted. It needs no credentials. A completed
-  passing gated run covering the complete eligible transaction index writes
-  the checksum-, policy-, and date-keyed local acceptance needed for `reliable`
-  estimates; a historical `--as-of` cannot approve a newer index and
-  `--no-gate` is diagnostic and never approves. Bump
-  `ESTIMATOR_POLICY_VERSION` whenever selector, weighting, outlier, confidence,
-  listing-location status/eligibility, or backtest semantics change. A bump
-  that changes transaction normalization or eligibility requires `update` to
-  rebuild, gate, and atomically publish a matching build/acceptance pair. Never
-  use `backtest` to mint new acceptance for a pre-change index. The schema-5 build manifest
-  records the policy version that created its indexes;
-  standalone backtest (including `--no-gate`) rejects missing or mismatched
-  provenance before evaluating cases, and the acceptance writer revalidates
-  that provenance plus the active transaction checksum before persistence.
-- `npm run route -- --lat <> --lng <>` — deterministic nearest-walk exit for one
-  coordinate (shared ORS cache). Used during triage (step 5) to get a trustworthy
-  walking distance after re-locating a listing from its address.
-- `npm run route-trial -- --profile <profile> [--date <target> | --from <a>
-  --to <b>]` — report-owned, display-only Valhalla trial for the selected
-  positive/candidate/risk indexes in
-  `state/runs/<profile>/<label>/route-trial-request.json`. It reads the existing
-  listing/enriched artifacts, uses the isolated git-ignored
-  `state/valhalla-trial-cache.json`, and writes detailed local evidence to
-  `state/runs/<profile>/<label>/route-trial.json`. It never mutates production
-  ORS decisions or `state/route-cache.json`. Provider failures degrade per
-  listing. Show the reliable primary route alone, or `步行時間待確認` when it is unavailable.
-  Trial failures do not change notification status.
-  The Valhalla base URL is read from `VALHALLA_URL` in `.env`; leave it blank
-  to use the default FOSSGIS demo. An already-exported `VALHALLA_URL` (including
-  a command-scoped override) takes precedence over `.env`. Non-empty overrides
-  must be absolute HTTP(S) base URLs without credentials, query, or fragment.
-- `npm run route-benchmark -- --profile <profile> --date <target> [--limit <1-200>]`
-  or `npm run route-benchmark -- --profile <profile> --from <a> --to <b>
-  [--limit <1-200>]` — evaluation-only Valhalla comparison. It reads the existing
-  bare daily `state/runs/<profile>/<date>/listings.json` files and
-  `state/route-cache.json`, then sends coordinate-only requests sequentially to
-  the configured Valhalla endpoint (the default is the FOSSGIS fair-use demo).
-  The limit defaults to 25 and is capped at 200.
-  Timestamped detailed local evidence is written under `state/route-benchmarks/`
-  and may contain privacy-sensitive per-case listing IDs, coordinates, exit IDs,
-  and provider distances; keep it local and never notify or commit it. Only
-  stdout and stderr are aggregate-only. Before sensitive input reads or routing,
-  the artifact directory is preflighted for atomic hard-link publication;
-  unsupported filesystems fail early. If a detailed temporary artifact cannot be
-  removed after publication, the command fails and requires local cleanup. The
-  benchmark never affects enrich, report, or notify and cannot justify a provider
-  switch without a separate design and walking-policy revalidation.
-- `npm run pipeline -- run --profile <profile> [--date <target> | --from <a>
-  --to <b>]` — thin orchestrator over fetch → enrich → report → notify. A run
-  covers an inclusive date range; a single day is the default (previous Taipei
-  day) and uses the bare date as its label. A multi-day range uses the label
-  `<from>_<to>`. One run per profile and label is recorded under
-  `state/runs/<profile>/<label>/`; artifacts are
-  `state/runs/<profile>/<label>/{listings.json, enriched.json, report.md, valuation-review.json?}`.
-  `valuation-review.json` is optional and exists only if a bounded external review affects a report bucket; `mark report --status ok` binds every review to exactly one listing's authoritative `marketEstimate` even when notification status is `warn`/`fail`. A whole range is fetched in **one** query
-  (`add_date`/`add_date_max`), deduped by listing id, and emitted as **one**
-  merged report + **one** notification. Already-ok steps are skipped, so
-  re-running resumes.
-  - `npm run pipeline -- recover --profile <profile> [--date <target> | --from
-    <a> --to <b>] --tool <codex|claude> [--dry-run]` — retry the recorded
-    unfinished backlog through the target end date, excluding the target run
-    itself. Successful report delivery is skipped. Script steps resume and
-    stop at the agent report boundary; stdout JSON lists `report`, `complete`,
-    or `failed` outcomes. A failed item does not block later items. Daily
-    workers must finish the returned report work list before the current run.
-    Failure alerts are separate from report delivery; a sent failure alert
-    never completes a run. Recovered report titles include `補送`.
-  - `npm run pipeline -- status --profile <profile> [--date <target> | --from
-    <a> --to <b>]` —
-    per-step status, timing, summary, last error, and the journal tail.
-  - `npm run pipeline -- mark report --profile <profile> [--date <target> |
-    --from <a> --to <b>] --status ok --artifact
-    state/runs/<profile>/<label>/report.md --status-notify <ok|warn|fail>
-    --title "<short>" --tool <codex|claude>` — approve the canonical report version
-    and its evidence, publish its delivery copy, and record the notify parameters.
-    Changed inputs or missing approval return unfinished runs to the report step.
-    Review the original files before reapproval. Never create approval from hashes alone.
-  - `npm run pipeline -- fail --profile <profile> [--date <d> | --from <a>
-    --to <b>] --reason "<short>" --tool <codex|claude> [--dry-run]` —
-    headless failure escape hatch: marks the run failed, writes a safe details
-    file with concise user-facing guidance while retaining the journal locally,
-    and sends one `status=fail` notification. `--dry-run` writes the details
-    and prints the composed command without sending.
-  - `fetch`/`enrich` remain runnable standalone; under the pipeline their
-    warnings/summaries flow to the journal instead of stderr.
-
-Date/range arguments default to the previous Taipei day when omitted, but
-`--profile <profile>` is always required. Pure logic is covered by `npm test`.
-
-### Report Date
-
-Default recurring runs report on the previous calendar day in `Asia/Taipei`, not
-the run date — this avoids an incomplete same-day report. Set both `add_date`
-and `add_date_max` to the target date, write
-`state/runs/<profile>/<label>/report.md`, and title the report for the target
-date and profile. Only use the run date itself when the user explicitly asks for
-a same-day/intraday check, and mark such output as incomplete/intraday.
-
-## Canonical Notification Command
-
-Approve the canonical report with `pipeline mark report`, then deliver it with `pipeline run`.
-The pipeline uses `NOTIFY_CMD` (default `ai-notify`) with this command shape.
-The details file is its program-managed approved copy, not the editable report.
-See [docs/notifications.md](docs/notifications.md#report-approval) for the contract.
-Do not bypass the pipeline with a direct notifier call for report delivery.
-
-```bash
-ai-notify --tool <codex|claude> --status <ok|warn|fail> \
-  --task "<profile displayName>" --title "<short title>" \
-  --details-file state/runs/<profile>/<label>/approved-report-<sha256>.md
-```
-
-- `--tool`: the agent actually running (`codex` or `claude`).
-- `--task`: use the selected profile's `displayName` from
-  `profiles/<profile>/profile.json`.
-- `--status warn`: candidates, risk listings, unresolved actionable manual review,
-  stale or weak data affecting safe interpretation, login fallback, or unverified mappings.
-- `--status ok`: a completed run with no unresolved actionable warning; fully supported recommendations/matches may use `ok`.
-- `--status fail`: only when the monitor cannot complete.
-
-## Safety Rules
+## Safety rules
 
 - Never commit real credentials, cookies, sessions, browser profiles,
   screenshots with secrets, or raw local output containing secrets.
@@ -294,57 +55,11 @@ ai-notify --tool <codex|claude> --status <ok|warn|fail> \
   `state/runs/<profile>/<label>/`) are git-ignored. Do not commit them unless
   the user explicitly asks.
 
-## Source-Of-Truth Map
+## Other task references
 
-- `AGENTS.md` (this file): entrypoint, run sequence, safety, notification
-  command, source-of-truth map.
-- `docs/fetching.md`: how to fetch listings, fields to extract, MRT distance.
-- `docs/credentials.md`: credential storage and login secrets handling.
-- `docs/notifications.md`: notifier command (`NOTIFY_CMD`) contract and no-notifier fallback.
-- `docs/reporting-rules.md`: shared calculations, data quality, sorting, and
-  notification conventions.
-- `profiles/<id>/`: one self-contained folder per runnable profile —
-  `profile.json` (`displayName` + structured `evaluation` policy + `fetch`
-  filter map), `evaluation.md`
-  (profile-specific criteria, thresholds, report buckets), and
-  `notify-template.md` (report/notification structure). Runnable ids are the
-  folder names: `example-investment`, `example-owner-occupied`.
-- `profiles/README.md`: how to author a profile (folder layout, `profile.json`
-  schema, the `fetch` encoding, the add-a-search recipe, `--set fetch.*`
-  overrides).
-- `docs/automation-state.md`: durable state and deduplication conventions.
-- `data/`: static reference data — `data/README.md` indexes the datasets
-  (Taipei MRT exits, filter id→name mappings, investment region allowlist).
-- `state/market-data/taipei/`: git-ignored, versioned local official doorplate
-  and transaction build used for deterministic market estimates; contains raw
-  source files, indexes, manifest/checksums, and no credentials. It is
-  checksum-closed, so undeclared files invalidate it. Its sibling
-  `state/market-data/taipei-backtest-acceptance.json` contains only aggregate
-  schema-3 acceptance metrics keyed to the active transaction-index checksum,
-  active policy id, estimator policy version, and complete eligible
-  transaction-date coverage, approved use cohorts, and parking-family gates.
-  Publication promotes this pair together. Optional
-  per-case diagnostic reports belong under
-  `state/market-data/backtests/taipei/`, outside the active build.
-- `prompts/daily-run.md`: the committed headless worker prompt for the daily
-  automated run (profile/range-agnostic; the trigger injects the profile and
-  date range).
-- `prompts/schedule-triggers.md`: copy-paste trigger template that injects
-  profile / tool / date range into the `prompts/daily-run.md` SOP for scheduled
-  runs.
-- Automation memory: recent run summaries and short-lived notes only. When a
-  decision becomes durable, promote it into the relevant doc above.
-
-## Agent skills
-
-### Issue tracker
-
-Issues and specs live in GitHub Issues. Before working with tickets, read `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Use the five default triage labels. Before labeling issues, read `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Use a single-context layout. Before exploring the codebase, read `docs/agents/domain.md`.
+Issues and specs live in GitHub Issues.
+Before working with tickets, read [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
+Before labeling issues, read [docs/agents/triage-labels.md](docs/agents/triage-labels.md) and use its five default triage labels.
+Use [data/README.md](data/README.md) for static datasets and mappings.
+Keep automation memory to recent summaries and short-lived notes.
+Promote durable decisions into the relevant reference document.

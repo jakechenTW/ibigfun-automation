@@ -80,7 +80,7 @@ iBigFun 是**單一共享登入**——同一帳號同時 fetch 會互踢登入 
 
 ## 排程前置（首次）
 
-排程環境需先滿足 `AGENTS.md`「First Run — Prerequisites」，否則 headless 會
+排程環境需先滿足 [docs/running.md 的首次執行條件](../docs/running.md#first-run-prerequisites)，否則 headless 會
 靜默失敗：
 
 - `ai-notify` 在 PATH（`which ai-notify`）。

@@ -6,20 +6,30 @@ to `ai-notify`.
 
 ## Notifier contract
 
-The notifier is invoked with this argv (positional flags, values may contain
-spaces and are shell-quoted only for display):
+Approve the canonical report with `pipeline mark report`, then deliver it with `pipeline run`.
+The pipeline uses `NOTIFY_CMD` (default `ai-notify`) with this command shape.
+The details file is its program-managed approved copy, not the editable report.
+Do not bypass the pipeline with a direct notifier call for report delivery.
 
-```
-<NOTIFY_CMD> --tool <codex|claude> --status <ok|warn|fail> \
+```bash
+ai-notify --tool <codex|claude> --status <ok|warn|fail> \
   --task "<profile displayName>" --title "<short title>" \
-  --details-file <approved report copy path>
+  --details-file state/runs/<profile>/<label>/approved-report-<sha256>.md
 ```
 
-- `--tool`: the agent performing this delivery (`codex` or `claude`).
-- `--status`: `ok` means the run completed without unresolved actionable warnings; fully supported recommendations or matches may use `ok`. `warn` means candidates, risks, unresolved actionable manual review, stale sources, unverified mappings, or other weak evidence affects safe interpretation. A fresh market review/unavailable result on a confirmed hard exclusion does not force `warn`. `fail` means the run could not complete.
-- `--task`: the selected profile's `displayName`.
-- `--title`: the sole user-facing notification title; include the concise status/date/outcome wording here and do not repeat it in the details body.
-- `--details-file`: path to the approved Markdown copy. The notifier reads its body from this file.
+- `--tool`: the agent actually running (`codex` or `claude`).
+- `--task`: use the selected profile's `displayName` from
+  `profiles/<profile>/profile.json`.
+- `--status warn`: candidates, risk listings, unresolved actionable manual review,
+  stale or weak data affecting safe interpretation, login fallback, or unverified mappings.
+- `--status ok`: a completed run with no unresolved actionable warning; fully supported recommendations/matches may use `ok`.
+- `--status fail`: only when the monitor cannot complete.
+
+The notifier receives separate argv values, including values that contain spaces.
+Shell quoting is only for display.
+`--title` is the sole notification title. Keep it out of the report body.
+`--details-file` points to the approved Markdown copy that the notifier reads.
+A fresh market review/unavailable result on a confirmed hard exclusion does not force `warn`.
 
 A notifier should exit `0` on success and non-zero on failure.
 

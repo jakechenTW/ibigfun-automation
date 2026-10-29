@@ -43,8 +43,9 @@ Remove `--dry-run` (and fill `.env`) for a real run.
 
 ## Repository Layout
 
-- `AGENTS.md` — agent runbook and entrypoint; the source-of-truth map indexes
-  every doc.
+- `AGENTS.md` — agent entrypoint, safety rules, and task-specific reading instructions.
+- `docs/running.md` — prerequisites, daily run sequence, and pipeline commands.
+- `docs/routing.md` — enrichment, walking triage, route trials, and benchmarks.
 - `profiles/example-investment/` — example investment screening profile:
   台北市, price ≤ 3000 萬, floors 2–4, ≤ 5-storey building.
 - `profiles/example-owner-occupied/` — example self-use screening profile:

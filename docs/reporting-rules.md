@@ -363,5 +363,5 @@ Retain each property's required market limitation and every positive, candidate,
 
 Keep durable shared notification and data-quality rules in this file.
 Keep profile-specific thresholds and report buckets in `profiles/<id>/evaluation.md`.
-Keep the daily execution sequence in `AGENTS.md`. Keep recent run history and
+Keep the daily execution sequence in [running.md](running.md). Keep recent run history and
 one-off operational observations in automation memory.

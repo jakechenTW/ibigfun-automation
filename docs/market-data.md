@@ -67,6 +67,20 @@ diagnostics or other ad-hoc files there, because an undeclared file invalidates
 the active build. Do not paste raw transactions or a listing's full comparable
 set into notifications.
 
+### Active pair reference
+
+- `state/market-data/taipei/`: git-ignored, versioned local official doorplate
+  and transaction build used for deterministic market estimates; contains raw
+  source files, indexes, manifest/checksums, and no credentials. It is
+  checksum-closed, so undeclared files invalidate it. Its sibling
+  `state/market-data/taipei-backtest-acceptance.json` contains only aggregate
+  schema-3 acceptance metrics keyed to the active transaction-index checksum,
+  active policy id, estimator policy version, and complete eligible
+  transaction-date coverage, approved use cohorts, and parking-family gates.
+  Publication promotes this pair together. Optional
+  per-case diagnostic reports belong under
+  `state/market-data/backtests/taipei/`, outside the active build.
+
 ### Address evidence and transaction eligibility
 
 Doorplate construction and official transaction lookup use the same
@@ -128,12 +142,16 @@ and exits `3`; an invalid older build is never silently promoted.
 
 ### Scheduled writer and read-only consumers
 
-Run the expensive writer once per Taipei calendar day, before either property
-profile:
+Run the investment and owner-occupied pipelines sequentially after the independent writer finishes.
 
-1. Run `npm run market-data -- update --city taipei` once.
-2. Wait for the command to publish or retain last-known-good.
-3. Run the investment and owner-occupied pipelines sequentially.
+The scheduled market-data writer is independent from profile runs. Run
+`npm run market-data -- update --city taipei` once per Taipei calendar day and
+wait for it to finish before starting profile pipelines. Profile `enrich` is a
+read-only consumer: it never refreshes, rebuilds, backtests, or publishes market
+data. A failed writer retains last-known-good; profile runs may use only the
+validated active pair and remain subject to freshness warnings and fail-closed
+recommendation rules. Profile workers must not invoke an inline refresh as a
+recovery action.
 
 `npm run enrich` calls `loadMarketData` only. It validates and reads the active
 build plus matching acceptance artifact without acquiring the refresh lock,
@@ -365,3 +383,38 @@ recalibrate selection/weight constants with tests and backtest evidence.
 | `no-comparables`, low confidence, or `review` | Read included and excluded evidence. Fewer than three retained comparables, a wide interval, stale data, or a hard conflict is review-only; do not relax criteria in report prose. |
 | `listing-parking-not-separable` | The conservative base estimate stays review-only. A policy-8 scenario may show an approved parking-family adjustment only when listing family/count and all other evidence are verified; it does not independently authorize automatic recommendation. |
 | Active build appears corrupt | Do not edit it. Run the updater so journal recovery and a fresh fully gated build can replace it atomically; if that fails, keep market evidence unavailable. |
+
+## Command reference
+
+- `npm run market-data -- update --city taipei` — refreshes, validates, fully
+  backtests, and atomically publishes a schema-5 / policy-8 build with its
+  matching aggregate schema-3 acceptance. Every global, residential-use,
+  Grade-B, and family-specific parking gate must pass; otherwise the previous
+  accepted pair is retained.
+- `npm run market-data -- candidate --city taipei --policy
+  <baseline|48-month|1000-meter>` — builds and backtests a fresh candidate
+  without publishing it. Standard output is aggregate-only and omits held-out
+  cases, rows, IDs, and addresses.
+  Evaluation is isolated in a disposable schema-5 / policy-8 staging directory
+  and can never publish production state. Evaluate `baseline` first. Try
+  `48-month` only when baseline misses the 70%
+  eligible-coverage target and has no accuracy/calibration failure; try
+  `1000-meter` only under the same condition after the 48-month policy. A
+  fallback still requires every gate to pass plus an explicit production
+  policy change; the candidate command itself can never publish.
+- `npm run market-data -- backtest --city taipei [--as-of YYYY-MM-DD] [--no-gate]`
+  — evaluates the active local build without refreshing it. Both stdout and
+  stderr are aggregate-only; held-out cases are omitted. It needs no credentials. A completed
+  passing gated run covering the complete eligible transaction index writes
+  the checksum-, policy-, and date-keyed local acceptance needed for `reliable`
+  estimates; a historical `--as-of` cannot approve a newer index and
+  `--no-gate` is diagnostic and never approves. Bump
+  `ESTIMATOR_POLICY_VERSION` whenever selector, weighting, outlier, confidence,
+  listing-location status/eligibility, or backtest semantics change. A bump
+  that changes transaction normalization or eligibility requires `update` to
+  rebuild, gate, and atomically publish a matching build/acceptance pair. Never
+  use `backtest` to mint new acceptance for a pre-change index. The schema-5 build manifest
+  records the policy version that created its indexes;
+  standalone backtest (including `--no-gate`) rejects missing or mismatched
+  provenance before evaluating cases, and the acceptance writer revalidates
+  that provenance plus the active transaction checksum before persistence.

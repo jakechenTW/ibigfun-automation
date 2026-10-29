@@ -1,7 +1,7 @@
 # Fetching iBigFun Listings
 
 How to retrieve the target date's listings for the daily report. This is the
-mechanics behind the fetch step in `AGENTS.md`; enrichment, routing triage, and
+mechanics behind the fetch step in [running.md](running.md); enrichment, routing triage, and
 profile evaluation are documented separately.
 
 ## Fetch Architecture (Browserless API)
@@ -269,3 +269,11 @@ is authoritative only for acceptance-approved use cohorts and parking families;
 `marketEstimate` remains the official transaction context and reliability gate.
 Neither is compared with the listing's asking price to decide whether it is a
 deal.
+
+## Standalone command
+
+- `npm run fetch -- --profile <profile> --date <target>` — Browserless fetch.
+  Logs in from `.env` via a form POST, calls iBigFun's JSON APIs
+  (`/api/search/list` + `on-market/o2o-same`), paginates by `total_records`,
+  writes normalized listings to `state/runs/<profile>/<label>/listings.json`.
+  Details: `docs/fetching.md`.
