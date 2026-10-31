@@ -25,8 +25,8 @@ Do these once before the first run; stop and ask the user if any fails:
 
 - [ ] `ai-notify` is on PATH (`which ai-notify`). If missing, stop and ask.
 - [ ] `.env` exists and is filled (`cp .env.example .env`): `IBIGFUN_ACCOUNT`/
-  `IBIGFUN_PASSWORD` (see `docs/credentials.md`) and `ORS_API_KEY` for the
-  enrich step's walking distances (free key at openrouteservice.org/dev).
+  `IBIGFUN_PASSWORD` (see `docs/credentials.md`). `ORS_API_KEY` enables ORS
+  walking routes. Without it, enrich uses Valhalla.
 - [ ] Toolchain installed: `npm install`.
 
 ## Market-data prerequisite
@@ -58,7 +58,7 @@ Profile workers never run an inline market-data refresh as recovery.
    `state/runs/<profile>/<label>/listings.json`).
 4. Enrich deterministically (`npm run enrich -- --profile <profile> --date
    <target>` writes `state/runs/<profile>/<label>/enriched.json`): nearest MRT
-   exit by **walking distance** (OpenRouteService foot routing over OSM),
+   exit by **walking distance** (ORS or Valhalla foot routing over OSM),
    monthly mortgage, parsed numbers, reusable walk signals (`withinWalk`),
    reliability flags, official `marketEstimate` evidence loaded read-only from
    the active validated market-data pair, and an advisory `signals.auctionKeyword` flag
@@ -75,6 +75,8 @@ Profile workers never run an inline market-data refresh as recovery.
    `步行時間待確認`. Use `pipeline fail` when the headless run cannot resolve it.
    Enrich waits 60 seconds and retries once for ORS 429 or quota-exhausted 403
    responses. It stops further ORS calls when that retry also fails.
+   Enrich then uses Valhalla under the any-reliable-route rule in
+   `docs/reporting-rules.md`. One provider failure alone does not block a report.
 6. Deduplicate by stable listing ID → `docs/automation-state.md`.
 7. Apply the profile's `evaluation.maxDaysOnMarket` through each listing's
    enriched `tenureGate` before considering a recommendation: `expired` is
@@ -104,7 +106,7 @@ Profile workers never run an inline market-data refresh as recovery.
     profile/date-or-range arguments and bind `route-trial.json` comparisons
     back by index and listing ID.
     Excluded/count-only listings never enter the request. Trial or provider
-    failure keeps the available primary route visible and omits the trial result; it never changes the ORS-owned
+    failure keeps the available primary route visible and omits the trial result; it never changes the enrich-owned
     bucket, order, or notification status and never by itself triggers
     `pipeline fail`.
 11. Write `state/runs/<profile>/<label>/report.md` using the profile's

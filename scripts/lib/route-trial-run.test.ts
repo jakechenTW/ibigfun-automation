@@ -869,3 +869,29 @@ test('route-trial CLI emits only aggregate JSON/progress and isolates VALHALLA_U
     assert.equal(output.stdout.includes('25.0321'), false);
   }
 });
+
+
+test('comparison preserves selected Valhalla evidence without labelling it as ORS', async (t) => {
+  const workspace = createWorkspace(t, [listing(700001, { lat: 25.031, lng: 121.517 })]);
+  const result: EnrichResult = JSON.parse(fs.readFileSync(workspace.enrichedPath, 'utf8'));
+  const item = result.listings[0];
+  item.walk = { stationZh: '甲站', line: 'G', exitId: '1', distanceM: 720, minutes: 9 };
+  item.withinWalk = true;
+  item.reliability = { coordPresent: true, coordConsistent: true, routeOk: true, ratio: 1.2, reason: null };
+  item.routing = {
+    selectedProvider: 'valhalla',
+    ors: { walk: null, withinWalk: null, routeOk: false, ratio: null, reason: 'routing unavailable' },
+    valhalla: { walk: item.walk, withinWalk: true, routeOk: true, ratio: 1.2, reason: null },
+  };
+  result.withinWalkCount = 1;
+  result.manualReviewCount = 0;
+  fs.writeFileSync(workspace.enrichedPath, JSON.stringify(result));
+  const { artifact } = await runRouteTrial(options(workspace.rootDir), {
+    route: async () => { throw new Error('provider unavailable'); }, sleep: async () => {},
+  });
+  const comparison = artifact.comparisons[0];
+  assert.equal(comparison.ors.status, 'unavailable');
+  assert.equal(comparison.primaryProvider, 'valhalla');
+  assert.equal(comparison.primary?.minutes, 9);
+  assert.equal(comparison.valhalla.status, 'unavailable');
+});

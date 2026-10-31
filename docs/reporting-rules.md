@@ -18,6 +18,17 @@ The enrich step produces reusable walking-distance signals. Profiles decide how
 to consume them; this shared file does not define a universal MRT hard
 exclusion.
 
+Enrich uses ORS and Valhalla with an any-reliable-route rule. Each provider uses
+the same candidate exits, 800-meter threshold, walking speed, and reliability checks.
+A reliable route within 800 meters is sufficient. ORS passes short-circuit the
+second request. Otherwise, enrich tries Valhalla before deciding.
+If neither passes, one reliable over-threshold result is sufficient for `false`.
+If neither provider is reliable, the decision remains `null`.
+Coordinate conflicts remain manual review regardless of provider results.
+`walk`, `withinWalk`, and `regionGate` use the selected provider together.
+`routing` preserves each attempted provider's decision and `selectedProvider`.
+Legacy enriched artifacts without `routing` retain their original ORS decision.
+
 - `withinWalk === true`: the route to the nearest active MRT exit is reliable
   and within a 10-minute walk.
 - `withinWalk === false`: the route is reliable and over a 10-minute walk.
@@ -184,7 +195,7 @@ signals; it never overrides a reliable `withinWalk`.
 Inputs the agent has per listing: `addressOrArea`, `nearbyStation` (the station
 text the listing itself shows), `reliability.reason`, `district`, and the
 `coordinate`. The `npm run route -- --lat <> --lng <>` tool returns the
-deterministic nearest-walk exit for any coordinate (shared ORS cache).
+deterministic nearest-walk exit with the same dual-provider policy and caches.
 
 By reason:
 
@@ -201,6 +212,8 @@ By reason:
 - `routing unavailable`: not a data problem — re-run enrich later (transient).
   Enrich waits 60 seconds and retries once for ORS 429 or quota-exhausted 403
   responses. If the retry fails, enrich stops further ORS calls for that run.
+  Valhalla can still resolve these listings. Re-run enrich only when the selected
+  decision remains unavailable.
 
 Output a three-state verdict, recorded in the report with rationale, confidence,
 and the location source: `likely-within`, `likely-far`, or `unknown` (→ human).
@@ -333,14 +346,14 @@ Retain each property's required market limitation and every positive, candidate,
 - Use the target date or inclusive range in the title. Use `本期` in prose that applies to either a day or a range. Keep tenure wording tied to the enriched evidence.
 - List every positive, candidate, and risk property. Summarize excluded properties by valid hard reason and count; never list excluded properties individually.
 - Every individually rendered property shows total price, area, asking unit price, profile-relevant basics, `walk_line`, `tenure_line`, `market_summary_line`, and one bucket reason or next action.
-- Compose `walk_line` after bucketing from authoritative enriched ORS `walk`, the display-only `route-trial.json` comparison, and `coordinate`; apply it only to positive, candidate, and risk buckets. The Valhalla trial never changes a bucket, order, ORS decision, or notification status, and excluded/count-only listings never enter its request. `route-trial-request.json` must name the selected enriched-index array exactly `listingIndexes`, with at most 25 unique, non-negative safe integer entries; every entry must be less than the current `enriched.json` listings-array length:
+- Compose `walk_line` after bucketing from authoritative enriched selected `walk`, the display-only `route-trial.json` comparison, and `coordinate`; apply it only to positive, candidate, and risk buckets. The later comparison never changes a bucket, order, enriched decision, or notification status, and excluded/count-only listings never enter its request. `route-trial-request.json` must name the selected enriched-index array exactly `listingIndexes`, with at most 25 unique, non-negative safe integer entries; every entry must be less than the current `enriched.json` listings-array length:
   - Use `formatDualRouteWalkLine` from `scripts/lib/route-trial.ts` for the display text.
   - Primary route reliable: `🚶 步行約 9 分鐘｜松江南京站 4號出口｜[地圖](https://www.google.com/maps?q=<lat>,<lng>)`.
   - Show the comparison only when rounded times differ by at least 3 minutes, stations differ, or times fall on opposite sides of 10 minutes.
   - Append `；另一條路線約 12 分鐘（松江南京站 3號出口），建議確認實際走法` for such differences.
   - Different exits alone do not require a comparison when the station and walking times are close.
   - If the primary route is unavailable, use `🚶 步行時間待確認｜[地圖](https://www.google.com/maps?q=<lat>,<lng>)`.
-  - Never substitute trial evidence for an unavailable primary route.
+  - Use the provider selected during enrich as the primary route. A later comparison alone cannot replace an unavailable enriched decision.
   - If only the trial is unavailable, show the reliable primary route without a service-failure note.
   - No coordinate: `🚶 無位置資訊` (without a map link).
   - Keep ORS, Valhalla, trial status, and provider errors in local evidence, not notification text.

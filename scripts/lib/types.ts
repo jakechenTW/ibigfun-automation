@@ -106,6 +106,12 @@ export interface EnrichedListing extends Listing {
   monthlyMortgage: number | null;
   district: string | null;
   walk: WalkInfo | null;
+  /** Absent in legacy artifacts. Provider evidence used for the walking decision. */
+  routing?: {
+    selectedProvider: 'ors' | 'valhalla' | null;
+    ors: import('./walk.ts').WalkPick;
+    valhalla: import('./walk.ts').WalkPick | null;
+  };
   withinWalk: boolean | null; // <=10-min walk; null = data unreliable, manual review
   /** Investment region gate from nearest station + withinWalk (see region.ts). */
   regionGate: RegionGate;

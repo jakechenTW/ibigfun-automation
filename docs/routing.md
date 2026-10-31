@@ -8,8 +8,8 @@ Use [running.md](running.md#daily-run-sequence) for report order and route-trial
 ## Enrichment
 
 - `npm run enrich -- --profile <profile> --date <target>` — reads
-  `state/runs/<profile>/<label>/listings.json` and adds walking distance to the nearest MRT exit (needs `ORS_API_KEY` in `.env`;
-  results cached in `state/route-cache.json`), mortgage, parsed numbers, a
+  `state/runs/<profile>/<label>/listings.json` and adds walking distance to the nearest MRT exit (uses ORS when `ORS_API_KEY` is set, then Valhalla when needed;
+  ORS results stay in `state/route-cache.json`), mortgage, parsed numbers, a
   reliability gate for walking distance, read-only estimates from the active
   validated market-data pair, and the advisory auction-keyword
   signal → `state/runs/<profile>/<label>/enriched.json`. Profile-specific
@@ -18,19 +18,31 @@ Use [running.md](running.md#daily-run-sequence) for report order and route-trial
   unreliable→manual). This command never refreshes official sources, rebuilds
   indexes, runs a full backtest, or publishes market data.
 
+Enrich and the single-coordinate helper follow the any-reliable-route rule in
+[reporting-rules.md](reporting-rules.md#walking-distance-signals).
+They use the same `VALHALLA_URL` as the comparison command. Valhalla requests
+run sequentially with a one-second delay, including failed requests.
+A reliable ORS pass avoids a second request. Otherwise Valhalla can supply
+the selected route, including when ORS exhausts its quota.
+Cache write failures remain errors. The two providers never share distance entries.
+Existing approved reports keep their original evidence. To apply the new policy
+to an unfinished run with completed enrichment, use `pipeline run --force enrich`
+with its explicit profile and original date or range. Review the new evidence
+before approving its report again. Failed enrichment already resumes normally.
+
 ## Routing commands
 
 - `npm run route -- --lat <> --lng <>` — deterministic nearest-walk exit for one
-  coordinate (shared ORS cache). Used during triage (step 5 in [running.md](running.md#daily-run-sequence)) to get a trustworthy
+  coordinate (shared ORS and endpoint-scoped Valhalla caches). Used during triage (step 5 in [running.md](running.md#daily-run-sequence)) to get a trustworthy
   walking distance after re-locating a listing from its address.
 - `npm run route-trial -- --profile <profile> [--date <target> | --from <a>
   --to <b>]` — report-owned, display-only Valhalla trial for the selected
   positive/candidate/risk indexes in
   `state/runs/<profile>/<label>/route-trial-request.json`. It reads the existing
-  listing/enriched artifacts, uses the isolated git-ignored
-  `state/valhalla-trial-cache.json`, and writes detailed local evidence to
+  listing/enriched artifacts, uses the endpoint-scoped git-ignored
+  `state/valhalla-trial-cache.json` shared with enrich, and writes detailed local evidence to
   `state/runs/<profile>/<label>/route-trial.json`. It never mutates production
-  ORS decisions or `state/route-cache.json`. Provider failures degrade per
+  enriched decisions or `state/route-cache.json`. Provider failures degrade per
   listing. Show the reliable primary route alone, or `步行時間待確認` when it is unavailable.
   Trial failures do not change notification status.
   The Valhalla base URL is read from `VALHALLA_URL` in `.env`; leave it blank

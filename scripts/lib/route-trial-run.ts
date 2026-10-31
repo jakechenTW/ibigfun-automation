@@ -5,6 +5,7 @@ import { loadExits, type MrtExit } from './mrt.ts';
 import type { RunRange } from './range.ts';
 import {
   reliableOrsTrialWalk,
+  reliablePrimaryTrialWalk,
   selectRouteTrialListings,
   valhallaTrialWalk,
   type RouteTrialComparison,
@@ -314,6 +315,10 @@ function comparison(
   return {
     listingIndex: selection.listingIndex,
     listingId: selection.listingId,
+    ...(selection.enriched.routing ? {
+      primary: reliablePrimaryTrialWalk(selection.enriched),
+      primaryProvider: selection.enriched.routing.selectedProvider,
+    } : {}),
     ors: reliableOrsTrialWalk(selection.enriched),
     valhalla: valhallaTrialWalk(selection, distances),
     error,

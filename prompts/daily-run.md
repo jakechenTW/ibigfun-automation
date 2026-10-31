@@ -53,7 +53,7 @@ Trigger 也會在訊息裡告訴你要監測的區間。把它對應成 pipeline
 
 若 profile 設定 `evaluation.requireResolvedRegionGate: true`，先解決每筆區域判定。報告不得包含 `步行時間待確認`。
 Enrich 會在 ORS 429 或 quota-exhausted 403 後等待 60 秒，然後重試一次。
-若重試後仍無法完成，使用「Headless 失敗政策」。不得標記 report 或發送一般候選報告。
+ORS 未通過或無可靠結果時，enrich 會查詢 Valhalla。依 `docs/reporting-rules.md` 的任一可靠路線通過規則，使用選定路線完成分桶。只有兩個服務都無可靠結果、且無法完成必要 triage 時，才使用「Headless 失敗政策」。
 
 2. 親手完成 `report` 步的分析與分桶：對 `state/runs/<profile>/<label>/enriched.json` 做 `withinWalk:null` 三角定位、估價/評估、跨日彙整。**先完成所有 positive／candidate／risk／excluded 分桶與原本的 `--status-notify` 決定，再做 route trial；此時先不要寫最終 `report.md`。**先依 profile 的 `evaluation.maxDaysOnMarket` 與 enriched `tenureGate` 判斷刊登年限；`expired` 排除，`review` 不得自動推薦。官方行情保留為成交證據與可靠性閘門，不再比較開價與官方行情來決定划算程度。行情一律先讀 `marketEstimate`：完整 status、官方中位與 P25–P75、信心、可比筆數、選用階段及資料日期／新鮮度只保留在 git-ignored 的 `enriched.json` 與本地 evidence；`report.md` 每筆只呈現人類可讀的 `market_summary_line`：When `marketUnitPriceMedian` is non-null, render `官方成交中位約 {median rounded to 1 decimal} 萬/坪（{comparables.length} 筆可比{review limitation, when applicable}）`. A `review` value retains exactly one concise human-readable limitation and never becomes recommendation-eligible merely because a value exists. When the median is null, render only a concise unavailable reason. 資料過期時標示偏舊但不印來源日期。Policy-8 `marketScenarios` 是已核准的用途／車位情境證據，但不得取代 `marketEstimate` 或資料品質限制。`review`/`unavailable`、low 信心、資料過期或未獲核准的車位情境不得自動推薦。只在低信心/review/unavailable 的少數邊界物件做外部覆核，絕不可靜默覆寫官方值；若覆核改變 bucket，於同一 run 寫 `valuation-review.json`（來源 URL、查核時間、外部回傳值或 `null`、官方 status/unavailable reasons 與可用區間、`(外部單價−官方中位)/官方中位*100` 差異、理由、結果 bucket 完整記錄）。官方欄位必須逐欄複製同一 listing 的 `marketEstimate`，不可自行填補；未取得外部價格時必須 `accepted: false`；官方 unavailable/review 不得因外部值升為推薦。通知只放一行精簡覆核結論，不貼完整可比或外部原始資料。
 
@@ -71,7 +71,7 @@ Enrich 會在 ORS 429 或 quota-exhausted 403 後等待 60 秒，然後重試一
    npm run route-trial -- [profile 參數] [範圍參數]
    ```
 
-   先核對 `route-trial.json.valhallaEndpoint`。若 `.env` 的 `VALHALLA_URL` 為空，且沒有已匯出的覆蓋值，端點必須是 `https://valhalla1.openstreetmap.de`。若端點是 `http://127.0.0.1:9` 或其他非預期值，這是設定錯誤，不可把全部房源寫成服務故障；先找出臨時環境變數並修正，再執行正確設定的 trial。逐筆以 index 與 listing ID 同時核對 `route-trial.json`，再依 `docs/reporting-rules.md`、profile 規則檔與 profile 模板寫出**一份**合併報告到 orchestrator 指定的 `state/runs/<profile>/<label>/report.md`。真正的 command/provider failure 要保留 ORS 原判斷，依共享規則只顯示可用的主要路線或「步行時間待確認」；不得因此改 bucket、排序或第 2 步已決定的 `--status-notify`，也不得只因 Valhalla trial evidence 呼叫 `pipeline fail`。
+   先核對 `route-trial.json.valhallaEndpoint`。若 `.env` 的 `VALHALLA_URL` 為空，且沒有已匯出的覆蓋值，端點必須是 `https://valhalla1.openstreetmap.de`。若端點是 `http://127.0.0.1:9` 或其他非預期值，這是設定錯誤，不可把全部房源寫成服務故障；先找出臨時環境變數並修正，再執行正確設定的 trial。逐筆以 index 與 listing ID 同時核對 `route-trial.json`，再依 `docs/reporting-rules.md`、profile 規則檔與 profile 模板寫出**一份**合併報告到 orchestrator 指定的 `state/runs/<profile>/<label>/report.md`。後續 comparison 的 command/provider failure 要保留 enrich 選定路線的原判斷，依共享規則只顯示可用的主要路線或「步行時間待確認」；不得因此改 bucket、排序或第 2 步已決定的 `--status-notify`，也不得只因 Valhalla trial evidence 呼叫 `pipeline fail`。
 
    送出格式契約：`--title` 是通知中唯一的摘要標題，`report.md` 不得再放 Markdown 標題，第一個內容直接寫結論。有座標的每個 `walk_line` 都必須包含人類可讀的步行時間與 `[地圖](https://www.google.com/maps?q=<lat>,<lng>)` 可點連結；只有沒有座標時使用 `🚶 無位置資訊`。
 
@@ -115,8 +115,8 @@ Enrich 會在 ORS 429 或 quota-exhausted 403 後等待 60 秒，然後重試一
 - 任何 fetch / enrich 不可恢復的錯誤（pipeline 以非 0 結束）：走失敗逃生口，不要無限重試。
 - Profile worker 絕不把 `market-data update` 當作復原動作；市場資料更新屬於獨立的每日 writer job。
 - 依 journal 最後完成的元件邊界判斷卡住位置：尚未出現 `market-data.ready` 時，只能描述為市場資料載入／驗證；ORS 必須在 `market-data.ready` 之後才會開始，只有 readiness 已記錄且當前邊界確為路由處理時，才能標為 ORS 卡住。
-- **部分失敗不是 fail**：一般 profile 的 ORS 失敗仍標記為 manual-review，並照常出 `warn`。
-- 若 profile 設定 `evaluation.requireResolvedRegionGate: true`，先使用 enrich 的一次延遲重試。重試後仍有 `步行時間待確認` 時才走失敗逃生口。
+- **單一服務失敗不是 fail**：先使用 enrich 的另一個服務結果。只有選定步行判定仍無法完成時，一般 profile 才標記 manual-review 並出 `warn`。
+- 若 profile 設定 `evaluation.requireResolvedRegionGate: true`，依共享規則使用 enrich 的 ORS 與 Valhalla 結果。兩者仍無法解決必要步行判定時，才走失敗逃生口。
 - 失敗逃生口（唯一一條）：
 
   ```

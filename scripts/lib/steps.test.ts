@@ -103,3 +103,65 @@ test('enrich performs no market refresh or ORS work for an empty listing run', a
   assert.equal(result.count, 0);
   assert.deepEqual(result.listings, []);
 });
+
+
+test('enrich resolves walking with Valhalla after the ORS quota retry fails', async (t) => {
+  const cwd = process.cwd();
+  const dir = fs.mkdtempSync(path.join(tmpdir(), 'enrich-dual-'));
+  const originalFetch = globalThis.fetch;
+  const originalKey = process.env.ORS_API_KEY;
+  const originalUrl = process.env.VALHALLA_URL;
+  fs.mkdirSync(path.join(dir, 'data'));
+  fs.writeFileSync(path.join(dir, 'data/taipei_mrt_exits.csv'),
+    'station_id,line,name_zh,exit_id,latitude,longitude\nO06,L,東門,4,25.0335,121.5285\n');
+  process.chdir(dir);
+  process.env.ORS_API_KEY = 'test-key';
+  process.env.VALHALLA_URL = 'https://routing.example';
+  t.after(() => {
+    process.chdir(cwd);
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.ORS_API_KEY;
+    else process.env.ORS_API_KEY = originalKey;
+    if (originalUrl === undefined) delete process.env.VALHALLA_URL;
+    else process.env.VALHALLA_URL = originalUrl;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  let orsCalls = 0, valhallaCalls = 0;
+  globalThis.fetch = (async (url) => {
+    if (String(url).includes('openrouteservice')) {
+      orsCalls++;
+      return new Response('{"error":"Quota exceeded"}', { status: 403 });
+    }
+    assert.equal(String(url), 'https://routing.example/sources_to_targets');
+    valhallaCalls++;
+    return Response.json({ sources_to_targets: { distances: [[0.7]] } });
+  }) as typeof fetch;
+  const profile = { id: 'dual-test', displayName: 'test', fetch: {}, evaluation: { maxDaysOnMarket: 365 } };
+  const range = { from: '2026-10-29', to: '2026-10-29', label: '2026-10-29' };
+  fs.mkdirSync(runDir(profile.id, range.label), { recursive: true });
+  const listing = {
+    title: 'test', addressOrArea: '台北市中正區金山南路',
+    coordinate: { lat: 25.033, lng: 121.522 }, listingHistory: [],
+    totalPrice: null, totalPing: null, unitPrice: null, age: null, parking: null,
+  };
+  fs.writeFileSync(listingsPath(profile.id, range.label), JSON.stringify({
+    ...range, count: 2, listings: [listing, { ...listing, coordinate: { lat: 25.034, lng: 121.522 } }],
+  }));
+  // Keep the public operation fast while exercising the actual retry and provider clients.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const pending = enrichStep({ profile, range }, { event: () => {} });
+  let finished = false;
+  void pending.finally(() => { finished = true; });
+  while (!finished) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(60_000);
+  }
+  await pending;
+  const result = JSON.parse(fs.readFileSync(enrichedPath(profile.id, range.label), 'utf8'));
+  assert.equal(result.manualReviewCount, 0);
+  assert.equal(result.withinWalkCount, 2);
+  assert.equal(result.listings[0].regionGate, 'in');
+  assert.equal(result.listings[0].routing.selectedProvider, 'valhalla');
+  assert.equal(orsCalls, 2);
+  assert.equal(valhallaCalls, 2);
+});

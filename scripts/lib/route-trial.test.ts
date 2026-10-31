@@ -203,6 +203,8 @@ test('selectRouteTrialListings rejects malformed requests and misbound results',
   assert.throws(() => selectRouteTrialListings(valid, 'p', range, fetched, mismatchedArray, exits));
 
   const malformedEnrichedFields = [
+    { routing: null },
+    { routing: { selectedProvider: 'unsupported', ors: {}, valhalla: null } },
     { walk: undefined },
     { walk: { stationZh: '松江南京', line: '松山新店線', exitId: '4', distanceM: '720', minutes: 9 } },
     { reliability: undefined },
@@ -259,4 +261,15 @@ test('incomplete primary evidence stays pending instead of displaying a trial es
     error: null,
   } as const;
   assert.match(formatDualRouteWalkLine(comparison, { lat: 25, lng: 121 }), /步行時間待確認/);
+});
+
+
+test('walk summary displays the selected Valhalla route with ORS as the comparison', () => {
+  const ors = { status: 'reliable' as const, stationZh: '東門', exitId: '4', distanceM: 960, minutes: 12 };
+  const valhalla = { ...ors, distanceM: 720, minutes: 9 };
+  const line = formatDualRouteWalkLine({
+    listingIndex: 0, listingId: null, primary: valhalla, primaryProvider: 'valhalla', ors, valhalla, error: null,
+  }, { lat: 25, lng: 121 });
+  assert.match(line, /步行約 9 分鐘/);
+  assert.match(line, /另一條路線約 12 分鐘/);
 });

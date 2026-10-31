@@ -7,8 +7,7 @@ import type { StepOutput } from './run.ts';
 import { loadExits } from './mrt.ts';
 import { enrichOffline } from './enrich-offline.ts';
 import { finalizeWalk } from './walk.ts';
-import { routeWalkDistances } from './routing.ts';
-import { loadCache, saveCache, cacheKey } from './route-cache.ts';
+import { createWalkRouter } from './walk-router.ts';
 import type { EnrichResult, EnrichedListing, PreMarketEnrichedListing, FetchResult } from './types.ts';
 import { runDir, listingsPath, enrichedPath, effectiveProfilePath } from './runpaths.ts';
 import { estimateMarket } from './market-data/estimator.ts';
@@ -40,32 +39,9 @@ import type {
 import { haversineMeters } from './geo.ts';
 
 const MRT_CSV = 'data/taipei_mrt_exits.csv';
-const ORS_DELAY_MS = 1600;        // ORS free tier ~40 req/min
-const ORS_RETRY_WAIT_MS = 60_000; // wait out the per-minute window once
-
-export function isRetryableOrsLimitError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes('ORS matrix HTTP 429')
-    || (message.includes('ORS matrix HTTP 403') && /quota exceeded/i.test(message));
-}
-
-export async function withOrsLimitRetry<T>(
-  operation: () => Promise<T>,
-  sleep: (ms: number) => Promise<void> = delay,
-  onRetry: () => void = () => {},
-): Promise<T> {
-  try {
-    return await operation();
-  } catch (error) {
-    if (!isRetryableOrsLimitError(error)) throw error;
-    onRetry();
-    await sleep(ORS_RETRY_WAIT_MS);
-    return operation();
-  }
-}
+export { isRetryableOrsLimitError, withOrsLimitRetry } from './routing.ts';
 const LISTING_LOCATION_ACCEPT_M = 100;
 const LISTING_LOCATION_TOLERANCE_M = 300;
-const delay = (ms: number): Promise<void> => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 const NO_ACTIVE_MARKET_FRESHNESS: SourceFreshness = {
   transactionCheckedAt: null,
@@ -473,12 +449,12 @@ export async function enrichStep(ctx: RunContext, logger: Logger): Promise<StepO
   const apiKey = process.env.ORS_API_KEY;
   if (!apiKey) {
     logger.event('warn', 'ors.missing-key',
-      'ORS_API_KEY not set — walking distances unavailable; affected listings marked manual-review');
+      'ORS_API_KEY not set — using Valhalla for walking distances');
   }
 
   const input = JSON.parse(fs.readFileSync(inPath, 'utf8')) as FetchResult;
   const exits = loadExits(MRT_CSV);
-  const cache = loadCache();
+  const router = createWalkRouter({ apiKey }, logger);
   const marketBundle = await loadMarketData(MARKET_DATA_ROOT);
   if (marketBundle) {
     const freshness = marketDataFreshness(marketBundle.manifest, range.to);
@@ -493,49 +469,19 @@ export async function enrichStep(ctx: RunContext, logger: Logger): Promise<StepO
 
   const offline = input.listings.map((l) => enrichOffline(l, exits));
   const enriched: PreMarketEnrichedListing[] = [];
-  let apiCalls = 0, cacheHits = 0, routeErrors = 0;
-  let orsLimitBlocked = false;
-
   for (const o of offline) {
-    let routed: (number | null)[] | null = null;
-    const needsRoute = o.candidates.length > 0 && o.coordConsistent !== false;
-    if (needsRoute) {
-      const key = cacheKey(o.coordinate!, o.candidates);
-      if (cache[key]) {
-        routed = cache[key];
-        cacheHits++;
-      } else if (apiKey && !orsLimitBlocked) {
-        const dests = o.candidates.map((c) => ({ lat: c.exit.lat, lng: c.exit.lng }));
-        try {
-          routed = await withOrsLimitRetry(
-            () => routeWalkDistances(o.coordinate!, dests, apiKey),
-            delay,
-            () => {
-              logger.event('warn', 'ors.rate-limited', 'ORS limit reached; waiting 60s then retrying once');
-            },
-          );
-          cache[key] = routed;
-          saveCache(cache);
-          apiCalls++;
-          await delay(ORS_DELAY_MS);
-        } catch (err) {
-          if (isRetryableOrsLimitError(err)) orsLimitBlocked = true;
-          routeErrors++;
-          logger.event('error', 'route.error',
-            `route error (${o.district ?? '?'}): ${(err as Error).message}`,
-            { district: o.district, reason: (err as Error).message });
-          routed = null;
-        }
-      }
-    }
-    enriched.push(finalizeWalk(o, routed, {
-      targetDate: range.to,
-      maxDaysOnMarket: profile.evaluation.maxDaysOnMarket,
-    }));
-    logger.event('info', 'route.progress',
-      `route progress ${enriched.length}/${offline.length} (${cacheHits} cache, ${apiCalls} ORS, ${routeErrors} errors)`,
-      { completed: enriched.length, total: offline.length, cacheHits, apiCalls, routeErrors });
+    const routing = await router.route(o);
+    enriched.push({
+      ...finalizeWalk(o, routing.distances, {
+        targetDate: range.to,
+        maxDaysOnMarket: profile.evaluation.maxDaysOnMarket,
+      }),
+      routing: routing.evidence,
+    });
+    logger.event('info', 'route.progress', `route progress ${enriched.length}/${offline.length}`,
+      { completed: enriched.length, total: offline.length, ...router.stats });
   }
+  const { apiCalls, cacheHits, routeErrors } = router.stats;
 
   const valued = attachMarketEstimates(enriched, marketBundle, range.to);
   const withinWalkCount = valued.filter((l) => l.withinWalk === true).length;
@@ -561,7 +507,6 @@ export async function enrichStep(ctx: RunContext, logger: Logger): Promise<StepO
   };
 
   fs.mkdirSync(runDir(profile.id, range.label), { recursive: true });
-  saveCache(cache);
   const outPath = enrichedPath(profile.id, range.label);
   fs.writeFileSync(outPath, JSON.stringify(result, null, 2));
   logger.event('info', 'enrich.summary',

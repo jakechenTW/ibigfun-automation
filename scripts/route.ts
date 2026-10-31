@@ -10,14 +10,13 @@
  * Usage:
  *   npm run route -- --lat 25.0272 --lng 121.5109
  *
- * Needs ORS_API_KEY in .env. Results share state/route-cache.json with enrich.
- * Exit codes: 0 ok · 2 bad input / missing key.
+ * Uses ORS when configured and Valhalla as a second route. Shares enrich caches.
+ * Exit codes: 0 ok · 2 bad input.
  */
 import { loadExits, kNearestExits } from './lib/mrt.ts';
 import { CANDIDATE_EXITS } from './lib/enrich-offline.ts';
 import { pickWalk } from './lib/walk.ts';
-import { routeWalkDistances } from './lib/routing.ts';
-import { loadCache, saveCache, cacheKey } from './lib/route-cache.ts';
+import { createWalkRouter } from './lib/walk-router.ts';
 import type { LatLng } from './lib/geo.ts';
 
 const MRT_CSV = 'data/taipei_mrt_exits.csv';
@@ -46,33 +45,26 @@ async function main(): Promise<void> {
     /* vars may already be exported */
   }
   const apiKey = process.env.ORS_API_KEY;
-  if (!apiKey) fail('ORS_API_KEY not set in .env');
 
   const exits = loadExits(MRT_CSV);
   const candidates = kNearestExits(coord, exits, CANDIDATE_EXITS);
 
-  const cache = loadCache();
-  const key = cacheKey(coord, candidates);
-  let routed = cache[key] ?? null;
-  if (!routed) {
-    routed = await routeWalkDistances(
-      coord,
-      candidates.map((c) => ({ lat: c.exit.lat, lng: c.exit.lng })),
-      apiKey,
-    );
-    cache[key] = routed;
-    saveCache(cache);
-  }
+  const router = createWalkRouter({ apiKey }, {
+    event: (_level, event, message) => console.error(`${event}: ${message}`),
+  });
+  const routing = await router.route({ coordinate: coord, candidates, coordConsistent: true });
+  const routed = routing.distances;
 
   const pick = pickWalk(candidates, routed);
   const output = {
     coordinate: coord,
+    routing: routing.evidence,
     candidates: candidates.map((c, i) => ({
       stationZh: c.exit.nameZh,
       exitId: c.exit.exitId,
       line: c.exit.line,
       straightM: Math.round(c.distanceM),
-      walkM: routed![i],
+      walkM: routed?.[i] ?? null,
     })),
     walk: pick.walk,
     withinWalk: pick.withinWalk,

@@ -62,3 +62,27 @@ export async function routeWalkDistances(
     clearTimeout(timer);
   }
 }
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+const ORS_RETRY_WAIT_MS = 60_000; // wait out the per-minute window once
+
+export function isRetryableOrsLimitError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('ORS matrix HTTP 429')
+    || (message.includes('ORS matrix HTTP 403') && /quota exceeded/i.test(message));
+}
+
+export async function withOrsLimitRetry<T>(
+  operation: () => Promise<T>,
+  sleep: (ms: number) => Promise<void> = delay,
+  onRetry: () => void = () => {},
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!isRetryableOrsLimitError(error)) throw error;
+    onRetry();
+    await sleep(ORS_RETRY_WAIT_MS);
+    return operation();
+  }
+}

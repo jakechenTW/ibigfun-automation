@@ -33,6 +33,8 @@ export interface RouteTrialSelection {
 export interface RouteTrialComparison {
   listingIndex: number;
   listingId: number | null;
+  primary?: RouteTrialWalk;
+  primaryProvider?: 'ors' | 'valhalla' | null;
   ors: RouteTrialWalk;
   valhalla: RouteTrialWalk;
   error: string | null;
@@ -112,6 +114,22 @@ function isWalkInfo(value: unknown): boolean {
     && typeof value.exitId === 'string'
     && typeof value.distanceM === 'number' && Number.isFinite(value.distanceM)
     && typeof value.minutes === 'number' && Number.isFinite(value.minutes);
+}
+
+function isWalkPick(value: unknown): boolean {
+  return isRecord(value)
+    && (value.walk === null || isWalkInfo(value.walk))
+    && isNullableBoolean(value.withinWalk)
+    && isNullableBoolean(value.routeOk)
+    && isNullableFiniteNumber(value.ratio)
+    && isNullableString(value.reason);
+}
+
+function isRouting(value: unknown): boolean {
+  return value === undefined || (isRecord(value)
+    && (value.selectedProvider === null || value.selectedProvider === 'ors' || value.selectedProvider === 'valhalla')
+    && isWalkPick(value.ors)
+    && (value.valhalla === null || isWalkPick(value.valhalla)));
 }
 
 function isReliability(value: unknown): boolean {
@@ -217,6 +235,7 @@ function isEnrichedListing(value: unknown): value is EnrichedListing {
     && (enriched.regionGate === 'in' || enriched.regionGate === 'out-of-region'
       || enriched.regionGate === 'in-region-too-far' || enriched.regionGate === 'review')
     && isReliability(enriched.reliability)
+    && isRouting(enriched.routing)
     && isRecord(enriched.signals) && typeof enriched.signals.auctionKeyword === 'boolean'
     && isRecord(enriched.hardExclusion) && typeof enriched.hardExclusion.excluded === 'boolean'
     && isStringArray(enriched.hardExclusion.reasons)
@@ -360,11 +379,18 @@ function trialWalk(
   };
 }
 
-export function reliableOrsTrialWalk(listing: EnrichedListing): RouteTrialWalk {
+export function reliablePrimaryTrialWalk(listing: EnrichedListing): RouteTrialWalk {
   const { walk, reliability } = listing;
   if (!walk || reliability.routeOk !== true || reliability.coordConsistent === false) {
     return unavailableTrialWalk();
   }
+  return trialWalk(walk.stationZh, walk.exitId, walk.distanceM);
+}
+
+export function reliableOrsTrialWalk(listing: EnrichedListing): RouteTrialWalk {
+  if (!listing.routing) return reliablePrimaryTrialWalk(listing);
+  const { walk, routeOk } = listing.routing.ors;
+  if (!walk || routeOk !== true || listing.reliability.coordConsistent === false) return unavailableTrialWalk();
   return trialWalk(walk.stationZh, walk.exitId, walk.distanceM);
 }
 
@@ -388,21 +414,22 @@ function stationLabel(walk: RouteTrialWalk & { stationZh: string }): string {
   return station + (walk.exitId ? ` ${walk.exitId}號出口` : '');
 }
 
-/** Display-only summary. ORS remains authoritative even when trial routes differ. */
+/** Display the enriched decision; a later comparison never changes its bucket. */
 export function formatDualRouteWalkLine(
   comparison: RouteTrialComparison,
   coordinate: Coordinate | null,
 ): string {
   if (coordinate === null) return '🚶 無位置資訊';
   const map = `[地圖](https://www.google.com/maps?q=${coordinate.lat},${coordinate.lng})`;
-  const { ors, valhalla } = comparison;
-  if (!hasDisplayableWalk(ors)) return `🚶 步行時間待確認｜${map}`;
-  const primary = `🚶 步行約 ${ors.minutes} 分鐘｜${stationLabel(ors)}｜${map}`;
-  const differs = hasDisplayableWalk(valhalla) && (
-    Math.abs(ors.minutes - valhalla.minutes) >= 3 ||
-    ors.stationZh !== valhalla.stationZh ||
-    (ors.minutes <= 10) !== (valhalla.minutes <= 10)
+  const primaryWalk = comparison.primary ?? comparison.ors;
+  const secondaryWalk = comparison.primaryProvider === 'valhalla' ? comparison.ors : comparison.valhalla;
+  if (!hasDisplayableWalk(primaryWalk)) return `🚶 步行時間待確認｜${map}`;
+  const primary = `🚶 步行約 ${primaryWalk.minutes} 分鐘｜${stationLabel(primaryWalk)}｜${map}`;
+  const differs = hasDisplayableWalk(secondaryWalk) && (
+    Math.abs(primaryWalk.minutes - secondaryWalk.minutes) >= 3 ||
+    primaryWalk.stationZh !== secondaryWalk.stationZh ||
+    (primaryWalk.minutes <= 10) !== (secondaryWalk.minutes <= 10)
   );
   if (!differs) return primary;
-  return `${primary}；另一條路線約 ${valhalla.minutes} 分鐘（${stationLabel(valhalla)}），建議確認實際走法`;
+  return `${primary}；另一條路線約 ${secondaryWalk.minutes} 分鐘（${stationLabel(secondaryWalk)}），建議確認實際走法`;
 }
